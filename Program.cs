@@ -16,6 +16,12 @@ builder.Services.AddSingleton<CashRegisterService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<AuthService>();
 
+// Nuevos servicios para gestión de ingredientes y recetas
+builder.Services.AddSingleton<SupplierService>();
+builder.Services.AddSingleton<InvoiceService>();
+builder.Services.AddSingleton<IngredientService>();
+builder.Services.AddSingleton<RecipeService>();
+
 var app = builder.Build();
 
 // Cargar datos persistidos al iniciar

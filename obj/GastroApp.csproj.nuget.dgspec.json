@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp.csproj": {}
+    "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp\\GastroApp.csproj": {}
   },
   "projects": {
-    "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp.csproj": {
+    "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp\\GastroApp.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp.csproj",
+        "projectUniqueName": "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp\\GastroApp.csproj",
         "projectName": "GastroApp",
-        "projectPath": "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp.csproj",
+        "projectPath": "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp\\GastroApp.csproj",
         "packagesPath": "C:\\Users\\Dani\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Dani\\Desktop\\GastroApp\\obj\\",
+        "outputPath": "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

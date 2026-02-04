@@ -11,77 +11,93 @@ build_property.EnforceExtendedAnalyzerRules =
 build_property._SupportedPlatformList = Linux,macOS,Windows
 build_property.RootNamespace = GastroApp
 build_property.RootNamespace = GastroApp
-build_property.ProjectDir = C:\Users\Dani\Desktop\GastroApp\
+build_property.ProjectDir = C:\Users\Dani\Desktop\GastroApp\GastroApp\
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 
 build_property.RazorLangVersion = 7.0
 build_property.SupportLocalizedComponentNames = 
 build_property.GenerateRazorMetadataSourceChecksumAttributes = 
-build_property.MSBuildProjectDirectory = C:\Users\Dani\Desktop\GastroApp
+build_property.MSBuildProjectDirectory = C:\Users\Dani\Desktop\GastroApp\GastroApp
 build_property._RazorSourceGeneratorDebug = 
 build_property.EffectiveAnalysisLevelStyle = 7.0
 build_property.EnableCodeStyleSeverity = 
 
-[C:/Users/Dani/Desktop/GastroApp/App.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/App.razor]
 build_metadata.AdditionalFiles.TargetPath = QXBwLnJhem9y
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Cash.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Cash.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQ2FzaC5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Counter.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Counter.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQ291bnRlci5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/FetchData.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/FetchData.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcRmV0Y2hEYXRhLnJhem9y
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Index.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Index.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcSW5kZXgucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Login.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Ingredients.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcSW5ncmVkaWVudHMucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Invoices.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcSW52b2ljZXMucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Login.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcTG9naW4ucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Products.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Products.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcUHJvZHVjdHMucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Sales.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Recipes.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcUmVjaXBlcy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Sales.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcU2FsZXMucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Summary.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Summary.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcU3VtbWFyeS5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Unauthorized.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Suppliers.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcU3VwcGxpZXJzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Unauthorized.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcVW5hdXRob3JpemVkLnJhem9y
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Shared/SurveyPrompt.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Shared/SurveyPrompt.razor]
 build_metadata.AdditionalFiles.TargetPath = U2hhcmVkXFN1cnZleVByb21wdC5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/_Imports.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/_Imports.razor]
 build_metadata.AdditionalFiles.TargetPath = X0ltcG9ydHMucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Shared/MainLayout.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Shared/MainLayout.razor]
 build_metadata.AdditionalFiles.TargetPath = U2hhcmVkXE1haW5MYXlvdXQucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = b-crkxj03j09
 
-[C:/Users/Dani/Desktop/GastroApp/Shared/NavMenu.razor]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Shared/NavMenu.razor]
 build_metadata.AdditionalFiles.TargetPath = U2hhcmVkXE5hdk1lbnUucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = b-xly8churmc
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/Error.cshtml]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/Error.cshtml]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcRXJyb3IuY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 
 
-[C:/Users/Dani/Desktop/GastroApp/Pages/_Host.cshtml]
+[C:/Users/Dani/Desktop/GastroApp/GastroApp/Pages/_Host.cshtml]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcX0hvc3QuY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 

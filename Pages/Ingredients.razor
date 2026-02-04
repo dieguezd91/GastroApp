@@ -1,0 +1,180 @@
+@page "/ingredients"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject IngredientService IngredientService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Ingredientes</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>🥕 Ingredientes</h1>
+        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Ingrediente</button>
+    </div>
+
+    @if (showForm)
+    {
+        <div class="form-card">
+            <h3>@(editingIngredient.Id == 0 ? "Nuevo Ingrediente" : "Editar Ingrediente")</h3>
+
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" @bind="editingIngredient.Name" class="form-control" placeholder="Ej: Harina" />
+            </div>
+
+            <div class="form-group">
+                <label>Unidad de Medida</label>
+                <select @bind="editingIngredient.Unit" class="form-control">
+                    <option value="kg">Kilogramo (kg)</option>
+                    <option value="lt">Litro (lt)</option>
+                    <option value="unidad">Unidad</option>
+                    <option value="gr">Gramo (gr)</option>
+                    <option value="ml">Mililitro (ml)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" @bind="editingIngredient.IsActive" />
+                    Activo
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SaveIngredient">Guardar</button>
+                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+            </div>
+        </div>
+    }
+
+    <div class="products-list">
+        @foreach (var ingredient in ingredients)
+        {
+            <div class="product-card @(!ingredient.IsActive ? "inactive" : "")">
+                <div class="product-info">
+                    <h3>
+                        @ingredient.Name
+                        @if (!ingredient.IsActive)
+                        {
+                            <span class="badge-inactive">Inactivo</span>
+                        }
+                    </h3>
+                    <p class="cost">Unidad: @ingredient.Unit</p>
+                    @{
+                        var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
+                    }
+                    @if (lastPrice.HasValue)
+                    {
+                        <p class="price">Último precio: $@lastPrice.Value</p>
+                    }
+                    else
+                    {
+                        <p class="cost">Sin precio registrado</p>
+                    }
+                </div>
+                <div class="product-actions">
+                    <button class="btn btn-small" @onclick="() => EditIngredient(ingredient)">✏️</button>
+                    <button class="btn btn-small btn-danger" @onclick="() => DeleteIngredient(ingredient.Id)">🗑️</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (ingredients.Count == 0)
+    {
+        <p class="empty-state">No hay ingredientes. Creá el primero!</p>
+    }
+</div>
+
+<style>
+    .inactive {
+        opacity: 0.6;
+    }
+
+    .badge-inactive {
+        background: #dc3545;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin-left: 0.5rem;
+    }
+</style>
+
+@code {
+    private List<Ingredient> ingredients = new();
+    private Ingredient editingIngredient = new();
+    private bool showForm = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+
+        LoadIngredients();
+        await Task.CompletedTask;
+    }
+
+    private void LoadIngredients()
+    {
+        ingredients = IngredientService.GetAll();
+    }
+
+    private void ShowAddForm()
+    {
+        editingIngredient = new Ingredient();
+        showForm = true;
+    }
+
+    private void EditIngredient(Ingredient ingredient)
+    {
+        editingIngredient = new Ingredient
+        {
+            Id = ingredient.Id,
+            Name = ingredient.Name,
+            Unit = ingredient.Unit,
+            IsActive = ingredient.IsActive
+        };
+        showForm = true;
+    }
+
+    private void SaveIngredient()
+    {
+        if (string.IsNullOrWhiteSpace(editingIngredient.Name))
+            return;
+
+        if (editingIngredient.Id == 0)
+        {
+            IngredientService.Add(editingIngredient);
+        }
+        else
+        {
+            IngredientService.Update(editingIngredient);
+        }
+
+        LoadIngredients();
+        CancelEdit();
+    }
+
+    private void DeleteIngredient(int id)
+    {
+        IngredientService.Delete(id);
+        LoadIngredients();
+    }
+
+    private void CancelEdit()
+    {
+        showForm = false;
+        editingIngredient = new Ingredient();
+    }
+}

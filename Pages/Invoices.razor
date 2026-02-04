@@ -1,0 +1,289 @@
+@page "/invoices"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject InvoiceService InvoiceService
+@inject SupplierService SupplierService
+@inject IngredientService IngredientService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Facturas</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>📄 Facturas de Proveedores</h1>
+        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nueva Factura</button>
+    </div>
+
+    @if (showForm)
+    {
+        <div class="form-card">
+            <h3>Nueva Factura</h3>
+
+            <div class="form-group">
+                <label>Fecha</label>
+                <input type="date" @bind="editingInvoice.Date" class="form-control" />
+            </div>
+
+            <div class="form-group">
+                <label>Proveedor</label>
+                <select @bind="editingInvoice.SupplierId" class="form-control">
+                    <option value="0">Seleccionar...</option>
+                    @foreach (var supplier in suppliers)
+                    {
+                        <option value="@supplier.Id">@supplier.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Número de Factura (opcional)</label>
+                <input type="text" @bind="editingInvoice.InvoiceNumber" class="form-control" placeholder="Ej: A-0001-12345678" />
+            </div>
+
+            <div class="form-group">
+                <label>Notas (opcional)</label>
+                <textarea @bind="editingInvoice.Notes" class="form-control" rows="2" placeholder="Observaciones..."></textarea>
+            </div>
+
+            <hr />
+
+            <h4>Items de la Factura</h4>
+
+            <div class="invoice-items">
+                <div class="form-group">
+                    <label>Ingrediente</label>
+                    <select @bind="selectedIngredientId" class="form-control">
+                        <option value="0">Seleccionar...</option>
+                        @foreach (var ingredient in activeIngredients)
+                        {
+                            <option value="@ingredient.Id">@ingredient.Name (@ingredient.Unit)</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Cantidad</label>
+                        <input type="number" @bind="itemQuantity" class="form-control" placeholder="0" step="0.01" />
+                    </div>
+
+                    <div class="form-group">
+                        <label>Precio Unitario</label>
+                        <input type="number" @bind="itemUnitPrice" class="form-control" placeholder="0" step="0.01" />
+                    </div>
+
+                    <div class="form-group">
+                        <button class="btn btn-secondary" @onclick="AddItem" style="margin-top: 1.75rem;">+ Agregar</button>
+                    </div>
+                </div>
+
+                @if (editingInvoice.Items.Any())
+                {
+                    <div class="items-list">
+                        <h5>Items agregados:</h5>
+                        @foreach (var item in editingInvoice.Items)
+                        {
+                            <div class="invoice-item">
+                                <span><strong>@item.IngredientName</strong></span>
+                                <span>@item.Quantity @item.Unit × $@item.UnitPrice = $@item.Subtotal</span>
+                                <button class="btn-remove" @onclick="() => RemoveItem(item)">❌</button>
+                            </div>
+                        }
+                        <div class="invoice-total">
+                            <strong>Total: $@editingInvoice.Total</strong>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-success" @onclick="SaveInvoice" disabled="@(!CanSaveInvoice())">Guardar Factura</button>
+                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+            </div>
+        </div>
+    }
+
+    <div class="products-list">
+        @foreach (var invoice in invoices)
+        {
+            var supplier = SupplierService.GetById(invoice.SupplierId);
+            <div class="product-card">
+                <div class="product-info">
+                    <h3>
+                        @if (!string.IsNullOrEmpty(invoice.InvoiceNumber))
+                        {
+                            <span>@invoice.InvoiceNumber</span>
+                        }
+                        else
+                        {
+                            <span>Factura #@invoice.Id</span>
+                        }
+                    </h3>
+                    <p class="cost">📅 @invoice.Date.ToString("dd/MM/yyyy")</p>
+                    <p class="cost">🚚 @(supplier?.Name ?? "Sin proveedor")</p>
+                    <p class="price">Total: $@invoice.Total</p>
+                    <p class="cost">@invoice.Items.Count item(s)</p>
+                </div>
+                <div class="product-actions">
+                    <button class="btn btn-small btn-danger" @onclick="() => DeleteInvoice(invoice.Id)">🗑️</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (invoices.Count == 0)
+    {
+        <p class="empty-state">No hay facturas. Creá la primera!</p>
+    }
+</div>
+
+<style>
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 1rem;
+        align-items: end;
+    }
+
+    .invoice-items {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+    }
+
+    .items-list {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 2px solid #dee2e6;
+    }
+
+    .invoice-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: white;
+        padding: 0.75rem;
+        border-radius: 4px;
+        margin-bottom: 0.5rem;
+    }
+
+    .invoice-total {
+        text-align: right;
+        font-size: 1.2rem;
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 2px solid #dee2e6;
+    }
+
+    .btn-remove {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+    }
+</style>
+
+@code {
+    private List<Invoice> invoices = new();
+    private List<Supplier> suppliers = new();
+    private List<Ingredient> activeIngredients = new();
+    private Invoice editingInvoice = new();
+    private bool showForm = false;
+
+    // Para agregar items
+    private int selectedIngredientId = 0;
+    private decimal itemQuantity = 0;
+    private decimal itemUnitPrice = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+
+        LoadData();
+        await Task.CompletedTask;
+    }
+
+    private void LoadData()
+    {
+        invoices = InvoiceService.GetAll();
+        suppliers = SupplierService.GetAll();
+        activeIngredients = IngredientService.GetActive();
+    }
+
+    private void ShowAddForm()
+    {
+        editingInvoice = new Invoice { Date = DateTime.Now };
+        showForm = true;
+    }
+
+    private void AddItem()
+    {
+        if (selectedIngredientId == 0 || itemQuantity <= 0 || itemUnitPrice <= 0)
+            return;
+
+        var ingredient = IngredientService.GetById(selectedIngredientId);
+        if (ingredient == null)
+            return;
+
+        editingInvoice.Items.Add(new InvoiceItem
+        {
+            IngredientId = ingredient.Id,
+            IngredientName = ingredient.Name,
+            Quantity = itemQuantity,
+            Unit = ingredient.Unit,
+            UnitPrice = itemUnitPrice
+        });
+
+        // Reset
+        selectedIngredientId = 0;
+        itemQuantity = 0;
+        itemUnitPrice = 0;
+    }
+
+    private void RemoveItem(InvoiceItem item)
+    {
+        editingInvoice.Items.Remove(item);
+    }
+
+    private bool CanSaveInvoice()
+    {
+        return editingInvoice.SupplierId > 0 && editingInvoice.Items.Any();
+    }
+
+    private void SaveInvoice()
+    {
+        if (!CanSaveInvoice())
+            return;
+
+        InvoiceService.Add(editingInvoice);
+        LoadData();
+        CancelEdit();
+    }
+
+    private void DeleteInvoice(int id)
+    {
+        InvoiceService.Delete(id);
+        LoadData();
+    }
+
+    private void CancelEdit()
+    {
+        showForm = false;
+        editingInvoice = new Invoice();
+        selectedIngredientId = 0;
+        itemQuantity = 0;
+        itemUnitPrice = 0;
+    }
+}

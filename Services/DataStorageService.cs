@@ -11,15 +11,29 @@ public class DataStorageService
     public List<DailySummary> Summaries { get; set; } = new();
     public List<User> Users { get; set; } = new();
 
+    // Nuevas entidades
+    public List<Ingredient> Ingredients { get; set; } = new();
+    public List<Supplier> Suppliers { get; set; } = new();
+    public List<Invoice> Invoices { get; set; } = new();
+    public List<Recipe> Recipes { get; set; } = new();
+
     private int _nextProductId = 1;
     private int _nextSaleId = 1;
     private int _nextUserId = 1;
+    private int _nextIngredientId = 1;
+    private int _nextSupplierId = 1;
+    private int _nextInvoiceId = 1;
+    private int _nextRecipeId = 1;
 
     private readonly string _dataFilePath = "data.json";
 
     public int GetNextProductId() => _nextProductId++;
     public int GetNextSaleId() => _nextSaleId++;
     public int GetNextUserId() => _nextUserId++;
+    public int GetNextIngredientId() => _nextIngredientId++;
+    public int GetNextSupplierId() => _nextSupplierId++;
+    public int GetNextInvoiceId() => _nextInvoiceId++;
+    public int GetNextRecipeId() => _nextRecipeId++;
 
     public DataStorageService()
     {
@@ -48,6 +62,59 @@ public class DataStorageService
             PasswordHash = BCrypt.Net.BCrypt.HashPassword("admin"),
             Role = UserRole.Admin
         });
+
+        // Seed de ingredientes
+        var harinaId = GetNextIngredientId();
+        var lecheId = GetNextIngredientId();
+        var huevoId = GetNextIngredientId();
+        var mantecaId = GetNextIngredientId();
+
+        Ingredients.Add(new Ingredient { Id = harinaId, Name = "Harina 000", Unit = "kg", IsActive = true });
+        Ingredients.Add(new Ingredient { Id = lecheId, Name = "Leche", Unit = "lt", IsActive = true });
+        Ingredients.Add(new Ingredient { Id = huevoId, Name = "Huevos", Unit = "unidad", IsActive = true });
+        Ingredients.Add(new Ingredient { Id = mantecaId, Name = "Manteca", Unit = "kg", IsActive = true });
+
+        // Seed de proveedores
+        var provId = GetNextSupplierId();
+        Suppliers.Add(new Supplier { Id = provId, Name = "Distribuidora San Martín" });
+
+        // Seed de factura con precios
+        var facturaId = GetNextInvoiceId();
+        Invoices.Add(new Invoice
+        {
+            Id = facturaId,
+            Date = DateTime.Now.AddDays(-5),
+            SupplierId = provId,
+            InvoiceNumber = "A-0001-00001234",
+            Notes = "Primera compra de ingredientes",
+            Items = new List<InvoiceItem>
+            {
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = harinaId, IngredientName = "Harina 000", Quantity = 10, Unit = "kg", UnitPrice = 80 },
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = lecheId, IngredientName = "Leche", Quantity = 5, Unit = "lt", UnitPrice = 120 },
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = huevoId, IngredientName = "Huevos", Quantity = 30, Unit = "unidad", UnitPrice = 15 },
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = mantecaId, IngredientName = "Manteca", Quantity = 2, Unit = "kg", UnitPrice = 350 }
+            }
+        });
+
+        // Seed de receta de ejemplo
+        var recetaId = GetNextRecipeId();
+        Recipes.Add(new Recipe
+        {
+            Id = recetaId,
+            Name = "Medialunas Caseras",
+            Yield = 12,
+            CreatedAt = DateTime.Now,
+            Ingredients = new List<RecipeIngredient>
+            {
+                new RecipeIngredient { RecipeId = recetaId, IngredientId = harinaId, IngredientName = "Harina 000", Quantity = 0.5m, Unit = "kg", UnitPrice = 80, Subtotal = 40 },
+                new RecipeIngredient { RecipeId = recetaId, IngredientId = lecheId, IngredientName = "Leche", Quantity = 0.2m, Unit = "lt", UnitPrice = 120, Subtotal = 24 },
+                new RecipeIngredient { RecipeId = recetaId, IngredientId = huevoId, IngredientName = "Huevos", Quantity = 2, Unit = "unidad", UnitPrice = 15, Subtotal = 30 },
+                new RecipeIngredient { RecipeId = recetaId, IngredientId = mantecaId, IngredientName = "Manteca", Quantity = 0.1m, Unit = "kg", UnitPrice = 350, Subtotal = 35 }
+            },
+            TotalCost = 129,
+            UnitCost = 10.75m,
+            CostIndicator = "green"
+        });
     }
 
     public void SaveToFile()
@@ -61,9 +128,17 @@ public class DataStorageService
                 CurrentCashRegister,
                 Summaries,
                 Users,
+                Ingredients,
+                Suppliers,
+                Invoices,
+                Recipes,
                 NextProductId = _nextProductId,
                 NextSaleId = _nextSaleId,
-                NextUserId = _nextUserId
+                NextUserId = _nextUserId,
+                NextIngredientId = _nextIngredientId,
+                NextSupplierId = _nextSupplierId,
+                NextInvoiceId = _nextInvoiceId,
+                NextRecipeId = _nextRecipeId
             };
 
             var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
@@ -128,6 +203,46 @@ public class DataStorageService
             if (root.TryGetProperty("NextUserId", out var nextUserIdElement))
             {
                 _nextUserId = nextUserIdElement.GetInt32();
+            }
+
+            if (root.TryGetProperty("Ingredients", out var ingredientsElement))
+            {
+                Ingredients = JsonSerializer.Deserialize<List<Ingredient>>(ingredientsElement.GetRawText()) ?? new();
+            }
+
+            if (root.TryGetProperty("Suppliers", out var suppliersElement))
+            {
+                Suppliers = JsonSerializer.Deserialize<List<Supplier>>(suppliersElement.GetRawText()) ?? new();
+            }
+
+            if (root.TryGetProperty("Invoices", out var invoicesElement))
+            {
+                Invoices = JsonSerializer.Deserialize<List<Invoice>>(invoicesElement.GetRawText()) ?? new();
+            }
+
+            if (root.TryGetProperty("Recipes", out var recipesElement))
+            {
+                Recipes = JsonSerializer.Deserialize<List<Recipe>>(recipesElement.GetRawText()) ?? new();
+            }
+
+            if (root.TryGetProperty("NextIngredientId", out var nextIngredientIdElement))
+            {
+                _nextIngredientId = nextIngredientIdElement.GetInt32();
+            }
+
+            if (root.TryGetProperty("NextSupplierId", out var nextSupplierIdElement))
+            {
+                _nextSupplierId = nextSupplierIdElement.GetInt32();
+            }
+
+            if (root.TryGetProperty("NextInvoiceId", out var nextInvoiceIdElement))
+            {
+                _nextInvoiceId = nextInvoiceIdElement.GetInt32();
+            }
+
+            if (root.TryGetProperty("NextRecipeId", out var nextRecipeIdElement))
+            {
+                _nextRecipeId = nextRecipeIdElement.GetInt32();
             }
         }
         catch (Exception ex)

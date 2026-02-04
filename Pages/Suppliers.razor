@@ -1,0 +1,127 @@
+@page "/suppliers"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject SupplierService SupplierService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Proveedores</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>🚚 Proveedores</h1>
+        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Proveedor</button>
+    </div>
+
+    @if (showForm)
+    {
+        <div class="form-card">
+            <h3>@(editingSupplier.Id == 0 ? "Nuevo Proveedor" : "Editar Proveedor")</h3>
+
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" @bind="editingSupplier.Name" class="form-control" placeholder="Ej: Distribuidora XYZ" />
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SaveSupplier">Guardar</button>
+                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+            </div>
+        </div>
+    }
+
+    <div class="products-list">
+        @foreach (var supplier in suppliers)
+        {
+            <div class="product-card">
+                <div class="product-info">
+                    <h3>@supplier.Name</h3>
+                </div>
+                <div class="product-actions">
+                    <button class="btn btn-small" @onclick="() => EditSupplier(supplier)">✏️</button>
+                    <button class="btn btn-small btn-danger" @onclick="() => DeleteSupplier(supplier.Id)">🗑️</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (suppliers.Count == 0)
+    {
+        <p class="empty-state">No hay proveedores. Creá el primero!</p>
+    }
+</div>
+
+@code {
+    private List<Supplier> suppliers = new();
+    private Supplier editingSupplier = new();
+    private bool showForm = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+
+        LoadSuppliers();
+        await Task.CompletedTask;
+    }
+
+    private void LoadSuppliers()
+    {
+        suppliers = SupplierService.GetAll();
+    }
+
+    private void ShowAddForm()
+    {
+        editingSupplier = new Supplier();
+        showForm = true;
+    }
+
+    private void EditSupplier(Supplier supplier)
+    {
+        editingSupplier = new Supplier
+        {
+            Id = supplier.Id,
+            Name = supplier.Name
+        };
+        showForm = true;
+    }
+
+    private void SaveSupplier()
+    {
+        if (string.IsNullOrWhiteSpace(editingSupplier.Name))
+            return;
+
+        if (editingSupplier.Id == 0)
+        {
+            SupplierService.Add(editingSupplier);
+        }
+        else
+        {
+            SupplierService.Update(editingSupplier);
+        }
+
+        LoadSuppliers();
+        CancelEdit();
+    }
+
+    private void DeleteSupplier(int id)
+    {
+        SupplierService.Delete(id);
+        LoadSuppliers();
+    }
+
+    private void CancelEdit()
+    {
+        showForm = false;
+        editingSupplier = new Supplier();
+    }
+}
