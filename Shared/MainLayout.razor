@@ -1,0 +1,42 @@
+﻿@inherits LayoutComponentBase
+@using GastroApp.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>GastroApp</PageTitle>
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            @if (AuthService.IsAuthenticated)
+            {
+                <div class="user-display">
+                    <span class="oi oi-person"></span>
+                    <strong>@AuthService.CurrentUser?.Username</strong>
+                    <span class="user-role">(@AuthService.CurrentUser?.Role)</span>
+                    <button class="btn btn-sm btn-link" @onclick="HandleLogout">Cerrar Sesión</button>
+                </div>
+            }
+            else
+            {
+                <a href="/login">Iniciar Sesión</a>
+            }
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        Navigation.NavigateTo("/login");
+    }
+}

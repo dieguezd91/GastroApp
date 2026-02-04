@@ -1,0 +1,42 @@
+{
+  "Products": [
+    {
+      "Id": 1,
+      "Name": "Caf\u00E9",
+      "Price": 150,
+      "Cost": 50,
+      "Margin": 66.666666666666666666666666670,
+      "MarginColor": "green"
+    },
+    {
+      "Id": 2,
+      "Name": "Medialunas",
+      "Price": 100,
+      "Cost": 40,
+      "Margin": 60.0,
+      "MarginColor": "green"
+    },
+    {
+      "Id": 3,
+      "Name": "Sandwich",
+      "Price": 300,
+      "Cost": 120,
+      "Margin": 60.0,
+      "MarginColor": "green"
+    }
+  ],
+  "Sales": [],
+  "CurrentCashRegister": null,
+  "Summaries": [],
+  "Users": [
+    {
+      "Id": 1,
+      "Username": "admin",
+      "PasswordHash": "$2a$11$ompl7LizbiG2UPhblM.H2.FfFEg231mPQEYX56gbkeZkuevT9iaEu",
+      "Role": 0
+    }
+  ],
+  "NextProductId": 4,
+  "NextSaleId": 1,
+  "NextUserId": 2
+}

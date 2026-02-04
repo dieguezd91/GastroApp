@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "PI0UC4/EJZc=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Dani\\Desktop\\GastroApp\\GastroApp.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Dani\\.nuget\\packages\\bcrypt.net-next\\4.0.3\\bcrypt.net-next.4.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

@@ -1,0 +1,147 @@
+@page "/products"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject ProductService ProductService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Productos</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>📦 Productos</h1>
+        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Producto</button>
+    </div>
+
+    @if (showForm)
+    {
+        <div class="form-card">
+            <h3>@(editingProduct.Id == 0 ? "Nuevo Producto" : "Editar Producto")</h3>
+
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" @bind="editingProduct.Name" class="form-control" placeholder="Ej: Café" />
+            </div>
+
+            <div class="form-group">
+                <label>Precio de Venta</label>
+                <input type="number" @bind="editingProduct.Price" class="form-control" placeholder="150" step="0.01" />
+            </div>
+
+            <div class="form-group">
+                <label>Costo (opcional)</label>
+                <input type="number" @bind="editingProduct.Cost" class="form-control" placeholder="50" step="0.01" />
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SaveProduct">Guardar</button>
+                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+            </div>
+        </div>
+    }
+
+    <div class="products-list">
+        @foreach (var product in products)
+        {
+            <div class="product-card">
+                <div class="product-info">
+                    <h3>@product.Name</h3>
+                    <p class="price">$@product.Price</p>
+                    @if (product.Cost.HasValue)
+                    {
+                        <p class="cost">Costo: $@product.Cost</p>
+                        <div class="margin-indicator" style="background-color: @product.MarginColor">
+                            Margen: @product.Margin.ToString("F1")%
+                        </div>
+                    }
+                </div>
+                <div class="product-actions">
+                    <button class="btn btn-small" @onclick="() => EditProduct(product)">✏️</button>
+                    <button class="btn btn-small btn-danger" @onclick="() => DeleteProduct(product.Id)">🗑️</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (products.Count == 0)
+    {
+        <p class="empty-state">No hay productos. Creá el primero!</p>
+    }
+</div>
+
+@code {
+    private List<Product> products = new();
+    private Product editingProduct = new();
+    private bool showForm = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+
+        LoadProducts();
+        await Task.CompletedTask;
+    }
+
+    private void LoadProducts()
+    {
+        products = ProductService.GetAll();
+    }
+
+    private void ShowAddForm()
+    {
+        editingProduct = new Product();
+        showForm = true;
+    }
+
+    private void EditProduct(Product product)
+    {
+        editingProduct = new Product
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Price = product.Price,
+            Cost = product.Cost
+        };
+        showForm = true;
+    }
+
+    private void SaveProduct()
+    {
+        if (string.IsNullOrWhiteSpace(editingProduct.Name) || editingProduct.Price <= 0)
+            return;
+
+        if (editingProduct.Id == 0)
+        {
+            ProductService.Add(editingProduct);
+        }
+        else
+        {
+            ProductService.Update(editingProduct);
+        }
+
+        LoadProducts();
+        CancelEdit();
+    }
+
+    private void DeleteProduct(int id)
+    {
+        ProductService.Delete(id);
+        LoadProducts();
+    }
+
+    private void CancelEdit()
+    {
+        showForm = false;
+        editingProduct = new Product();
+    }
+}

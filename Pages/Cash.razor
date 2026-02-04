@@ -1,0 +1,114 @@
+@page "/cash"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject CashRegisterService CashService
+@inject SaleService SaleService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Caja</PageTitle>
+
+<div class="page-container">
+    <h1>💵 Caja Diaria</h1>
+
+    @if (cashRegister == null || !cashRegister.IsOpen)
+    {
+        <div class="form-card">
+            <h3>Abrir Caja</h3>
+            <p>Ingresá el monto inicial con el que empezás el día</p>
+
+            <div class="form-group">
+                <label>Monto Inicial</label>
+                <input type="number" @bind="initialAmount" class="form-control" placeholder="0" step="0.01" />
+            </div>
+
+            <button class="btn btn-success btn-large" @onclick="OpenCash">
+                ✅ Abrir Caja
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="cash-info">
+            <div class="info-card">
+                <h4>Apertura</h4>
+                <p>@cashRegister.OpenDate.ToString("dd/MM/yyyy HH:mm")</p>
+                <p class="amount">$@cashRegister.InitialAmount</p>
+            </div>
+
+            <div class="info-card">
+                <h4>Ventas de Hoy</h4>
+                <p class="amount success">$@expectedSales</p>
+            </div>
+
+            <div class="info-card">
+                <h4>Esperado en Caja</h4>
+                <p class="amount">$@(cashRegister.InitialAmount + expectedSales)</p>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h3>Cerrar Caja</h3>
+            <p>Contá el efectivo que tenés y registralo acá</p>
+
+            <div class="form-group">
+                <label>Monto Final (efectivo en caja)</label>
+                <input type="number" @bind="finalAmount" class="form-control" placeholder="0" step="0.01" />
+            </div>
+
+            @if (finalAmount > 0)
+            {
+                var difference = finalAmount - (cashRegister.InitialAmount + expectedSales);
+                <div class="difference @(difference >= 0 ? "positive" : "negative")">
+                    Diferencia: @(difference >= 0 ? "+" : "")$@difference
+                </div>
+            }
+
+            <button class="btn btn-danger btn-large" @onclick="CloseCash">
+                🔒 Cerrar Caja
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private CashRegister? cashRegister;
+    private decimal initialAmount;
+    private decimal finalAmount;
+    private decimal expectedSales => SaleService.GetTodayTotal();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+
+        cashRegister = CashService.GetCurrent();
+        await Task.CompletedTask;
+    }
+
+    private void OpenCash()
+    {
+        if (initialAmount < 0) return;
+
+        CashService.Open(initialAmount);
+        cashRegister = CashService.GetCurrent();
+        initialAmount = 0;
+    }
+
+    private void CloseCash()
+    {
+        if (finalAmount < 0) return;
+
+        var summary = CashService.Close(finalAmount);
+        Navigation.NavigateTo("/summary");
+    }
+}

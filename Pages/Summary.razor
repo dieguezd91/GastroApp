@@ -1,0 +1,89 @@
+@page "/summary"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject SaleService SaleService
+@inject CashRegisterService CashService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Resumen</PageTitle>
+
+<div class="page-container">
+    <h1>📊 Resumen del Día</h1>
+
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="summary-icon">💰</div>
+            <h3>Total Vendido</h3>
+            <p class="summary-value">$@totalSales</p>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-icon">🧾</div>
+            <h3>Cantidad de Ventas</h3>
+            <p class="summary-value">@salesCount</p>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-icon">⭐</div>
+            <h3>Producto Más Vendido</h3>
+            <p class="summary-value">@topProduct</p>
+            <p class="summary-detail">@topProductQty unidades</p>
+        </div>
+
+        @if (cashRegister != null && !cashRegister.IsOpen)
+        {
+            <div class="summary-card">
+                <div class="summary-icon">💵</div>
+                <h3>Estado de Caja</h3>
+                <p class="summary-detail">Inicial: $@cashRegister.InitialAmount</p>
+                <p class="summary-detail">Final: $@cashRegister.FinalAmount</p>
+                <p class="summary-value @(cashRegister.Difference >= 0 ? "positive" : "negative")">
+                    @(cashRegister.Difference >= 0 ? "+" : "")$@cashRegister.Difference
+                </p>
+            </div>
+        }
+    </div>
+
+    <div class="summary-actions">
+        <button class="btn btn-primary" @onclick="GoHome">Volver al Inicio</button>
+    </div>
+</div>
+
+@code {
+    private decimal totalSales;
+    private int salesCount;
+    private string topProduct = "Ninguno";
+    private int topProductQty;
+    private CashRegister? cashRegister;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+
+        totalSales = SaleService.GetTodayTotal();
+        salesCount = SaleService.GetTodayCount();
+
+        var top = SaleService.GetTopProduct();
+        topProduct = top.Name;
+        topProductQty = top.Quantity;
+
+        cashRegister = CashService.GetCurrent();
+        await Task.CompletedTask;
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+}

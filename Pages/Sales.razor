@@ -1,0 +1,131 @@
+@page "/sales"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject ProductService ProductService
+@inject SaleService SaleService
+@inject CashRegisterService CashService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Vender</PageTitle>
+
+<div class="page-container">
+    <h1>💰 Punto de Venta</h1>
+
+    @if (!CashService.IsOpen())
+    {
+        <div class="alert alert-warning">
+            <p>⚠️ La caja está cerrada. Abrí la caja para empezar a vender.</p>
+            <button class="btn btn-primary" @onclick="GoToCash">Ir a Caja</button>
+        </div>
+    }
+    else
+    {
+        <div class="sales-layout">
+            <div class="products-grid">
+                <h3>Productos</h3>
+                @foreach (var product in products)
+                {
+                    <button class="product-button" @onclick="() => AddToCart(product)">
+                        <div class="product-name">@product.Name</div>
+                        <div class="product-price">$@product.Price</div>
+                    </button>
+                }
+            </div>
+
+            <div class="cart-panel">
+                <h3>Carrito</h3>
+
+                @if (currentSale.Items.Any())
+                {
+                    <div class="cart-items">
+                        @foreach (var item in currentSale.Items)
+                        {
+                            <div class="cart-item">
+                                <div class="item-info">
+                                    <strong>@item.ProductName</strong>
+                                    <span>x@item.Quantity</span>
+                                </div>
+                                <div class="item-price">$@item.Subtotal</div>
+                                <button class="btn-remove" @onclick="() => RemoveFromCart(item)">❌</button>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="cart-total">
+                        <h2>Total: $@currentSale.Total</h2>
+                    </div>
+
+                    <button class="btn btn-success btn-large" @onclick="CompleteSale">
+                        ✅ Cobrar
+                    </button>
+                    <button class="btn btn-secondary" @onclick="ClearCart">Limpiar</button>
+                }
+                else
+                {
+                    <p class="empty-cart">Carrito vacío</p>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<Product> products = new();
+    private Sale currentSale = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        products = ProductService.GetAll();
+        await Task.CompletedTask;
+    }
+
+    private void AddToCart(Product product)
+    {
+        var existingItem = currentSale.Items.FirstOrDefault(i => i.ProductId == product.Id);
+
+        if (existingItem != null)
+        {
+            existingItem.Quantity++;
+        }
+        else
+        {
+            currentSale.Items.Add(new SaleItem
+            {
+                ProductId = product.Id,
+                ProductName = product.Name,
+                Price = product.Price,
+                Quantity = 1
+            });
+        }
+    }
+
+    private void RemoveFromCart(SaleItem item)
+    {
+        currentSale.Items.Remove(item);
+    }
+
+    private void ClearCart()
+    {
+        currentSale = new Sale();
+    }
+
+    private void CompleteSale()
+    {
+        if (!currentSale.Items.Any()) return;
+
+        SaleService.Add(currentSale);
+        currentSale = new Sale();
+    }
+
+    private void GoToCash()
+    {
+        Navigation.NavigateTo("/cash");
+    }
+}

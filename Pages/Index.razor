@@ -1,0 +1,90 @@
+@page "/"
+@using GastroApp.Services
+@inject CashRegisterService CashService
+@inject SaleService SaleService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>GastroApp - Home</PageTitle>
+
+<div class="home-container">
+    <h1>🍽️ GastroApp</h1>
+    <p class="subtitle">Gestión gastronómica simple</p>
+
+    @if (AuthService.IsAuthenticated)
+    {
+        <div class="welcome-message">
+            <p>Bienvenido, <strong>@AuthService.CurrentUser?.Username</strong>!</p>
+        </div>
+    }
+
+    @if (cashRegister != null && cashRegister.IsOpen)
+    {
+        <div class="status-card open">
+            <h3>✅ Caja Abierta</h3>
+            <p>Inicio: @cashRegister.OpenDate.ToString("HH:mm")</p>
+            <p>Monto inicial: $@cashRegister.InitialAmount</p>
+            <p>Ventas de hoy: $@SaleService.GetTodayTotal()</p>
+        </div>
+    }
+    else
+    {
+        <div class="status-card closed">
+            <h3>⚠️ Caja Cerrada</h3>
+            <p>Abrí la caja para empezar a vender</p>
+        </div>
+    }
+
+    <div class="menu-grid">
+        @if (AuthService.IsInRole(Models.UserRole.Admin))
+        {
+            <a href="/products" class="menu-card">
+                <div class="menu-icon">📦</div>
+                <h3>Productos</h3>
+                <p>Crear y editar productos</p>
+            </a>
+        }
+
+        <a href="/sales" class="menu-card @(!isOpen ? "disabled" : "")">
+            <div class="menu-icon">💰</div>
+            <h3>Vender</h3>
+            <p>Pantalla de ventas</p>
+            @if (!isOpen)
+            {
+                <small class="warning">Caja cerrada</small>
+            }
+        </a>
+
+        @if (AuthService.IsInRole(Models.UserRole.Admin))
+        {
+            <a href="/cash" class="menu-card">
+                <div class="menu-icon">💵</div>
+                <h3>Caja</h3>
+                <p>Abrir/Cerrar caja</p>
+            </a>
+
+            <a href="/summary" class="menu-card">
+                <div class="menu-icon">📊</div>
+                <h3>Resumen</h3>
+                <p>Ver estadísticas</p>
+            </a>
+        }
+    </div>
+</div>
+
+@code {
+    private Models.CashRegister? cashRegister;
+    private bool isOpen => cashRegister?.IsOpen ?? false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        cashRegister = CashService.GetCurrent();
+        await Task.CompletedTask;
+    }
+}

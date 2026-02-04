@@ -1,0 +1,141 @@
+@page "/login"
+@using GastroApp.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Login - GastroApp</PageTitle>
+
+<div class="login-container">
+    <div class="login-card">
+        <h2>🍽️ GastroApp</h2>
+        <h3>Iniciar Sesión</h3>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger">
+                @errorMessage
+            </div>
+        }
+
+        <EditForm Model="@loginModel" OnValidSubmit="@HandleLogin">
+            <div class="form-group">
+                <label>Usuario</label>
+                <InputText @bind-Value="loginModel.Username" class="form-control" placeholder="admin" />
+            </div>
+
+            <div class="form-group">
+                <label>Contraseña</label>
+                <InputText @bind-Value="loginModel.Password" type="password" class="form-control" placeholder="••••••" />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Iniciar Sesión</button>
+        </EditForm>
+
+        <div class="login-hint">
+            <small>Usuario por defecto: <strong>admin</strong> / <strong>admin</strong></small>
+        </div>
+    </div>
+</div>
+
+<style>
+    .login-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 80vh;
+    }
+
+    .login-card {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        width: 100%;
+        max-width: 400px;
+    }
+
+    .login-card h2 {
+        text-align: center;
+        margin-bottom: 0.5rem;
+        font-size: 2rem;
+    }
+
+    .login-card h3 {
+        text-align: center;
+        margin-bottom: 1.5rem;
+        font-size: 1.5rem;
+        color: #333;
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 1rem;
+    }
+
+    .btn-block {
+        width: 100%;
+        margin-top: 1rem;
+    }
+
+    .login-hint {
+        margin-top: 1.5rem;
+        text-align: center;
+        color: #666;
+    }
+
+    .alert {
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+        border-radius: 4px;
+    }
+
+    .alert-danger {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+    }
+</style>
+
+@code {
+    private LoginModel loginModel = new();
+    private string errorMessage = string.Empty;
+
+    private class LoginModel
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+
+    private void HandleLogin()
+    {
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(loginModel.Username) || string.IsNullOrWhiteSpace(loginModel.Password))
+        {
+            errorMessage = "Por favor complete todos los campos";
+            return;
+        }
+
+        if (AuthService.Login(loginModel.Username, loginModel.Password))
+        {
+            Navigation.NavigateTo("/");
+        }
+        else
+        {
+            errorMessage = "Usuario o contraseña incorrectos";
+        }
+    }
+}
