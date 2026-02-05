@@ -7,6 +7,8 @@ public class AuthService
     private readonly UserService _userService;
     private User? _currentUser;
 
+    public event Action? OnAuthStateChanged;
+
     public AuthService(UserService userService)
     {
         _userService = userService;
@@ -25,12 +27,14 @@ public class AuthService
             return false;
 
         _currentUser = user;
+        OnAuthStateChanged?.Invoke();
         return true;
     }
 
     public void Logout()
     {
         _currentUser = null;
+        OnAuthStateChanged?.Invoke();
     }
 
     public bool IsInRole(UserRole role)

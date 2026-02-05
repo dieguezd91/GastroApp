@@ -28,6 +28,16 @@ var app = builder.Build();
 var storage = app.Services.GetRequiredService<DataStorageService>();
 storage.LoadFromFile();
 
+// Configurar dependencias entre servicios (para evitar ciclos en DI)
+var invoiceService = app.Services.GetRequiredService<InvoiceService>();
+var ingredientService = app.Services.GetRequiredService<IngredientService>();
+var saleService = app.Services.GetRequiredService<SaleService>();
+var recipeService = app.Services.GetRequiredService<RecipeService>();
+
+invoiceService.SetIngredientService(ingredientService);
+saleService.SetRecipeService(recipeService);
+saleService.SetIngredientService(ingredientService);
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {

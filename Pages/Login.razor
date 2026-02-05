@@ -119,6 +119,15 @@
         public string Password { get; set; } = string.Empty;
     }
 
+    protected override void OnInitialized()
+    {
+        // Si ya está autenticado, redirigir al dashboard
+        if (AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/", true);
+        }
+    }
+
     private void HandleLogin()
     {
         errorMessage = string.Empty;
@@ -131,7 +140,7 @@
 
         if (AuthService.Login(loginModel.Username, loginModel.Password))
         {
-            Navigation.NavigateTo("/");
+            Navigation.NavigateTo("/", true);
         }
         else
         {

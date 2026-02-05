@@ -1,82 +1,170 @@
 .navbar-toggler[b-xly8churmc] {
     background-color: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
 }
 
-.user-info[b-xly8churmc] {
-    color: #d7d7d7;
-    padding: 1rem 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-}
-
-    .user-info strong[b-xly8churmc] {
-        color: white;
+    .navbar-toggler:hover[b-xly8churmc] {
+        background-color: rgba(255, 255, 255, 0.2);
     }
-
-    .user-info small[b-xly8churmc] {
-        color: #aaa;
-    }
-
-    .user-info button[b-xly8churmc] {
-        margin-top: 0.5rem;
-        color: #ff6b6b;
-        padding: 0;
-        text-decoration: none;
-    }
-
-        .user-info button:hover[b-xly8churmc] {
-            color: #ff5252;
-            text-decoration: underline;
-        }
 
 .top-row[b-xly8churmc] {
-    height: 3.5rem;
-    background-color: rgba(0,0,0,0.4);
+    height: 4rem;
+    background-color: rgba(0,0,0,0.3);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
 .navbar-brand[b-xly8churmc] {
-    font-size: 1.1rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: white;
+    text-decoration: none;
+}
+
+    .navbar-brand:hover[b-xly8churmc] {
+        color: white;
+        text-decoration: none;
+    }
+
+.brand-icon[b-xly8churmc] {
+    font-size: 1.5rem;
+}
+
+.brand-text[b-xly8churmc] {
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+.user-info[b-xly8churmc] {
+    padding: 1.25rem 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 0.5rem;
+}
+
+    .user-info .oi[b-xly8churmc] {
+        font-size: 1.5rem;
+        color: rgba(255,255,255,0.8);
+    }
+
+.user-details[b-xly8churmc] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    flex: 1;
+}
+
+    .user-details strong[b-xly8churmc] {
+        color: white;
+        font-weight: 600;
+        font-size: 0.9375rem;
+    }
+
+    .user-details small[b-xly8churmc] {
+        color: rgba(255,255,255,0.6);
+        font-size: 0.8125rem;
+    }
+
+.nav-section[b-xly8churmc] {
+    margin-bottom: 1.5rem;
+}
+
+    .nav-section:last-child[b-xly8churmc] {
+        margin-bottom: 0;
+    }
+
+.nav-section-title[b-xly8churmc] {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.nav-section-bottom[b-xly8churmc] {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
 }
 
 .oi[b-xly8churmc] {
-    width: 2rem;
-    font-size: 1.1rem;
-    vertical-align: text-top;
-    top: -2px;
+    width: 1.25rem;
+    font-size: 1rem;
+    vertical-align: middle;
+    margin-right: 0.5rem;
 }
 
 .nav-item[b-xly8churmc] {
-    font-size: 0.9rem;
-    padding-bottom: 0.5rem;
+    font-size: 0.9375rem;
+    padding-bottom: 0.25rem;
 }
 
-    .nav-item:first-of-type[b-xly8churmc] {
-        padding-top: 1rem;
-    }
-
-    .nav-item:last-of-type[b-xly8churmc] {
-        padding-bottom: 1rem;
-    }
-
-    .nav-item[b-xly8churmc]  a {
-        color: #d7d7d7;
-        border-radius: 4px;
-        height: 3rem;
+    .nav-item[b-xly8churmc]  .nav-link {
+        color: rgba(255,255,255,0.85);
+        border-radius: 0.5rem;
+        height: 2.75rem;
         display: flex;
         align-items: center;
-        line-height: 3rem;
+        padding: 0 1rem;
+        transition: all 0.2s ease;
+        font-weight: 500;
+        text-decoration: none;
     }
 
-.nav-item[b-xly8churmc]  a.active {
-    background-color: rgba(255,255,255,0.25);
-    color: white;
-}
+        .nav-item[b-xly8churmc]  .nav-link:hover {
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+        }
 
-.nav-item[b-xly8churmc]  a:hover {
-    background-color: rgba(255,255,255,0.1);
-    color: white;
-}
+        .nav-item[b-xly8churmc]  .nav-link.active {
+            background-color: rgba(255,255,255,0.15);
+            color: white;
+        }
+
+        .nav-item[b-xly8churmc]  .nav-link-primary {
+            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+            color: white;
+            font-weight: 600;
+        }
+
+            .nav-item[b-xly8churmc]  .nav-link-primary:hover {
+                background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+                transform: translateX(2px);
+            }
+
+            .nav-item[b-xly8churmc]  .nav-link-primary.active {
+                background: linear-gradient(135deg, #1e3a8a 0%, #1e3a8a 100%);
+            }
+
+    .nav-item button.nav-link-logout[b-xly8churmc] {
+        width: 100%;
+        color: rgba(255,255,255,0.85);
+        background: transparent;
+        border: none;
+        border-radius: 0.5rem;
+        height: 2.75rem;
+        display: flex;
+        align-items: center;
+        padding: 0 1rem;
+        transition: all 0.2s ease;
+        font-weight: 500;
+        font-size: 0.9375rem;
+        cursor: pointer;
+        text-align: left;
+    }
+
+        .nav-item button.nav-link-logout:hover[b-xly8churmc] {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #fca5a5;
+        }
 
 @media (min-width: 641px) {
     .navbar-toggler[b-xly8churmc] {
@@ -84,13 +172,30 @@
     }
 
     .collapse[b-xly8churmc] {
-        /* Never collapse the sidebar for wide screens */
         display: block;
     }
-    
+
     .nav-scrollable[b-xly8churmc] {
-        /* Allow sidebar to scroll for tall menus */
-        height: calc(100vh - 3.5rem);
+        height: calc(100vh - 4rem);
         overflow-y: auto;
+        display: flex;
+        flex-direction: column;
     }
+
+        .nav-scrollable[b-xly8churmc]::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .nav-scrollable[b-xly8churmc]::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .nav-scrollable[b-xly8churmc]::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
+        }
+
+            .nav-scrollable[b-xly8churmc]::-webkit-scrollbar-thumb:hover {
+                background: rgba(255,255,255,0.3);
+            }
 }

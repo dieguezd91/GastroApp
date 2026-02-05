@@ -35,6 +35,16 @@
             </div>
 
             <div class="form-group">
+                <label>Stock Actual</label>
+                <input type="number" @bind="editingIngredient.CurrentStock" class="form-control" placeholder="0" step="0.01" />
+            </div>
+
+            <div class="form-group">
+                <label>Stock Mínimo (Alerta)</label>
+                <input type="number" @bind="editingIngredient.MinStock" class="form-control" placeholder="0" step="0.01" />
+            </div>
+
+            <div class="form-group">
                 <label>
                     <input type="checkbox" @bind="editingIngredient.IsActive" />
                     Activo
@@ -55,12 +65,22 @@
                 <div class="product-info">
                     <h3>
                         @ingredient.Name
+                        <span class="stock-indicator stock-@ingredient.StockIndicator">
+                            @(ingredient.StockIndicator == "green" ? "🟢" : ingredient.StockIndicator == "yellow" ? "🟡" : "🔴")
+                        </span>
                         @if (!ingredient.IsActive)
                         {
                             <span class="badge-inactive">Inactivo</span>
                         }
                     </h3>
                     <p class="cost">Unidad: @ingredient.Unit</p>
+                    <p class="stock-info">
+                        <strong>Stock: @ingredient.CurrentStock @ingredient.Unit</strong>
+                        @if (ingredient.MinStock > 0)
+                        {
+                            <span class="text-muted"> (Mín: @ingredient.MinStock)</span>
+                        }
+                    </p>
                     @{
                         var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
                     }
@@ -72,8 +92,18 @@
                     {
                         <p class="cost">Sin precio registrado</p>
                     }
+
+                    @if (adjustingStockId == ingredient.Id)
+                    {
+                        <div class="stock-adjust-form">
+                            <input type="number" @bind="newStockValue" class="form-control-small" placeholder="Nuevo stock" step="0.01" />
+                            <button class="btn btn-small btn-success" @onclick="() => SaveStockAdjustment(ingredient.Id)">✓</button>
+                            <button class="btn btn-small" @onclick="CancelStockAdjustment">✕</button>
+                        </div>
+                    }
                 </div>
                 <div class="product-actions">
+                    <button class="btn btn-small" @onclick="() => ShowStockAdjust(ingredient)" title="Ajustar stock">📦</button>
                     <button class="btn btn-small" @onclick="() => EditIngredient(ingredient)">✏️</button>
                     <button class="btn btn-small btn-danger" @onclick="() => DeleteIngredient(ingredient.Id)">🗑️</button>
                 </div>
@@ -100,12 +130,52 @@
         font-size: 0.8rem;
         margin-left: 0.5rem;
     }
+
+    .stock-indicator {
+        font-size: 1.2rem;
+        margin-left: 0.5rem;
+    }
+
+    .stock-info {
+        margin: 0.5rem 0;
+        font-size: 0.95rem;
+    }
+
+    .text-muted {
+        color: #6c757d;
+        font-size: 0.85rem;
+    }
+
+    .stock-adjust-form {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        align-items: center;
+    }
+
+    .form-control-small {
+        width: 120px;
+        padding: 0.25rem 0.5rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+
+    .btn-success {
+        background: #28a745;
+        color: white;
+    }
+
+    .btn-success:hover {
+        background: #218838;
+    }
 </style>
 
 @code {
     private List<Ingredient> ingredients = new();
     private Ingredient editingIngredient = new();
     private bool showForm = false;
+    private int adjustingStockId = 0;
+    private decimal newStockValue = 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -143,9 +213,30 @@
             Id = ingredient.Id,
             Name = ingredient.Name,
             Unit = ingredient.Unit,
-            IsActive = ingredient.IsActive
+            IsActive = ingredient.IsActive,
+            CurrentStock = ingredient.CurrentStock,
+            MinStock = ingredient.MinStock
         };
         showForm = true;
+    }
+
+    private void ShowStockAdjust(Ingredient ingredient)
+    {
+        adjustingStockId = ingredient.Id;
+        newStockValue = ingredient.CurrentStock;
+    }
+
+    private void SaveStockAdjustment(int ingredientId)
+    {
+        IngredientService.AdjustStock(ingredientId, newStockValue);
+        LoadIngredients();
+        CancelStockAdjustment();
+    }
+
+    private void CancelStockAdjustment()
+    {
+        adjustingStockId = 0;
+        newStockValue = 0;
     }
 
     private void SaveIngredient()

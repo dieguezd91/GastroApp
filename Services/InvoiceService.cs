@@ -5,10 +5,17 @@ namespace GastroApp.Services;
 public class InvoiceService
 {
     private readonly DataStorageService _storage;
+    private IngredientService? _ingredientService;
 
     public InvoiceService(DataStorageService storage)
     {
         _storage = storage;
+    }
+
+    // Setter para evitar dependencia circular
+    public void SetIngredientService(IngredientService ingredientService)
+    {
+        _ingredientService = ingredientService;
     }
 
     public List<Invoice> GetAll() => _storage.Invoices.OrderByDescending(i => i.Date).ToList();
@@ -24,7 +31,30 @@ public class InvoiceService
             item.InvoiceId = invoice.Id;
         }
         _storage.Invoices.Add(invoice);
+
+        // Sumar stock por cada item de la factura
+        UpdateStockFromInvoice(invoice);
+
         _storage.SaveToFile();
+    }
+
+    private void UpdateStockFromInvoice(Invoice invoice)
+    {
+        if (_ingredientService == null) return;
+
+        foreach (var item in invoice.Items)
+        {
+            // Obtener el ingrediente para saber su unidad base
+            var ingredient = _storage.Ingredients.FirstOrDefault(i => i.Id == item.IngredientId);
+            if (ingredient == null) continue;
+
+            // Convertir cantidad a unidad base del ingrediente
+            var quantityInBaseUnit = UnitConverter.Convert(item.Quantity, item.Unit, ingredient.Unit);
+            if (quantityInBaseUnit == null) continue; // Unidades incompatibles
+
+            // Sumar al stock
+            _ingredientService.AddStock(item.IngredientId, quantityInBaseUnit.Value);
+        }
     }
 
     public void Update(Invoice invoice)

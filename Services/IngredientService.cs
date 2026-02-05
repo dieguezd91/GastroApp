@@ -34,8 +34,44 @@ public class IngredientService
             existing.Name = ingredient.Name;
             existing.Unit = ingredient.Unit;
             existing.IsActive = ingredient.IsActive;
+            existing.CurrentStock = ingredient.CurrentStock;
+            existing.MinStock = ingredient.MinStock;
             _storage.SaveToFile();
         }
+    }
+
+    // Ajustar stock manualmente
+    public void AdjustStock(int ingredientId, decimal quantity)
+    {
+        var ingredient = GetById(ingredientId);
+        if (ingredient != null)
+        {
+            ingredient.CurrentStock = quantity;
+            _storage.SaveToFile();
+        }
+    }
+
+    // Sumar stock (usado por facturas)
+    public void AddStock(int ingredientId, decimal quantity)
+    {
+        var ingredient = GetById(ingredientId);
+        if (ingredient != null)
+        {
+            ingredient.CurrentStock += quantity;
+            _storage.SaveToFile();
+        }
+    }
+
+    // Restar stock (usado por ventas)
+    public bool TryRemoveStock(int ingredientId, decimal quantity)
+    {
+        var ingredient = GetById(ingredientId);
+        if (ingredient == null || ingredient.CurrentStock < quantity)
+            return false;
+
+        ingredient.CurrentStock -= quantity;
+        _storage.SaveToFile();
+        return true;
     }
 
     public void Delete(int id)

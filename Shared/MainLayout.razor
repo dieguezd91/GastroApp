@@ -1,4 +1,5 @@
 ﻿@inherits LayoutComponentBase
+@implements IDisposable
 @using GastroApp.Services
 @inject AuthService AuthService
 @inject NavigationManager Navigation
@@ -34,9 +35,19 @@
 </div>
 
 @code {
+    protected override void OnInitialized()
+    {
+        AuthService.OnAuthStateChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        AuthService.OnAuthStateChanged -= StateHasChanged;
+    }
+
     private void HandleLogout()
     {
         AuthService.Logout();
-        Navigation.NavigateTo("/login");
+        Navigation.NavigateTo("/login", true);
     }
 }

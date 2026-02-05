@@ -36,6 +36,14 @@
             <div class="cart-panel">
                 <h3>Carrito</h3>
 
+                @if (!string.IsNullOrEmpty(stockError))
+                {
+                    <div class="alert alert-danger">
+                        <strong>⚠️ Error de Stock</strong>
+                        <p>@stockError</p>
+                    </div>
+                }
+
                 @if (currentSale.Items.Any())
                 {
                     <div class="cart-items">
@@ -73,6 +81,7 @@
 @code {
     private List<Product> products = new();
     private Sale currentSale = new();
+    private string stockError = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -88,6 +97,9 @@
 
     private void AddToCart(Product product)
     {
+        // Limpiar error anterior
+        stockError = string.Empty;
+
         var existingItem = currentSale.Items.FirstOrDefault(i => i.ProductId == product.Id);
 
         if (existingItem != null)
@@ -120,7 +132,18 @@
     {
         if (!currentSale.Items.Any()) return;
 
+        // Validar stock antes de registrar la venta
+        var (isValid, errorMessage) = SaleService.ValidateStock(currentSale.Items);
+
+        if (!isValid)
+        {
+            stockError = errorMessage;
+            return;
+        }
+
+        // Stock validado, proceder con la venta
         SaleService.Add(currentSale);
+        stockError = string.Empty;
         currentSale = new Sale();
     }
 

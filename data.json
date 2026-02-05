@@ -49,19 +49,28 @@
       "Id": 1,
       "Name": "Harina",
       "Unit": "kg",
-      "IsActive": true
+      "IsActive": true,
+      "CurrentStock": 0,
+      "MinStock": 0,
+      "StockIndicator": "red"
     },
     {
       "Id": 2,
       "Name": "Garron",
       "Unit": "kg",
-      "IsActive": true
+      "IsActive": true,
+      "CurrentStock": 3,
+      "MinStock": 0,
+      "StockIndicator": "green"
     },
     {
       "Id": 3,
       "Name": "Vinagre",
       "Unit": "lt",
-      "IsActive": true
+      "IsActive": true,
+      "CurrentStock": 0,
+      "MinStock": 0,
+      "StockIndicator": "red"
     }
   ],
   "Suppliers": [
@@ -102,6 +111,25 @@
         }
       ],
       "Total": 31000
+    },
+    {
+      "Id": 2,
+      "Date": "2026-02-04T23:38:38.9404519-03:00",
+      "SupplierId": 1,
+      "InvoiceNumber": "A-0001-123123",
+      "Notes": "",
+      "Items": [
+        {
+          "InvoiceId": 2,
+          "IngredientId": 2,
+          "IngredientName": "Garron",
+          "Quantity": 3,
+          "Unit": "kg",
+          "UnitPrice": 1500,
+          "Subtotal": 4500
+        }
+      ],
+      "Total": 4500
     }
   ],
   "Recipes": [
@@ -132,6 +160,8 @@
       ],
       "TotalCost": 2750.000,
       "UnitCost": 550.000,
+      "LastCalculatedCost": 0,
+      "LastCalculatedAt": null,
       "CostIndicator": "red"
     }
   ],
@@ -140,6 +170,6 @@
   "NextUserId": 2,
   "NextIngredientId": 4,
   "NextSupplierId": 3,
-  "NextInvoiceId": 2,
+  "NextInvoiceId": 3,
   "NextRecipeId": 2
 }

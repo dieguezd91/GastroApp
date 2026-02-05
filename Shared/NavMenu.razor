@@ -1,6 +1,9 @@
 ﻿<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="">GastroApp</a>
+        <a class="navbar-brand" href="">
+            <span class="brand-icon">🍽️</span>
+            <span class="brand-text">GastroApp</span>
+        </a>
         <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -13,76 +16,101 @@
         {
             <div class="user-info px-3">
                 <span class="oi oi-person" aria-hidden="true"></span>
-                <strong>@AuthService.CurrentUser?.Username</strong>
-                <small>(@AuthService.CurrentUser?.Role)</small>
-                <button class="btn btn-sm btn-link" @onclick="HandleLogout">Salir</button>
+                <div class="user-details">
+                    <strong>@AuthService.CurrentUser?.Username</strong>
+                    <small>@AuthService.CurrentUser?.Role</small>
+                </div>
             </div>
-            <hr />
         }
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="oi oi-home" aria-hidden="true"></span> Home
-            </NavLink>
+        <div class="nav-section">
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="oi oi-home" aria-hidden="true"></span> Dashboard
+                </NavLink>
+            </div>
         </div>
 
         @if (AuthService.IsAuthenticated)
         {
-            @if (AuthService.IsInRole(UserRole.Admin))
-            {
+            <!-- SECCIÓN VENTAS -->
+            <div class="nav-section">
+                <div class="nav-section-title">VENTAS</div>
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="products">
-                        <span class="oi oi-box" aria-hidden="true"></span> Productos
+                    <NavLink class="nav-link nav-link-primary" href="sales">
+                        <span class="oi oi-cart" aria-hidden="true"></span> Vender
                     </NavLink>
                 </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="ingredients">
-                        <span class="oi oi-droplet" aria-hidden="true"></span> Ingredientes
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="recipes">
-                        <span class="oi oi-book" aria-hidden="true"></span> Recetas
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="suppliers">
-                        <span class="oi oi-truck" aria-hidden="true"></span> Proveedores
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="invoices">
-                        <span class="oi oi-document" aria-hidden="true"></span> Facturas
-                    </NavLink>
-                </div>
-            }
-
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="sales">
-                    <span class="oi oi-cart" aria-hidden="true"></span> Vender
-                </NavLink>
+                @if (AuthService.IsInRole(UserRole.Admin))
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="cash">
+                            <span class="oi oi-dollar" aria-hidden="true"></span> Caja
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="summary">
+                            <span class="oi oi-bar-chart" aria-hidden="true"></span> Resumen
+                        </NavLink>
+                    </div>
+                }
             </div>
 
             @if (AuthService.IsInRole(UserRole.Admin))
             {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="cash">
-                        <span class="oi oi-dollar" aria-hidden="true"></span> Caja
-                    </NavLink>
+                <!-- SECCIÓN COSTOS -->
+                <div class="nav-section">
+                    <div class="nav-section-title">COSTOS</div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="ingredients">
+                            <span class="oi oi-droplet" aria-hidden="true"></span> Ingredientes
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="recipes">
+                            <span class="oi oi-book" aria-hidden="true"></span> Recetas
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="suppliers">
+                            <span class="oi oi-truck" aria-hidden="true"></span> Proveedores
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="invoices">
+                            <span class="oi oi-document" aria-hidden="true"></span> Facturas
+                        </NavLink>
+                    </div>
                 </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="summary">
-                        <span class="oi oi-bar-chart" aria-hidden="true"></span> Resumen
-                    </NavLink>
+
+                <!-- SECCIÓN PRODUCTOS -->
+                <div class="nav-section">
+                    <div class="nav-section-title">PRODUCTOS</div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="products">
+                            <span class="oi oi-box" aria-hidden="true"></span> Gestionar
+                        </NavLink>
+                    </div>
                 </div>
             }
+
+            <!-- LOGOUT -->
+            <div class="nav-section nav-section-bottom">
+                <div class="nav-item px-3">
+                    <button class="nav-link nav-link-logout" @onclick="HandleLogout">
+                        <span class="oi oi-account-logout" aria-hidden="true"></span> Cerrar Sesión
+                    </button>
+                </div>
+            </div>
         }
         else
         {
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="login">
-                    <span class="oi oi-account-login" aria-hidden="true"></span> Iniciar Sesión
-                </NavLink>
+            <div class="nav-section">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="login">
+                        <span class="oi oi-account-login" aria-hidden="true"></span> Iniciar Sesión
+                    </NavLink>
+                </div>
             </div>
         }
     </nav>
@@ -90,6 +118,7 @@
 
 @using GastroApp.Services
 @using GastroApp.Models
+@implements IDisposable
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
@@ -97,6 +126,16 @@
     private bool collapseNavMenu = true;
 
     private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+
+    protected override void OnInitialized()
+    {
+        AuthService.OnAuthStateChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        AuthService.OnAuthStateChanged -= StateHasChanged;
+    }
 
     private void ToggleNavMenu()
     {
@@ -106,6 +145,6 @@
     private void HandleLogout()
     {
         AuthService.Logout();
-        Navigation.NavigateTo("/login");
+        Navigation.NavigateTo("/login", true);
     }
 }
