@@ -1,0 +1,12 @@
+# Local Pi runtime state
+.atl/
+.codegraph/
+
+# .NET build output
+**/bin/
+**/obj/
+
+# IDE and user-local settings
+.vs/
+*.user
+*.suo

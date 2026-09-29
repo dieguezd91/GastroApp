@@ -101,7 +101,7 @@ Primary responsibilities:
   - Build output.
   - Do not manually edit generated files or treat them as source of truth.
 
-There is currently no `Docs/Architecture/` directory. When architectural decisions become stable, new architecture documents should be placed there.
+The `Docs/Architecture/` directory exists and is the canonical location for stable architecture documentation.
 
 ---
 
