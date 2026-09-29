@@ -36,6 +36,10 @@ public class SaleService
 
     public void Add(Sale sale)
     {
+        var (isValid, errorMessage) = ValidateStock(sale.Items);
+        if (!isValid)
+            throw new InvalidOperationException(errorMessage);
+
         sale.Id = _storage.GetNextSaleId();
         sale.Date = DateTime.Now;
         _storage.Sales.Add(sale);
@@ -44,9 +48,26 @@ public class SaleService
         DeductStockFromSale(sale);
     }
 
-    // Validar si hay stock suficiente para una venta
+    // Validate checkout eligibility before the existing recipe-based stock checks.
     public (bool IsValid, string ErrorMessage) ValidateStock(List<SaleItem> items)
     {
+        if (items == null || items.Count == 0)
+            return (false, "La venta debe contener al menos un producto.");
+
+        foreach (var item in items)
+        {
+            if (item == null || item.Quantity <= 0)
+                return (false, "La cantidad de cada producto debe ser un entero positivo.");
+
+            // Resolve current catalog state, not the cart's product snapshot.
+            var product = _storage.Products.FirstOrDefault(p => p.Id == item.ProductId);
+            if (product == null)
+                return (false, "Uno de los productos de la venta ya no existe.");
+
+            if (!product.IsActive)
+                return (false, $"El producto {product.Name} está inactivo y no se puede vender.");
+        }
+
         if (_recipeService == null || _ingredientService == null)
             return (true, string.Empty); // Sin validación si no hay servicios
 

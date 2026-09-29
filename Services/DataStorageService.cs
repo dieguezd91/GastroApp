@@ -6,6 +6,7 @@ namespace GastroApp.Services;
 public class DataStorageService
 {
     public List<Product> Products { get; set; } = new();
+    public List<ProductCategory> ProductCategories { get; set; } = new();
     public List<Sale> Sales { get; set; } = new();
     public CashRegister? CurrentCashRegister { get; set; }
     public List<DailySummary> Summaries { get; set; } = new();
@@ -18,6 +19,7 @@ public class DataStorageService
     public List<Recipe> Recipes { get; set; } = new();
 
     private int _nextProductId = 1;
+    private int _nextProductCategoryId = 1;
     private int _nextSaleId = 1;
     private int _nextUserId = 1;
     private int _nextIngredientId = 1;
@@ -28,6 +30,7 @@ public class DataStorageService
     private readonly string _dataFilePath = "data.json";
 
     public int GetNextProductId() => _nextProductId++;
+    public int GetNextProductCategoryId() => _nextProductCategoryId++;
     public int GetNextSaleId() => _nextSaleId++;
     public int GetNextUserId() => _nextUserId++;
     public int GetNextIngredientId() => _nextIngredientId++;
@@ -124,6 +127,7 @@ public class DataStorageService
             var data = new
             {
                 Products,
+                ProductCategories,
                 Sales,
                 CurrentCashRegister,
                 Summaries,
@@ -133,6 +137,7 @@ public class DataStorageService
                 Invoices,
                 Recipes,
                 NextProductId = _nextProductId,
+                NextProductCategoryId = _nextProductCategoryId,
                 NextSaleId = _nextSaleId,
                 NextUserId = _nextUserId,
                 NextIngredientId = _nextIngredientId,
@@ -169,6 +174,20 @@ public class DataStorageService
             {
                 Products = JsonSerializer.Deserialize<List<Product>>(productsElement.GetRawText()) ?? new();
             }
+
+            // Los archivos anteriores no tienen categorías ni su contador.
+            ProductCategories = root.TryGetProperty("ProductCategories", out var categoriesElement)
+                ? JsonSerializer.Deserialize<List<ProductCategory>>(categoriesElement.GetRawText()) ?? new()
+                : new();
+
+            var minimumNextCategoryId = ProductCategories.Count == 0
+                ? 1
+                : ProductCategories.Max(c => c.Id) + 1;
+            var savedNextCategoryId = root.TryGetProperty("NextProductCategoryId", out var nextCategoryIdElement)
+                && nextCategoryIdElement.ValueKind == JsonValueKind.Number
+                ? nextCategoryIdElement.GetInt32()
+                : 1;
+            _nextProductCategoryId = Math.Max(1, Math.Max(minimumNextCategoryId, savedNextCategoryId));
 
             if (root.TryGetProperty("Sales", out var salesElement))
             {

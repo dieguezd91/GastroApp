@@ -59,13 +59,31 @@ Admin functionality:
 - delete products;
 - set sale price;
 - optionally set product cost;
-- display calculated margin.
+- assign or change an optional category, or remove it with **Sin categoría**;
+- activate or deactivate products without deleting them;
+- display each product's category, availability, and calculated margin.
 
 Margin status is based on the calculated percentage:
 
 - negative: red;
 - below 30%: orange;
 - 30% or greater: green.
+
+## Product Categories
+
+Route:
+
+```text
+/product-categories
+```
+
+Admin users can create, list, rename, and delete product categories from the **PRODUCTOS** navigation section.
+
+Category names are trimmed, required, and unique ignoring case. Categories have stable IDs, so renaming does not change product assignments. A category with assigned products cannot be deleted: those products must first be reassigned or left without a category. Validation failures are displayed in Spanish.
+
+Existing products remain uncategorized until explicitly assigned. Category and product changes are saved through `DataStorageService`.
+
+The implemented service, JSON, authentication, and POS boundaries are documented in [ProductCatalog.md](Docs/Architecture/ProductCatalog.md).
 
 ## Point of Sale
 
@@ -77,14 +95,17 @@ Route:
 
 Authenticated users can:
 
-- browse products;
+- browse active products using **Todos**, a category, or **Sin categoría** (only offered when uncategorized products exist), combined with case-insensitive name search;
 - add products to a cart;
+- increment, decrement, or directly edit positive integer quantities; decrementing one removes the line, and invalid edits retain the previous quantity;
 - remove items;
 - clear the cart;
 - review the total;
 - complete a sale when the cash register is open.
 
-Before checkout, stock is validated for products that have a recipe with the same name.
+Search and category filters affect only the displayed catalog, never the cart. The detailed projection, editing, and refresh contract is documented in [ProductCatalog.md](Docs/Architecture/ProductCatalog.md#point-of-sale-boundary).
+
+Checkout rejects empty carts, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name.
 
 When validation succeeds, the sale is recorded and recipe ingredient stock is deducted.
 
@@ -270,7 +291,8 @@ The sale is blocked when a required ingredient does not have sufficient stock.
 
 Persisted collections include:
 
-- products;
+- products (including optional category IDs and availability);
+- product categories;
 - sales;
 - current cash register;
 - daily summaries;
@@ -283,7 +305,9 @@ Persisted collections include:
 
 The application loads this file at startup and seeds initial data when no products are present.
 
-Persistence remains prototype-level, and not every service mutation currently calls `SaveToFile()` consistently.
+Legacy JSON without categories loads with an empty category collection and uncategorized products. The category next-ID counter is recovered from saved state and existing category IDs.
+
+Product and category CRUD call `SaveToFile()`. Persistence remains prototype-level, and not every other service mutation currently calls it consistently. Save errors are logged rather than propagated to the UI.
 
 ## Service Wiring
 
@@ -294,6 +318,7 @@ Current services include:
 ```text
 DataStorageService
 ProductService
+ProductCategoryService
 SaleService
 CashRegisterService
 UserService

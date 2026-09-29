@@ -1,0 +1,150 @@
+@page "/product-categories"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject ProductCategoryService CategoryService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Categorías de productos</PageTitle>
+
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    <div class="page-container">
+        <div class="page-header">
+            <h1>📦 Categorías de productos</h1>
+            <button class="btn btn-primary" @onclick="ShowAddForm">+ Nueva Categoría</button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger" role="alert">@errorMessage</div>
+        }
+
+        @if (showForm)
+        {
+            <div class="form-card">
+                <h3>@(editingCategory.Id == 0 ? "Nueva Categoría" : "Editar Categoría")</h3>
+                <div class="form-group">
+                    <label for="category-name">Nombre</label>
+                    <input id="category-name" type="text" @bind="editingCategory.Name" class="form-control" placeholder="Ej: Bebidas" />
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-primary" @onclick="SaveCategory">Guardar</button>
+                    <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+                </div>
+            </div>
+        }
+
+        <p>Para eliminar una categoría, primero quitá o cambiá su asignación en los productos.</p>
+        <div class="products-list">
+            @foreach (var category in categories)
+            {
+                <div class="product-card">
+                    <div class="product-info"><h3>@category.Name</h3></div>
+                    <div class="product-actions">
+                        <button class="btn btn-small" aria-label="Editar categoría" @onclick="() => EditCategory(category)">✏️</button>
+                        <button class="btn btn-small btn-danger" aria-label="Eliminar categoría" @onclick="() => DeleteCategory(category.Id)">🗑️</button>
+                    </div>
+                </div>
+            }
+        </div>
+        @if (categories.Count == 0)
+        {
+            <p class="empty-state">No hay categorías. Creá la primera!</p>
+        }
+    </div>
+}
+
+@code {
+    private List<ProductCategory> categories = new();
+    private ProductCategory editingCategory = new();
+    private bool showForm;
+    private string errorMessage = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        if (EnsureAdmin()) LoadCategories();
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return false;
+        }
+
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void LoadCategories() => categories = CategoryService.GetAll();
+
+    private void ShowAddForm()
+    {
+        if (!EnsureAdmin()) return;
+        editingCategory = new ProductCategory();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void EditCategory(ProductCategory category)
+    {
+        if (!EnsureAdmin()) return;
+        editingCategory = new ProductCategory { Id = category.Id, Name = category.Name };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void SaveCategory()
+    {
+        if (!EnsureAdmin()) return;
+        errorMessage = string.Empty;
+        try
+        {
+            if (editingCategory.Id == 0)
+                CategoryService.Add(editingCategory);
+            else
+                CategoryService.Update(editingCategory);
+
+            LoadCategories();
+            CancelEdit();
+        }
+        catch (ArgumentException ex)
+        {
+            errorMessage = ex.Message;
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private void DeleteCategory(int id)
+    {
+        if (!EnsureAdmin()) return;
+        errorMessage = string.Empty;
+        try
+        {
+            CategoryService.Delete(id);
+            LoadCategories();
+            if (editingCategory.Id == id) CancelEdit();
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private void CancelEdit()
+    {
+        showForm = false;
+        editingCategory = new ProductCategory();
+        errorMessage = string.Empty;
+    }
+}

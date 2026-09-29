@@ -2,6 +2,7 @@
 @using GastroApp.Models
 @using GastroApp.Services
 @inject ProductService ProductService
+@inject ProductCategoryService CategoryService
 @inject SaleService SaleService
 @inject CashRegisterService CashService
 @inject AuthService AuthService
@@ -22,14 +23,39 @@
     else
     {
         <div class="sales-layout">
-            <div class="products-grid">
+            <div>
                 <h3>Productos</h3>
-                @foreach (var product in products)
+                <div class="form-group">
+                    <label for="sales-category">Filtrar por categoría</label>
+                    <select id="sales-category" class="form-control" @bind="categoryFilter">
+                        <option value="">Todos</option>
+                        @foreach (var category in categories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                        @if (products.Any(p => !p.CategoryId.HasValue))
+                        {
+                            <option value="uncategorized">Sin categoría</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="sales-search">Buscar por nombre</label>
+                    <input id="sales-search" type="search" class="form-control"
+                           placeholder="Buscar productos..." @bind="nameSearch" @bind:event="oninput" />
+                </div>
+                <div class="products-grid">
+                    @foreach (var product in FilteredProducts)
+                    {
+                        <button class="product-button" @onclick="() => AddToCart(product)">
+                            <div class="product-name">@product.Name</div>
+                            <div class="product-price">$@product.Price</div>
+                        </button>
+                    }
+                </div>
+                @if (!FilteredProducts.Any())
                 {
-                    <button class="product-button" @onclick="() => AddToCart(product)">
-                        <div class="product-name">@product.Name</div>
-                        <div class="product-price">$@product.Price</div>
-                    </button>
+                    <p class="empty-state">No hay productos para mostrar con este filtro.</p>
                 }
             </div>
 
@@ -44,18 +70,35 @@
                     </div>
                 }
 
+                @if (!string.IsNullOrEmpty(quantityError))
+                {
+                    <div class="alert alert-danger" role="alert">@quantityError</div>
+                }
+
                 @if (currentSale.Items.Any())
                 {
                     <div class="cart-items">
                         @foreach (var item in currentSale.Items)
                         {
-                            <div class="cart-item">
+                            <div class="cart-item" @key="item">
                                 <div class="item-info">
                                     <strong>@item.ProductName</strong>
-                                    <span>x@item.Quantity</span>
+                                    <div class="d-flex align-items-center gap-1 flex-wrap">
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                                aria-label="@($"Disminuir cantidad de {item.ProductName}")"
+                                                @onclick="() => DecrementQuantity(item)">−</button>
+                                        <input @key="(item.Quantity, quantityEditVersion)" type="text" inputmode="numeric"
+                                               class="form-control" style="width: 5rem;"
+                                               aria-label="@($"Cantidad de {item.ProductName}")"
+                                               value="@item.Quantity" @onchange="e => EditQuantity(item, e)" />
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                                aria-label="@($"Aumentar cantidad de {item.ProductName}")"
+                                                @onclick="() => IncrementQuantity(item)">+</button>
+                                    </div>
                                 </div>
                                 <div class="item-price">$@item.Subtotal</div>
-                                <button class="btn-remove" @onclick="() => RemoveFromCart(item)">❌</button>
+                                <button class="btn-remove" aria-label="@($"Quitar {item.ProductName}")"
+                                        @onclick="() => RemoveFromCart(item)">❌</button>
                             </div>
                         }
                     </div>
@@ -80,8 +123,20 @@
 
 @code {
     private List<Product> products = new();
+    private List<ProductCategory> categories = new();
+    private string categoryFilter = string.Empty;
+    private string nameSearch = string.Empty;
     private Sale currentSale = new();
     private string stockError = string.Empty;
+    private string quantityError = string.Empty;
+    private int quantityEditVersion;
+
+    // Los filtros sólo proyectan el catálogo; no modifican productos ni el carrito.
+    private IEnumerable<Product> FilteredProducts => products.Where(p =>
+        p.IsActive
+        && (categoryFilter == string.Empty
+            || (categoryFilter == "uncategorized" ? !p.CategoryId.HasValue : p.CategoryId?.ToString() == categoryFilter))
+        && p.Name.Contains(nameSearch.Trim(), StringComparison.OrdinalIgnoreCase));
 
     protected override async Task OnInitializedAsync()
     {
@@ -92,22 +147,24 @@
         }
 
         products = ProductService.GetAll();
+        categories = CategoryService.GetAll();
         await Task.CompletedTask;
     }
 
     private void AddToCart(Product product)
     {
-        // Limpiar error anterior
-        stockError = string.Empty;
+        if (!product.IsActive) return;
 
         var existingItem = currentSale.Items.FirstOrDefault(i => i.ProductId == product.Id);
 
         if (existingItem != null)
         {
-            existingItem.Quantity++;
+            IncrementQuantity(existingItem);
         }
         else
         {
+            stockError = string.Empty;
+            quantityError = string.Empty;
             currentSale.Items.Add(new SaleItem
             {
                 ProductId = product.Id,
@@ -118,14 +175,62 @@
         }
     }
 
+    private void IncrementQuantity(SaleItem item)
+    {
+        if (!currentSale.Items.Contains(item)) return;
+        if (item.Quantity == int.MaxValue)
+        {
+            quantityError = "La cantidad no puede superar el máximo permitido.";
+            return;
+        }
+
+        item.Quantity++;
+        stockError = string.Empty;
+        quantityError = string.Empty;
+    }
+
+    private void DecrementQuantity(SaleItem item)
+    {
+        if (!currentSale.Items.Contains(item)) return;
+        if (item.Quantity <= 1)
+        {
+            RemoveFromCart(item);
+            return;
+        }
+
+        item.Quantity--;
+        stockError = string.Empty;
+        quantityError = string.Empty;
+    }
+
+    private void EditQuantity(SaleItem item, ChangeEventArgs e)
+    {
+        if (!currentSale.Items.Contains(item)) return;
+        if (!int.TryParse(e.Value?.ToString(), out var quantity) || quantity <= 0)
+        {
+            quantityError = "La cantidad debe ser un entero positivo. Se mantuvo la cantidad anterior.";
+            // Recrear el editor restaura el valor visible aunque el modelo no haya cambiado.
+            quantityEditVersion++;
+            return;
+        }
+
+        item.Quantity = quantity;
+        stockError = string.Empty;
+        quantityError = string.Empty;
+    }
+
     private void RemoveFromCart(SaleItem item)
     {
         currentSale.Items.Remove(item);
+        stockError = string.Empty;
+        quantityError = string.Empty;
     }
 
     private void ClearCart()
     {
         currentSale = new Sale();
+        stockError = string.Empty;
+        quantityError = string.Empty;
     }
 
     private void CompleteSale()
@@ -142,8 +247,18 @@
         }
 
         // Stock validado, proceder con la venta
-        SaleService.Add(currentSale);
+        try
+        {
+            SaleService.Add(currentSale);
+        }
+        catch (InvalidOperationException ex)
+        {
+            stockError = ex.Message;
+            return;
+        }
+
         stockError = string.Empty;
+        quantityError = string.Empty;
         currentSale = new Sale();
     }
 

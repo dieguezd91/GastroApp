@@ -2,6 +2,7 @@
 @using GastroApp.Models
 @using GastroApp.Services
 @inject ProductService ProductService
+@inject ProductCategoryService CategoryService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
@@ -12,6 +13,11 @@
         <h1>📦 Productos</h1>
         <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Producto</button>
     </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger" role="alert">@errorMessage</div>
+    }
 
     @if (showForm)
     {
@@ -33,6 +39,24 @@
                 <input type="number" @bind="editingProduct.Cost" class="form-control" placeholder="50" step="0.01" />
             </div>
 
+            <div class="form-group">
+                <label for="product-category">Categoría (opcional)</label>
+                <select id="product-category" @bind="editingProduct.CategoryId" class="form-control">
+                    <option value="">Sin categoría</option>
+                    @foreach (var category in categories)
+                    {
+                        <option value="@category.Id">@category.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="product-active">
+                    <input id="product-active" type="checkbox" @bind="editingProduct.IsActive" />
+                    Activo (disponible para la venta)
+                </label>
+            </div>
+
             <div class="form-actions">
                 <button class="btn btn-primary" @onclick="SaveProduct">Guardar</button>
                 <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
@@ -46,6 +70,8 @@
             <div class="product-card">
                 <div class="product-info">
                     <h3>@product.Name</h3>
+                    <p>Estado: @(product.IsActive ? "Activo" : "Inactivo")</p>
+                    <p>Categoría: @(categories.FirstOrDefault(c => c.Id == product.CategoryId)?.Name ?? "Sin categoría")</p>
                     <p class="price">$@product.Price</p>
                     @if (product.Cost.HasValue)
                     {
@@ -71,8 +97,10 @@
 
 @code {
     private List<Product> products = new();
+    private List<ProductCategory> categories = new();
     private Product editingProduct = new();
     private bool showForm = false;
+    private string errorMessage = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -95,22 +123,29 @@
     private void LoadProducts()
     {
         products = ProductService.GetAll();
+        categories = CategoryService.GetAll();
     }
 
     private void ShowAddForm()
     {
+        categories = CategoryService.GetAll();
+        errorMessage = string.Empty;
         editingProduct = new Product();
         showForm = true;
     }
 
     private void EditProduct(Product product)
     {
+        categories = CategoryService.GetAll();
+        errorMessage = string.Empty;
         editingProduct = new Product
         {
             Id = product.Id,
             Name = product.Name,
             Price = product.Price,
-            Cost = product.Cost
+            Cost = product.Cost,
+            CategoryId = product.CategoryId,
+            IsActive = product.IsActive
         };
         showForm = true;
     }
@@ -120,17 +155,26 @@
         if (string.IsNullOrWhiteSpace(editingProduct.Name) || editingProduct.Price <= 0)
             return;
 
-        if (editingProduct.Id == 0)
+        errorMessage = string.Empty;
+        try
         {
-            ProductService.Add(editingProduct);
-        }
-        else
-        {
-            ProductService.Update(editingProduct);
-        }
+            if (editingProduct.Id == 0)
+            {
+                ProductService.Add(editingProduct);
+            }
+            else
+            {
+                ProductService.Update(editingProduct);
+            }
 
-        LoadProducts();
-        CancelEdit();
+            LoadProducts();
+            CancelEdit();
+        }
+        catch (ArgumentException ex)
+        {
+            errorMessage = ex.Message;
+            categories = CategoryService.GetAll();
+        }
     }
 
     private void DeleteProduct(int id)
@@ -143,5 +187,6 @@
     {
         showForm = false;
         editingProduct = new Product();
+        errorMessage = string.Empty;
     }
 }

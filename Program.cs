@@ -11,6 +11,7 @@ builder.Services.AddServerSideBlazor();
 // Servicios de la app (Singleton para mantener estado en memoria)
 builder.Services.AddSingleton<DataStorageService>();
 builder.Services.AddSingleton<ProductService>();
+builder.Services.AddSingleton<ProductCategoryService>();
 builder.Services.AddSingleton<SaleService>();
 builder.Services.AddSingleton<CashRegisterService>();
 builder.Services.AddSingleton<UserService>();
