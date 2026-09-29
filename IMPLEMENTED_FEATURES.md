@@ -98,6 +98,7 @@ Authenticated users can:
 - browse active products using **Todos**, a category, or **Sin categoría** (only offered when uncategorized products exist), combined with case-insensitive name search;
 - add products to a cart;
 - increment, decrement, or directly edit positive integer quantities; decrementing one removes the line, and invalid edits retain the previous quantity;
+- add an optional observation applying to the entire quantity of each cart line;
 - remove items;
 - clear the cart;
 - review the total;
@@ -107,7 +108,7 @@ Search and category filters affect only the displayed catalog, never the cart. T
 
 Checkout rejects empty carts, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name.
 
-When validation succeeds, the sale is recorded and recipe ingredient stock is deducted.
+When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. The notes, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
 
 ## Cash Register
 

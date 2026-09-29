@@ -40,12 +40,20 @@ public class SaleService
         if (!isValid)
             throw new InvalidOperationException(errorMessage);
 
+        foreach (var item in sale.Items)
+        {
+            item.Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim();
+        }
+
         sale.Id = _storage.GetNextSaleId();
         sale.Date = DateTime.Now;
         _storage.Sales.Add(sale);
 
         // Descontar stock por cada producto vendido
         DeductStockFromSale(sale);
+
+        // Guardar el estado final incluso si ningún producto tiene receta.
+        _storage.SaveToFile();
     }
 
     // Validate checkout eligibility before the existing recipe-based stock checks.

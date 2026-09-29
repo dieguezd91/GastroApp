@@ -95,6 +95,13 @@
                                                 aria-label="@($"Aumentar cantidad de {item.ProductName}")"
                                                 @onclick="() => IncrementQuantity(item)">+</button>
                                     </div>
+                                    <div class="form-group">
+                                        <label for="@($"sale-item-notes-{item.ProductId}")">Observación (opcional)</label>
+                                        <input id="@($"sale-item-notes-{item.ProductId}")" type="text" class="form-control"
+                                               aria-describedby="@($"sale-item-notes-help-{item.ProductId}")"
+                                               @bind:get="item.Notes" @bind:set="value => EditNotes(item, value)" />
+                                        <small id="@($"sale-item-notes-help-{item.ProductId}")">Aplica a toda la cantidad de esta línea.</small>
+                                    </div>
                                 </div>
                                 <div class="item-price">$@item.Subtotal</div>
                                 <button class="btn-remove" aria-label="@($"Quitar {item.ProductName}")"
@@ -217,6 +224,12 @@
         item.Quantity = quantity;
         stockError = string.Empty;
         quantityError = string.Empty;
+    }
+
+    private void EditNotes(SaleItem item, string? value)
+    {
+        if (!currentSale.Items.Contains(item)) return;
+        item.Notes = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private void RemoveFromCart(SaleItem item)
