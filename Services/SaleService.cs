@@ -36,7 +36,7 @@ public class SaleService
 
     public void Add(Sale sale)
     {
-        var (isValid, errorMessage) = ValidateStock(sale.Items);
+        var (isValid, errorMessage) = ValidateSale(sale);
         if (!isValid)
             throw new InvalidOperationException(errorMessage);
 
@@ -54,6 +54,58 @@ public class SaleService
 
         // Guardar el estado final incluso si ningún producto tiene receta.
         _storage.SaveToFile();
+    }
+
+    public (bool IsValid, string ErrorMessage) ValidateSale(Sale sale)
+    {
+        if (sale == null || sale.Items == null || sale.Items.Count == 0)
+            return (false, "La venta debe contener al menos un producto.");
+
+        foreach (var item in sale.Items)
+        {
+            if (item == null)
+                return (false, "La venta contiene un producto inválido.");
+
+            var lineValidation = ValidateDiscount(item.DiscountType, item.DiscountValue,
+                item.GrossSubtotal, $"El descuento de {item.ProductName}");
+            if (!lineValidation.IsValid)
+                return lineValidation;
+        }
+
+        var saleValidation = ValidateDiscount(sale.DiscountType, sale.DiscountValue,
+            sale.Subtotal, "El descuento de la venta");
+        if (!saleValidation.IsValid)
+            return saleValidation;
+
+        return ValidateStock(sale.Items);
+    }
+
+    // Compartido por checkout y los candidatos de edición del POS, sin mutar estado.
+    public static (bool IsValid, string ErrorMessage) ValidateDiscount(
+        DiscountType type, decimal value, decimal applicableBase, string description)
+    {
+        if (value < 0m)
+            return (false, $"{description} no puede ser negativo.");
+
+        switch (type)
+        {
+            case DiscountType.None:
+                if (value != 0m)
+                    return (false, $"{description} debe tener valor cero si no se aplica descuento.");
+                break;
+            case DiscountType.Percentage:
+                if (value > 100m)
+                    return (false, $"{description} no puede superar el 100%.");
+                break;
+            case DiscountType.Fixed:
+                if (value > applicableBase)
+                    return (false, $"{description} no puede superar el subtotal aplicable.");
+                break;
+            default:
+                return (false, $"{description} tiene un tipo inválido.");
+        }
+
+        return (true, string.Empty);
     }
 
     // Validate checkout eligibility before the existing recipe-based stock checks.

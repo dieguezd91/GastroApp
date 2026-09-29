@@ -1,12 +1,25 @@
 namespace GastroApp.Models;
 
+public enum DiscountType
+{
+    None = 0,
+    Percentage = 1,
+    Fixed = 2
+}
+
 public class Sale
 {
     public int Id { get; set; }
     public DateTime Date { get; set; } = DateTime.Now;
     public List<SaleItem> Items { get; set; } = new();
 
-    public decimal Total => Items.Sum(i => i.Subtotal);
+    public DiscountType DiscountType { get; set; } = DiscountType.None;
+    public decimal DiscountValue { get; set; } = 0m;
+
+    // El descuento de la venta se aplica después de los descuentos de línea.
+    public decimal Subtotal => Items?.Sum(i => i?.Subtotal ?? 0m) ?? 0m;
+    public decimal DiscountAmount => DiscountCalculation.Calculate(Subtotal, DiscountType, DiscountValue);
+    public decimal Total => Math.Max(0m, Subtotal - DiscountAmount);
 }
 
 public class SaleItem
@@ -17,5 +30,26 @@ public class SaleItem
     public int Quantity { get; set; }
     public string? Notes { get; set; }
 
-    public decimal Subtotal => Price * Quantity;
+    public DiscountType DiscountType { get; set; } = DiscountType.None;
+    public decimal DiscountValue { get; set; } = 0m;
+
+    public decimal GrossSubtotal => Math.Max(0m, Price * Quantity);
+    // El descuento fijo corresponde a toda la línea, no a cada unidad.
+    public decimal DiscountAmount => DiscountCalculation.Calculate(GrossSubtotal, DiscountType, DiscountValue);
+    public decimal Subtotal => Math.Max(0m, GrossSubtotal - DiscountAmount);
+}
+
+internal static class DiscountCalculation
+{
+    public static decimal Calculate(decimal applicableBase, DiscountType type, decimal value)
+    {
+        // Proteger importes derivados de datos inválidos; el servicio rechaza esos descuentos.
+        // Porcentaje: base * valor / 100 con decimal, sin nuevo redondeo monetario.
+        return type switch
+        {
+            DiscountType.Percentage => applicableBase * Math.Clamp(value, 0m, 100m) / 100m,
+            DiscountType.Fixed => Math.Clamp(value, 0m, applicableBase),
+            _ => 0m
+        };
+    }
 }

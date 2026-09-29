@@ -1,6 +1,7 @@
 @page "/sales"
 @using GastroApp.Models
 @using GastroApp.Services
+@using System.Globalization
 @inject ProductService ProductService
 @inject ProductCategoryService CategoryService
 @inject SaleService SaleService
@@ -64,8 +65,8 @@
 
                 @if (!string.IsNullOrEmpty(stockError))
                 {
-                    <div class="alert alert-danger">
-                        <strong>⚠️ Error de Stock</strong>
+                    <div class="alert alert-danger" role="alert">
+                        <strong>⚠️ No se pudo completar la venta</strong>
                         <p>@stockError</p>
                     </div>
                 }
@@ -75,13 +76,20 @@
                     <div class="alert alert-danger" role="alert">@quantityError</div>
                 }
 
+                <div id="sales-discount-error" role="alert" aria-live="assertive">
+                    @if (!string.IsNullOrEmpty(discountError))
+                    {
+                        <div class="alert alert-danger">@discountError</div>
+                    }
+                </div>
+
                 @if (currentSale.Items.Any())
                 {
                     <div class="cart-items">
                         @foreach (var item in currentSale.Items)
                         {
-                            <div class="cart-item" @key="item">
-                                <div class="item-info">
+                            <div class="cart-item d-flex flex-wrap align-items-start gap-2" @key="item">
+                                <div class="item-info" style="flex: 1 1 12rem; min-width: 0;">
                                     <strong>@item.ProductName</strong>
                                     <div class="d-flex align-items-center gap-1 flex-wrap">
                                         <button type="button" class="btn btn-secondary btn-sm"
@@ -102,16 +110,65 @@
                                                @bind:get="item.Notes" @bind:set="value => EditNotes(item, value)" />
                                         <small id="@($"sale-item-notes-help-{item.ProductId}")">Aplica a toda la cantidad de esta línea.</small>
                                     </div>
+                                    <div @key="discountEditVersion">
+                                        <div class="form-group">
+                                            <label for="@($"sale-item-discount-type-{item.ProductId}")">Descuento de línea</label>
+                                            <select id="@($"sale-item-discount-type-{item.ProductId}")" class="form-control"
+                                                    aria-describedby="sales-discount-help sales-discount-error"
+                                                    value="@((int)item.DiscountType)" @onchange="e => EditDiscountType(item, e)">
+                                                <option value="0">Sin descuento</option>
+                                                <option value="1">Porcentaje (%)</option>
+                                                <option value="2">Importe fijo ($ por línea)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="@($"sale-item-discount-value-{item.ProductId}")">Valor del descuento de línea (@(item.DiscountType == DiscountType.Percentage ? "%" : "$"))</label>
+                                            <input id="@($"sale-item-discount-value-{item.ProductId}")" type="text" inputmode="decimal"
+                                                   class="form-control" disabled="@(item.DiscountType == DiscountType.None)"
+                                                   aria-describedby="sales-discount-help sales-discount-error"
+                                                   value="@item.DiscountValue" @onchange="e => EditDiscountValue(item, e)" />
+                                        </div>
+                                    </div>
+                                    <div class="item-price">
+                                        <div>Bruto de línea: $@item.GrossSubtotal</div>
+                                        <div>Descuento de línea: $@item.DiscountAmount</div>
+                                        <strong>Subtotal final de línea: $@item.Subtotal</strong>
+                                    </div>
                                 </div>
-                                <div class="item-price">$@item.Subtotal</div>
                                 <button class="btn-remove" aria-label="@($"Quitar {item.ProductName}")"
                                         @onclick="() => RemoveFromCart(item)">❌</button>
                             </div>
                         }
                     </div>
 
+                    <p id="sales-discount-help">
+                        El importe fijo de línea se descuenta una vez, no por unidad. El descuento de venta se aplica después de los de línea.
+                        Usá «@CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator» como separador decimal, sin separador de miles.
+                        Cambiar el tipo reinicia el valor a cero.
+                    </p>
+                    <div @key="discountEditVersion">
+                        <div class="form-group">
+                            <label for="sale-discount-type">Descuento de toda la venta</label>
+                            <select id="sale-discount-type" class="form-control"
+                                    aria-describedby="sales-discount-help sales-discount-error"
+                                    value="@((int)currentSale.DiscountType)" @onchange="e => EditDiscountType(null, e)">
+                                <option value="0">Sin descuento</option>
+                                <option value="1">Porcentaje (%)</option>
+                                <option value="2">Importe fijo ($)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="sale-discount-value">Valor del descuento de venta (@(currentSale.DiscountType == DiscountType.Percentage ? "%" : "$"))</label>
+                            <input id="sale-discount-value" type="text" inputmode="decimal" class="form-control"
+                                   disabled="@(currentSale.DiscountType == DiscountType.None)"
+                                   aria-describedby="sales-discount-help sales-discount-error"
+                                   value="@currentSale.DiscountValue" @onchange="e => EditDiscountValue(null, e)" />
+                        </div>
+                    </div>
                     <div class="cart-total">
-                        <h2>Total: $@currentSale.Total</h2>
+                        <div>Subtotal tras descuentos de línea: $@currentSale.Subtotal</div>
+                        <div>Descuento de venta: $@currentSale.DiscountAmount</div>
+                        <h2>Total final: $@currentSale.Total</h2>
                     </div>
 
                     <button class="btn btn-success btn-large" @onclick="CompleteSale">
@@ -137,6 +194,8 @@
     private string stockError = string.Empty;
     private string quantityError = string.Empty;
     private int quantityEditVersion;
+    private string discountError = string.Empty;
+    private int discountEditVersion;
 
     // Los filtros sólo proyectan el catálogo; no modifican productos ni el carrito.
     private IEnumerable<Product> FilteredProducts => products.Where(p =>
@@ -172,6 +231,7 @@
         {
             stockError = string.Empty;
             quantityError = string.Empty;
+            discountError = string.Empty;
             currentSale.Items.Add(new SaleItem
             {
                 ProductId = product.Id,
@@ -191,6 +251,10 @@
             return;
         }
 
+        var candidate = CopyLine(item);
+        candidate.Quantity++;
+        if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
+
         item.Quantity++;
         stockError = string.Empty;
         quantityError = string.Empty;
@@ -204,6 +268,10 @@
             RemoveFromCart(item);
             return;
         }
+
+        var candidate = CopyLine(item);
+        candidate.Quantity--;
+        if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
 
         item.Quantity--;
         stockError = string.Empty;
@@ -221,7 +289,113 @@
             return;
         }
 
+        var candidate = CopyLine(item);
+        candidate.Quantity = quantity;
+        if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
+
         item.Quantity = quantity;
+        stockError = string.Empty;
+        quantityError = string.Empty;
+    }
+
+    private static SaleItem CopyLine(SaleItem item) => new()
+    {
+        ProductId = item.ProductId,
+        ProductName = item.ProductName,
+        Price = item.Price,
+        Quantity = item.Quantity,
+        Notes = item.Notes,
+        DiscountType = item.DiscountType,
+        DiscountValue = item.DiscountValue
+    };
+
+    private void RejectDiscountEdit(string message)
+    {
+        discountError = $"{message} Se mantuvo el carrito anterior.";
+        // Recrear sólo los editores restaura entradas rechazadas sin tocar notas ni filtros.
+        discountEditVersion++;
+        quantityEditVersion++;
+    }
+
+    private bool CanApplyCartChange(SaleItem? original, SaleItem? candidate,
+        DiscountType saleType, decimal saleValue)
+    {
+        if (candidate != null)
+        {
+            var lineValidation = GastroApp.Services.SaleService.ValidateDiscount(candidate.DiscountType,
+                candidate.DiscountValue, candidate.GrossSubtotal, $"El descuento de {candidate.ProductName}");
+            if (!lineValidation.IsValid)
+            {
+                RejectDiscountEdit(lineValidation.ErrorMessage);
+                return false;
+            }
+        }
+
+        // La base candidata usa los importes del modelo; no se cambia el carrito para validarla.
+        var subtotal = currentSale.Items.Sum(i => i == original ? candidate?.Subtotal ?? 0m : i.Subtotal);
+        var saleValidation = GastroApp.Services.SaleService.ValidateDiscount(saleType, saleValue,
+            subtotal, "El descuento de la venta");
+        if (!saleValidation.IsValid)
+        {
+            RejectDiscountEdit(saleValidation.ErrorMessage);
+            return false;
+        }
+
+        discountError = string.Empty;
+        return true;
+    }
+
+    private void EditDiscountType(SaleItem? item, ChangeEventArgs e)
+    {
+        if (item != null && !currentSale.Items.Contains(item)) return;
+        if (!int.TryParse(e.Value?.ToString(), out var type))
+        {
+            RejectDiscountEdit("El tipo de descuento es inválido.");
+            return;
+        }
+
+        ApplyDiscountEdit(item, (DiscountType)type, 0m);
+    }
+
+    private void EditDiscountValue(SaleItem? item, ChangeEventArgs e)
+    {
+        if (item != null && !currentSale.Items.Contains(item)) return;
+        const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
+            | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
+        if (!decimal.TryParse(e.Value?.ToString(), styles, CultureInfo.CurrentCulture, out var value))
+        {
+            RejectDiscountEdit("El valor del descuento debe ser un número decimal válido, sin separador de miles.");
+            return;
+        }
+
+        ApplyDiscountEdit(item, item?.DiscountType ?? currentSale.DiscountType, value);
+    }
+
+    private void ApplyDiscountEdit(SaleItem? item, DiscountType type, decimal value)
+    {
+        var candidate = item == null ? null : CopyLine(item);
+        if (candidate != null)
+        {
+            candidate.DiscountType = type;
+            candidate.DiscountValue = value;
+        }
+
+        if (!CanApplyCartChange(item, candidate,
+            item == null ? type : currentSale.DiscountType,
+            item == null ? value : currentSale.DiscountValue)) return;
+
+        if (item == null)
+        {
+            currentSale.DiscountType = type;
+            currentSale.DiscountValue = value;
+        }
+        else
+        {
+            item.DiscountType = type;
+            item.DiscountValue = value;
+        }
+
+        discountEditVersion++;
         stockError = string.Empty;
         quantityError = string.Empty;
     }
@@ -234,6 +408,9 @@
 
     private void RemoveFromCart(SaleItem item)
     {
+        if (!currentSale.Items.Contains(item)) return;
+        if (!CanApplyCartChange(item, null, currentSale.DiscountType, currentSale.DiscountValue)) return;
+
         currentSale.Items.Remove(item);
         stockError = string.Empty;
         quantityError = string.Empty;
@@ -244,14 +421,15 @@
         currentSale = new Sale();
         stockError = string.Empty;
         quantityError = string.Empty;
+        discountError = string.Empty;
     }
 
     private void CompleteSale()
     {
         if (!currentSale.Items.Any()) return;
 
-        // Validar stock antes de registrar la venta
-        var (isValid, errorMessage) = SaleService.ValidateStock(currentSale.Items);
+        // Validar descuentos, elegibilidad y stock antes de registrar la venta.
+        var (isValid, errorMessage) = SaleService.ValidateSale(currentSale);
 
         if (!isValid)
         {
@@ -259,7 +437,7 @@
             return;
         }
 
-        // Stock validado, proceder con la venta
+        // Venta validada; Add vuelve a validar antes de cualquier mutación.
         try
         {
             SaleService.Add(currentSale);
@@ -272,6 +450,7 @@
 
         stockError = string.Empty;
         quantityError = string.Empty;
+        discountError = string.Empty;
         currentSale = new Sale();
     }
 

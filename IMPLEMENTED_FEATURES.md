@@ -99,16 +99,17 @@ Authenticated users can:
 - add products to a cart;
 - increment, decrement, or directly edit positive integer quantities; decrementing one removes the line, and invalid edits retain the previous quantity;
 - add an optional observation applying to the entire quantity of each cart line;
+- edit line and whole-sale discounts as none, percentage, or a fixed decimal amount (line fixed amounts apply once, not per unit); invalid edits retain the previous cart and restore the editor;
 - remove items;
 - clear the cart;
-- review the total;
+- review line gross, discount and final subtotals, then the sale's post-line subtotal, discount and final total;
 - complete a sale when the cash register is open.
 
 Search and category filters affect only the displayed catalog, never the cart. The detailed projection, editing, and refresh contract is documented in [ProductCatalog.md](Docs/Architecture/ProductCatalog.md#point-of-sale-boundary).
 
-Checkout rejects empty carts, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name.
+Checkout rejects empty carts, invalid line or sale discounts, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name. Sale discounts apply after line discounts; percentage arithmetic uses decimal without a new currency-rounding policy. Quantity changes or removals that invalidate a fixed discount are rejected until the discount is adjusted.
 
-When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. The notes, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
+When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. The notes, discount semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
 
 ## Cash Register
 
