@@ -1,344 +1,331 @@
-# 🍽️ GastroApp - Nuevas Funcionalidades
+# GastroApp: Implemented Features
 
-## 📦 Módulos Implementados
+## Purpose
 
-### 1. 🥕 Ingredientes
-Gestión de materia prima con control de stock.
+This document provides a current functional overview of the modules implemented in GastroApp.
 
-**Características:**
-- CRUD completo de ingredientes
-- Unidades de medida: kg, lt, unidad, gr, ml
-- Estado activo/inactivo
-- Último precio conocido (desde facturas)
+It replaces the previous feature notes that had become partially outdated as authentication, JSON persistence, unit conversion, and stock control were added.
 
-**Ruta:** `/ingredients`
+For implementation details, current source code is authoritative.
 
----
+## Authentication
 
-### 2. 🚚 Proveedores
-Registro simple de proveedores.
+GastroApp currently provides application-level authentication through:
 
-**Características:**
-- CRUD completo de proveedores
-- Información básica (nombre)
+- `AuthService`;
+- `UserService`;
+- BCrypt password hashing;
+- `Admin` and `Employee` roles.
 
-**Ruta:** `/suppliers`
+The default seeded development account is:
 
----
-
-### 3. 📄 Facturas de Proveedores
-Historial de compras con precios.
-
-**Características:**
-- Crear facturas con múltiples items
-- Cada item asocia ingrediente + cantidad + precio unitario
-- Número de factura opcional
-- Notas adicionales
-- Cálculo automático de totales
-- Ordenadas por fecha (más reciente primero)
-
-**Ruta:** `/invoices`
-
-**Flujo de uso:**
-1. Crear nueva factura
-2. Seleccionar proveedor y fecha
-3. Agregar items (ingrediente + cantidad + precio)
-4. Guardar factura
-
----
-
-### 4. 📖 Recetas Estandarizadas
-Costeo automático de recetas.
-
-**Características:**
-- CRUD completo de recetas
-- Agregar ingredientes con cantidades
-- Definir rendimiento (porciones/pax)
-- **Cálculo automático de costos:**
-  - Usa el último precio cargado en facturas
-  - Calcula costo total de la receta
-  - Calcula costo por porción
-- **Indicadores visuales de costo:**
-  - 🟢 Verde: Costo normal (< $100 por porción)
-  - 🟡 Amarillo: Costo elevado ($100-$200 por porción)
-  - 🔴 Rojo: Costo crítico (> $200 por porción)
-- Botón de recalcular costos (🔄) para actualizar precios
-
-**Ruta:** `/recipes`
-
-**Flujo de uso:**
-1. Crear nueva receta
-2. Definir nombre y rendimiento
-3. Agregar ingredientes (muestra precio actual)
-4. Ver preview del costo en tiempo real
-5. Guardar receta
-
----
-
-## 🔄 Integración con Sistema Existente
-
-### Persistencia
-- Todo se guarda en `data.json`
-- Carga automática al iniciar
-- Sin base de datos externa
-
-### Autenticación
-- Solo accesible para usuarios Admin
-- Empleados NO ven estos módulos
-- Reutiliza el sistema de auth existente
-
-### Navegación
-Nuevo menú lateral para Admin:
-- Home
-- **Productos** (existente)
-- **Ingredientes** ✨ NUEVO
-- **Recetas** ✨ NUEVO
-- **Proveedores** ✨ NUEVO
-- **Facturas** ✨ NUEVO
-- Vender
-- Caja
-- Resumen
-
----
-
-## 🎯 Casos de Uso
-
-### Caso 1: Cargar Ingredientes y Precios
-1. Ir a **Ingredientes** → Crear ingredientes básicos
-2. Ir a **Proveedores** → Crear proveedor
-3. Ir a **Facturas** → Crear factura con items
-4. Los precios quedan registrados
-
-### Caso 2: Crear Receta con Costo
-1. Asegurar que existan ingredientes con precios
-2. Ir a **Recetas** → Crear receta
-3. Agregar ingredientes y cantidades
-4. El sistema calcula automáticamente el costo
-5. Ver indicador de costo (🟢🟡🔴)
-
-### Caso 3: Actualizar Precios
-1. Ir a **Facturas** → Crear nueva factura con precios actualizados
-2. Ir a **Recetas** → Hacer clic en 🔄 para recalcular
-3. Ver los nuevos costos actualizados
-
-### Caso 4: Análisis de Rentabilidad
-1. Ver costo unitario de receta en **Recetas**
-2. Comparar con precio de venta del producto final
-3. Determinar margen de ganancia
-
----
-
-## 💡 Decisiones de Diseño
-
-### ✅ Simplicidad
-- Sin abstracciones complejas
-- Servicios CRUD directos
-- Sin repositorios ni UoW
-- Sin caché
-
-### ✅ Cálculo de Costos
-**Lógica implementada:**
-```
-Último precio ingrediente = último InvoiceItem (por fecha)
-Costo receta = suma(cantidad × último precio)
-Costo unitario = costo total ÷ rendimiento
+```text
+admin / admin
 ```
 
-**Indicadores visuales:**
-- Basados en umbrales fijos de costo unitario
-- Verde: < $100
-- Amarillo: $100-$200
-- Rojo: > $200
+Management pages explicitly redirect unauthenticated users to `/login` and non-admin users to `/unauthorized`.
 
-### ✅ Desnormalización
-- `IngredientName` repetido en InvoiceItem y RecipeIngredient
-- Facilita el display sin joins
-- Mantiene historial aunque se edite el ingrediente
+The point of sale requires authentication but is not restricted to the Admin role.
 
-### ✅ Sin Validaciones Complejas
-- Validaciones mínimas en UI
-- Sin reglas de negocio complicadas
-- Prioridad en funcionalidad sobre perfección
+## Dashboard
 
----
+Route:
 
-## 🚀 Cómo Probar
-
-### 1. Iniciar la aplicación
-```bash
-cd Desktop/GastroApp/GastroApp
-dotnet run
+```text
+/
 ```
 
-### 2. Login
-- Usuario: `admin`
-- Contraseña: `admin`
+The dashboard shows:
 
-### 3. Ver datos de ejemplo
-El sistema viene con seed data:
-- 4 ingredientes (Harina, Leche, Huevos, Manteca)
-- 1 proveedor (Distribuidora San Martín)
-- 1 factura con precios
-- 1 receta de ejemplo (Medialunas Caseras)
+- current cash register state;
+- opening time;
+- initial cash;
+- today's sales total;
+- a primary sales action when the register is open;
+- admin quick links.
 
-### 4. Probar funcionalidades
-- **Ingredientes:** Ver lista, crear nuevos, editar
-- **Proveedores:** Ver lista, crear nuevos
-- **Facturas:** Ver existente, crear nueva con items
-- **Recetas:** Ver "Medialunas Caseras", verificar cálculo de costos
+## Products
 
----
+Route:
 
-## 📊 Estructura de Archivos Nuevos
-
-```
-Models/
-  ├── Ingredient.cs
-  ├── Supplier.cs
-  ├── Invoice.cs
-  ├── InvoiceItem.cs
-  ├── Recipe.cs
-  └── RecipeIngredient.cs
-
-Services/
-  ├── IngredientService.cs
-  ├── SupplierService.cs
-  ├── InvoiceService.cs
-  └── RecipeService.cs
-
-Pages/
-  ├── Ingredients.razor
-  ├── Suppliers.razor
-  ├── Invoices.razor
-  └── Recipes.razor
+```text
+/products
 ```
 
-**Archivos modificados:**
-- `Services/DataStorageService.cs` - Agregadas nuevas listas y persistencia
-- `Program.cs` - Registrados nuevos servicios
-- `Shared/NavMenu.razor` - Agregados links de navegación
+Admin functionality:
 
----
+- create products;
+- edit products;
+- delete products;
+- set sale price;
+- optionally set product cost;
+- display calculated margin.
 
-## 🔮 Mejoras Futuras Sugeridas
+Margin status is based on the calculated percentage:
 
-1. **Historial de cambios de precios:**
-   - Gráfico de evolución de precios por ingrediente
-   - Comparación temporal de costos de recetas
+- negative: red;
+- below 30%: orange;
+- 30% or greater: green.
 
-2. **Análisis de rentabilidad:**
-   - Comparar costo de receta vs precio de producto
-   - Alertas de margen bajo
+## Point of Sale
 
-3. **Batch updates:**
-   - Recalcular todas las recetas de una vez
-   - Actualización masiva de precios
+Route:
 
-4. **Unidades de conversión:**
-   - Convertir kg a gr automáticamente
-   - Manejar fracciones comunes
+```text
+/sales
+```
 
-5. **Exportación:**
-   - Exportar recetas a PDF
-   - Listado de compras sugerido
+Authenticated users can:
 
----
+- browse products;
+- add products to a cart;
+- remove items;
+- clear the cart;
+- review the total;
+- complete a sale when the cash register is open.
 
-## ⚠️ Limitaciones Conocidas
+Before checkout, stock is validated for products that have a recipe with the same name.
 
-1. **Sin conversión de unidades:**
-   - Si una factura tiene "gr" y la receta usa "kg", hay que convertir manualmente
+When validation succeeds, the sale is recorded and recipe ingredient stock is deducted.
 
-2. **Último precio siempre:**
-   - No hay promedios ni ponderaciones
-   - Siempre toma el precio más reciente
+## Cash Register
 
-3. **Sin validación de stock:**
-   - No controla si hay suficiente ingrediente
-   - Es solo para costeo, no inventario
+Route:
 
-4. **Indicadores fijos:**
-   - Los umbrales de 🟢🟡🔴 son arbitrarios
-   - Podrían ser configurables en el futuro
+```text
+/cash
+```
 
-5. **Sin auditoría:**
-   - No registra quién modificó qué
-   - No hay historial de cambios en recetas
+Admin functionality:
 
----
+- open the register with an initial amount;
+- view register state;
+- close the register with a final counted amount;
+- calculate expected cash;
+- calculate the final difference.
 
-## ✅ Testing Manual
+Closing the register creates a daily summary entry.
 
-### Checklist de Funcionalidades
+## Daily Summary
 
-**Ingredientes:**
-- [ ] Crear ingrediente
-- [ ] Editar ingrediente
-- [ ] Activar/desactivar ingrediente
-- [ ] Ver último precio en lista
+Route:
 
-**Proveedores:**
-- [ ] Crear proveedor
-- [ ] Editar proveedor
-- [ ] Eliminar proveedor
+```text
+/summary
+```
 
-**Facturas:**
-- [ ] Crear factura
-- [ ] Agregar múltiples items
-- [ ] Ver total calculado
-- [ ] Ver lista de facturas ordenadas
-- [ ] Eliminar factura
+Admin users can review:
 
-**Recetas:**
-- [ ] Crear receta
-- [ ] Agregar ingredientes
-- [ ] Ver preview de costo en tiempo real
-- [ ] Guardar receta
-- [ ] Ver indicador de costo (🟢🟡🔴)
-- [ ] Recalcular costos (botón 🔄)
-- [ ] Ver desglose de ingredientes (details)
-- [ ] Editar receta existente
+- today's total sales;
+- number of sales;
+- top-selling product;
+- top-selling quantity;
+- initial cash;
+- final cash;
+- cash difference.
 
-**Integración:**
-- [ ] Los precios de facturas se reflejan en ingredientes
-- [ ] Los precios de ingredientes se usan en recetas
-- [ ] Todo persiste en data.json
-- [ ] Todo se carga correctamente al reiniciar
+## Ingredients and Stock
 
----
+Route:
 
-## 🎓 Notas Técnicas
+```text
+/ingredients
+```
 
-### Orden de Registro de Servicios
-Importante: `InvoiceService` debe registrarse ANTES que `IngredientService` y `RecipeService` porque estos últimos dependen de él.
+Admin functionality:
 
-### Cálculo en Tiempo Real
-Las recetas muestran un preview del costo mientras se editan, actualizando en cada cambio.
+- create ingredients;
+- edit ingredients;
+- delete ingredients;
+- activate/deactivate ingredients;
+- configure a base unit;
+- define current stock;
+- define minimum stock;
+- manually adjust stock;
+- view the latest known purchase price;
+- view stock status.
 
-### JSON Serialization
-Los modelos con propiedades calculadas (como `Total` en Invoice) se serializan correctamente porque son getters simples.
+Supported units currently exposed by the UI:
 
----
+- `kg`;
+- `lt`;
+- `unidad`;
+- `gr`;
+- `ml`.
 
-## 📝 Supuestos Importantes
+Stock indicator rules:
 
-1. **Un solo precio por ingrediente:**
-   - Se usa el último precio cargado
-   - No se manejan precios por proveedor
+- red: no stock;
+- yellow: stock at or below the configured minimum;
+- green: stock above the minimum.
 
-2. **Recetas inmutables en historial:**
-   - Una vez guardada, una receta refleja los precios del momento
-   - Al recalcular, se actualizan con precios actuales
+## Suppliers
 
-3. **Sin control de acceso granular:**
-   - Todo Admin puede ver/editar todo
-   - Empleados no ven nada de este módulo
+Route:
 
-4. **Persistencia simple:**
-   - JSON en disco
-   - Sin transacciones
-   - Sin rollback
+```text
+/suppliers
+```
 
----
+Admin users can manage supplier records used by purchase invoices.
 
-Implementado con ❤️ siguiendo el estilo simple y directo del prototipo existente.
+The current supplier model is intentionally small and primarily stores supplier identity information.
+
+## Purchase Invoices
+
+Route:
+
+```text
+/invoices
+```
+
+Admin users can create invoices with:
+
+- date;
+- supplier;
+- optional invoice number;
+- optional notes;
+- multiple ingredient items;
+- quantity;
+- unit;
+- unit price.
+
+On creation, invoice quantities are converted when necessary and added to ingredient stock.
+
+Invoice history is also used to resolve the latest purchase price for an ingredient.
+
+The current UI supports creation and deletion. Although `InvoiceService` contains an update method, invoice editing is not exposed by the current page.
+
+## Recipes
+
+Route:
+
+```text
+/recipes
+```
+
+Admin functionality:
+
+- create recipes;
+- edit recipes;
+- delete recipes;
+- define yield;
+- add ingredients;
+- calculate total recipe cost;
+- calculate unit cost;
+- recalculate costs from current invoice prices.
+
+Recipe costing uses the latest invoice price available for each ingredient.
+
+## Unit Conversion
+
+The application centralizes supported conversions in `UnitConverter`.
+
+Supported conversions:
+
+```text
+1 kg = 1000 gr
+1 lt = 1000 ml
+```
+
+Weight-to-volume conversion is not supported.
+
+Identical units are compatible, including `unidad` to `unidad`.
+
+Recipe costing and stock updates use the same conversion helper.
+
+## Recipe Cost Indicators
+
+Recipe cost status is based on change from the previous calculated unit cost rather than on fixed currency values.
+
+Thresholds:
+
+- green: less than 10% variation;
+- yellow: 10% to less than 30%;
+- red: 30% or greater.
+
+The variation is absolute, so both increases and decreases can trigger yellow or red.
+
+## Inventory Flow
+
+Current stock changes through three paths.
+
+### Manual Adjustment
+
+Administrators can set an ingredient's current stock directly from the ingredient page.
+
+### Purchase Entry
+
+Creating an invoice adds the purchased quantity to ingredient stock.
+
+### Sale Consumption
+
+A completed sale deducts recipe ingredient quantities when the sold product name matches a recipe name.
+
+The sale is blocked when a required ingredient does not have sufficient stock.
+
+## Persistence
+
+`DataStorageService` stores application state in `data.json`.
+
+Persisted collections include:
+
+- products;
+- sales;
+- current cash register;
+- daily summaries;
+- users;
+- ingredients;
+- suppliers;
+- invoices;
+- recipes;
+- next-ID counters.
+
+The application loads this file at startup and seeds initial data when no products are present.
+
+Persistence remains prototype-level, and not every service mutation currently calls `SaveToFile()` consistently.
+
+## Service Wiring
+
+Application services are registered as singletons in `Program.cs`.
+
+Current services include:
+
+```text
+DataStorageService
+ProductService
+SaleService
+CashRegisterService
+UserService
+AuthService
+SupplierService
+InvoiceService
+IngredientService
+RecipeService
+```
+
+Some relationships are configured after service construction:
+
+```text
+InvoiceService -> IngredientService
+SaleService -> RecipeService
+SaleService -> IngredientService
+```
+
+This is current implementation state and exists to avoid constructor dependency cycles.
+
+## Current Limitations
+
+The repository currently has the following relevant limitations:
+
+- authentication state is stored in a singleton `AuthService` and is therefore not isolated per Blazor circuit;
+- shared application state is singleton-based;
+- JSON persistence is not transactional;
+- save behavior is inconsistent across some service mutations;
+- products and recipes are linked for stock consumption by matching names;
+- deleting an invoice does not roll back stock;
+- editing an invoice does not reconcile previously applied stock;
+- no database is integrated;
+- no automated test project is currently present.
+
+These are implementation facts, not final product requirements.
