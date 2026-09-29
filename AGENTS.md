@@ -34,8 +34,8 @@ Use this priority order:
 1. Current source code, `GastroApp.csproj`, configuration, and repository structure.
 2. Current documents under `Docs/Architecture/`, when that directory exists.
 3. This `AGENTS.md`.
-4. Current repository design/product documents.
-5. Historical implementation notes such as `CAMBIOS_IMPLEMENTADOS.md` and `NUEVAS_FUNCIONALIDADES.md`.
+4. Current repository design/product documents, including `IMPLEMENTED_FEATURES.md` and `IMPLEMENTED_CHANGES.md`.
+5. Historical repository notes, when present.
 6. External notes, uploaded copies, plans, walkthroughs, or prior conversations.
 
 When documentation conflicts with current code, current code wins unless the task is explicitly to change the code to match an approved specification.
@@ -325,7 +325,7 @@ Create or update architecture documentation when a change establishes or materia
 
 Documentation should describe the implemented architecture, not an aspirational design unless clearly labeled as proposed.
 
-Historical files such as `CAMBIOS_IMPLEMENTADOS.md` and `NUEVAS_FUNCIONALIDADES.md` may contain stale information. Do not use them as the primary source for current behavior.
+`IMPLEMENTED_FEATURES.md` and `IMPLEMENTED_CHANGES.md` summarize the current repository state, but they remain secondary to the source code and may lag behind implementation. Do not use them as the primary source for current behavior.
 
 ---
 
