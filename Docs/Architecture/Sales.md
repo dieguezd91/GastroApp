@@ -1,4 +1,4 @@
-# Sales, discounts, line notes and checkout persistence
+# Sales, discounts, payments, line notes and checkout persistence
 
 ## Ownership and line semantics
 
@@ -30,11 +30,24 @@ Quantity changes and removals also check the candidate discount bases before mut
 
 Rejected edits retain the prior cart and sale discount, give Spanish feedback in an accessible alert region, and recreate only discount/quantity editors with `@key` to restore their displayed values. Notes and catalog filters are not recreated or reset; there is no page reload. The summary separately identifies line gross/discount/final subtotal and sale post-line subtotal/discount/final total.
 
+## Payment semantics and POS selection
+
+`Sale` owns a `List<SalePayment>` initialized to an empty collection. Each `SalePayment` persists a `PaymentMethod` and decimal `Amount`. Supported enum values are `Cash = 0`, `DebitCard = 1`, `CreditCard = 2`, `Transfer = 3`, `MercadoPago = 4`, and `Other = 5`.
+
+- A new sale with positive `Sale.Total` requires exactly one non-null payment, a defined method, and a positive amount exactly equal to that derived final total after all discounts. There is no tolerance or extra rounding.
+- A new sale with total zero requires an empty payment collection, including a sale reduced to zero by a 100% discount. Explicitly null payment collections are invalid.
+- `SaleService.ValidateSale()` enforces these rules without mutation, after discount validation and before eligibility/stock checks. `Add()` repeats validation before notes normalization, ID allocation, sale insertion, stock deduction, or saving. Invalid payment data cannot reach those mutations through `Add()`.
+- The POS starts with no selected method. For positive totals it requires explicit selection of **Efectivo**, **Tarjeta de débito**, **Tarjeta de crédito**, **Transferencia**, **Mercado Pago**, or **Otro**, and displays the selection beside the final total. Attempting checkout without selection gives Spanish feedback and retains the cart.
+- At checkout the POS creates a candidate sale with one payment using the model's exact final total; there is no amount editor. It retains the cart and selection on validation failure, and generates a fresh amount on the next attempt, so cart/discount edits cannot leave a stale payment amount.
+- At zero total the POS displays that no payment is required and generates no payment, regardless of any earlier selection. Selection remains local to the component, is ignored while total is zero, and resets when the cart is cleared or checkout succeeds. Filters remain unchanged.
+
+The collection leaves room for future mixed payments but this implementation rejects multiple payments. It adds no manual amounts, change, partial/mixed payments, fees, refunds, cancellation, or external payment processing. Cash register and summary calculations remain based on all sale totals; they are not split or filtered by method.
+
 ## Checkout ordering and persistence
 
 `SaleService.Add()` performs these steps in order:
 
-1. Run `ValidateSale()`: reject an empty sale or invalid line, validate each line discount against its gross subtotal, validate the sale discount against the sum of final line subtotals, then delegate eligibility and recipe stock checks to `ValidateStock()`. Failure throws `InvalidOperationException` before normalizing notes, assigning ID/date, registering the sale, deducting stock, or requesting a save.
+1. Run `ValidateSale()`: reject an empty sale or invalid line, validate each line discount against its gross subtotal, validate the sale discount against the sum of final line subtotals, validate the payment collection against the final total, then delegate eligibility and recipe stock checks to `ValidateStock()`. Failure throws `InvalidOperationException` before normalizing notes, assigning ID/date, registering the sale, deducting stock, or requesting a save.
 2. Normalize all line notes: whitespace-only, empty, or missing notes become `null`; other notes use `Trim()`.
 3. Allocate the sale ID, set the current date/time, and add the sale to `DataStorageService.Sales`.
 4. Run the existing recipe stock deduction. Recipes are matched by line product name; ingredient quantities are multiplied by line quantity and converted through `UnitConverter`. Missing recipes/ingredients and incompatible conversions retain their existing skip behavior. Deduction is skipped if the stock services are not wired.
@@ -48,4 +61,6 @@ Rejected edits retain the prior cart and sale discount, give Spanish feedback in
 
 Line and sale discount type/value are saved and restored with their owning objects. With the existing serializer options, enum types are numeric and values are JSON decimals. Legacy JSON omitting discount fields loads with model defaults `None`/`0`, preserving undiscounted totals; no migration or root data-file rewrite is needed. Read-only gross/subtotal/discount/total properties are serialized as derived amounts, but deserialization recomputes them from price, quantity, and discount fields instead of trusting stored totals.
 
-This remains prototype-level persistence, not a transaction or a durable-write acknowledgment. `SaveToFile()` catches and logs write errors rather than propagating them to checkout. A normal return does not guarantee disk persistence. Intermediate ingredient saves can contain partially deducted stock; there is no rollback, locking, or multi-instance consistency. `Add()` stores the supplied sale reference, and exposed storage collections remain mutable. Discounts affect monetary totals only, not quantities or ingredient consumption. This contract adds no payments, modifiers, cancellation, kitchen workflow, or authentication changes.
+Payments are serialized inside each sale and restored by the existing `System.Text.Json` sale deserialization. Methods use numeric enum values and amounts retain decimal precision. Historical JSON that omits `Payments` loads with the model's empty collection and keeps its existing totals; no inferred payment, migration, or root data-file rewrite is required. Loading does not apply new checkout validation to historical sales, even when their positive totals have no payment. Passing such a sale to `Add()` as a new checkout requires a valid payment.
+
+This remains prototype-level persistence, not a transaction or a durable-write acknowledgment. `SaveToFile()` catches and logs write errors rather than propagating them to checkout. A normal return does not guarantee disk persistence. Intermediate ingredient saves can contain partially deducted stock; there is no rollback, locking, or multi-instance consistency. `Add()` stores the supplied sale reference, and exposed storage collections remain mutable. Discounts affect monetary totals only, not quantities or ingredient consumption. Payments record the checkout method and amount only; they do not change stock, totals, or authentication. This contract adds no modifiers, cancellation, or kitchen workflow.

@@ -7,11 +7,29 @@ public enum DiscountType
     Fixed = 2
 }
 
+public enum PaymentMethod
+{
+    Cash = 0,
+    DebitCard = 1,
+    CreditCard = 2,
+    Transfer = 3,
+    MercadoPago = 4,
+    Other = 5
+}
+
+public class SalePayment
+{
+    public PaymentMethod PaymentMethod { get; set; }
+    public decimal Amount { get; set; }
+}
+
 public class Sale
 {
     public int Id { get; set; }
     public DateTime Date { get; set; } = DateTime.Now;
     public List<SaleItem> Items { get; set; } = new();
+    // Las ventas históricas sin Payments conservan una colección vacía.
+    public List<SalePayment> Payments { get; set; } = new();
 
     public DiscountType DiscountType { get; set; } = DiscountType.None;
     public decimal DiscountValue { get; set; } = 0m;

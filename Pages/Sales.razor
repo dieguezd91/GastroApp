@@ -169,6 +169,26 @@
                         <div>Subtotal tras descuentos de línea: $@currentSale.Subtotal</div>
                         <div>Descuento de venta: $@currentSale.DiscountAmount</div>
                         <h2>Total final: $@currentSale.Total</h2>
+                        @if (currentSale.Total > 0m)
+                        {
+                            <div class="form-group">
+                                <label for="sale-payment-method">Medio de pago (obligatorio)</label>
+                                <select id="sale-payment-method" class="form-control"
+                                        aria-describedby="sale-payment-help" @bind="selectedPaymentMethod">
+                                    <option value="">Seleccioná un medio de pago</option>
+                                    @foreach (var method in Enum.GetValues<PaymentMethod>())
+                                    {
+                                        <option value="@method">@PaymentMethodLabel(method)</option>
+                                    }
+                                </select>
+                                <small id="sale-payment-help">Se cobra el total final exacto, sin ingresar un importe.</small>
+                            </div>
+                            <div>Medio de pago: @(selectedPaymentMethod.HasValue ? PaymentMethodLabel(selectedPaymentMethod.Value) : "Sin seleccionar")</div>
+                        }
+                        else
+                        {
+                            <div>Total cero: no requiere medio de pago ni registra un pago.</div>
+                        }
                     </div>
 
                     <button class="btn btn-success btn-large" @onclick="CompleteSale">
@@ -191,6 +211,7 @@
     private string categoryFilter = string.Empty;
     private string nameSearch = string.Empty;
     private Sale currentSale = new();
+    private PaymentMethod? selectedPaymentMethod;
     private string stockError = string.Empty;
     private string quantityError = string.Empty;
     private int quantityEditVersion;
@@ -416,9 +437,21 @@
         quantityError = string.Empty;
     }
 
+    private static string PaymentMethodLabel(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Efectivo",
+        PaymentMethod.DebitCard => "Tarjeta de débito",
+        PaymentMethod.CreditCard => "Tarjeta de crédito",
+        PaymentMethod.Transfer => "Transferencia",
+        PaymentMethod.MercadoPago => "Mercado Pago",
+        PaymentMethod.Other => "Otro",
+        _ => "Medio inválido"
+    };
+
     private void ClearCart()
     {
         currentSale = new Sale();
+        selectedPaymentMethod = null;
         stockError = string.Empty;
         quantityError = string.Empty;
         discountError = string.Empty;
@@ -428,8 +461,31 @@
     {
         if (!currentSale.Items.Any()) return;
 
-        // Validar descuentos, elegibilidad y stock antes de registrar la venta.
-        var (isValid, errorMessage) = SaleService.ValidateSale(currentSale);
+        var total = currentSale.Total;
+        if (total > 0m && !selectedPaymentMethod.HasValue)
+        {
+            stockError = "Seleccioná un medio de pago para completar la venta.";
+            return;
+        }
+
+        // Crear el pago al cobrar, sin dejar importes obsoletos en el carrito si falla la validación.
+        var checkoutSale = new Sale
+        {
+            Items = currentSale.Items,
+            DiscountType = currentSale.DiscountType,
+            DiscountValue = currentSale.DiscountValue
+        };
+        if (total > 0m)
+        {
+            checkoutSale.Payments.Add(new SalePayment
+            {
+                PaymentMethod = selectedPaymentMethod!.Value,
+                Amount = total
+            });
+        }
+
+        // Validar descuentos, pago, elegibilidad y stock antes de registrar la venta.
+        var (isValid, errorMessage) = SaleService.ValidateSale(checkoutSale);
 
         if (!isValid)
         {
@@ -440,7 +496,7 @@
         // Venta validada; Add vuelve a validar antes de cualquier mutación.
         try
         {
-            SaleService.Add(currentSale);
+            SaleService.Add(checkoutSale);
         }
         catch (InvalidOperationException ex)
         {
@@ -448,10 +504,7 @@
             return;
         }
 
-        stockError = string.Empty;
-        quantityError = string.Empty;
-        discountError = string.Empty;
-        currentSale = new Sale();
+        ClearCart();
     }
 
     private void GoToCash()

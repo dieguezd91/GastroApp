@@ -103,13 +103,14 @@ Authenticated users can:
 - remove items;
 - clear the cart;
 - review line gross, discount and final subtotals, then the sale's post-line subtotal, discount and final total;
-- complete a sale when the cash register is open.
+- explicitly select **Efectivo**, **Tarjeta de débito**, **Tarjeta de crédito**, **Transferencia**, **Mercado Pago**, or **Otro** for a positive-total sale and review the selected method at checkout;
+- complete a sale when the cash register is open; a zero-total sale requires no payment method.
 
 Search and category filters affect only the displayed catalog, never the cart. The detailed projection, editing, and refresh contract is documented in [ProductCatalog.md](Docs/Architecture/ProductCatalog.md#point-of-sale-boundary).
 
-Checkout rejects empty carts, invalid line or sale discounts, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name. Sale discounts apply after line discounts; percentage arithmetic uses decimal without a new currency-rounding policy. Quantity changes or removals that invalidate a fixed discount are rejected until the discount is adjusted.
+Checkout rejects empty carts, invalid line or sale discounts, invalid payments, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name. Positive totals require exactly one valid-method positive payment equal to the final total; zero totals require no payments. The POS generates that exact payment at checkout without a manual amount editor and resets selection after success or clearing the cart. Sale discounts apply after line discounts; percentage arithmetic uses decimal without a new currency-rounding policy. Quantity changes or removals that invalidate a fixed discount are rejected until the discount is adjusted.
 
-When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. The notes, discount semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
+When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. Each sale also persists its payment collection with method and decimal amount. Historical JSON missing payments loads with an empty collection without changing totals or inventing payments; new checkout validation does not run during loading. There is no change, partial/mixed payment, fee, refund, or external payment processing functionality, and cash register/summary calculations remain unchanged. The notes, discount and payment semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
 
 ## Cash Register
 

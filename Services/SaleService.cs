@@ -77,7 +77,36 @@ public class SaleService
         if (!saleValidation.IsValid)
             return saleValidation;
 
+        var paymentValidation = ValidatePayments(sale);
+        if (!paymentValidation.IsValid)
+            return paymentValidation;
+
         return ValidateStock(sale.Items);
+    }
+
+    private static (bool IsValid, string ErrorMessage) ValidatePayments(Sale sale)
+    {
+        if (sale.Payments == null)
+            return (false, "La colección de pagos de la venta es inválida.");
+
+        if (sale.Total == 0m)
+        {
+            return sale.Payments.Count == 0
+                ? (true, string.Empty)
+                : (false, "Una venta con total cero no debe contener pagos.");
+        }
+
+        if (sale.Payments.Count != 1)
+            return (false, "La venta debe contener exactamente un pago por el total final.");
+
+        var payment = sale.Payments[0];
+        if (payment == null || !Enum.IsDefined(typeof(PaymentMethod), payment.PaymentMethod))
+            return (false, "El medio de pago de la venta es inválido.");
+
+        if (payment.Amount <= 0m || payment.Amount != sale.Total)
+            return (false, "El importe del pago debe ser positivo e igual al total final de la venta.");
+
+        return (true, string.Empty);
     }
 
     // Compartido por checkout y los candidatos de edición del POS, sin mutar estado.
