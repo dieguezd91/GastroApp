@@ -174,15 +174,35 @@
                             <div class="form-group">
                                 <label for="sale-payment-method">Medio de pago (obligatorio)</label>
                                 <select id="sale-payment-method" class="form-control"
-                                        aria-describedby="sale-payment-help" @bind="selectedPaymentMethod">
+                                        aria-describedby="sale-payment-help" value="@selectedPaymentMethod" @onchange="EditPaymentMethod">
                                     <option value="">Seleccioná un medio de pago</option>
                                     @foreach (var method in Enum.GetValues<PaymentMethod>())
                                     {
                                         <option value="@method">@PaymentMethodLabel(method)</option>
                                     }
                                 </select>
-                                <small id="sale-payment-help">Se cobra el total final exacto, sin ingresar un importe.</small>
+                                <small id="sale-payment-help">El pago se aplica al total final. En efectivo, ingresá el importe entregado.</small>
                             </div>
+                            @if (selectedPaymentMethod == PaymentMethod.Cash)
+                            {
+                                <div class="form-group">
+                                    <label for="sale-cash-received">Efectivo recibido (obligatorio)</label>
+                                    <input id="sale-cash-received" type="text" inputmode="decimal" class="form-control"
+                                           value="@cashReceivedInput" @oninput="EditCashReceived"
+                                           aria-describedby="sale-cash-help sale-cash-error" />
+                                    <small id="sale-cash-help">Usá «@CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator» como separador decimal, sin separador de miles.</small>
+                                    <div id="sale-cash-error" role="alert" aria-live="polite">
+                                        @if (!string.IsNullOrEmpty(CashTenderError))
+                                        {
+                                            <span class="text-danger">@CashTenderError</span>
+                                        }
+                                    </div>
+                                </div>
+                                @if (TryGetCashReceived(out var received) && received >= currentSale.Total)
+                                {
+                                    <div>Vuelto: $@(received - currentSale.Total)</div>
+                                }
+                            }
                             <div>Medio de pago: @(selectedPaymentMethod.HasValue ? PaymentMethodLabel(selectedPaymentMethod.Value) : "Sin seleccionar")</div>
                         }
                         else
@@ -212,6 +232,7 @@
     private string nameSearch = string.Empty;
     private Sale currentSale = new();
     private PaymentMethod? selectedPaymentMethod;
+    private string cashReceivedInput = string.Empty;
     private string stockError = string.Empty;
     private string quantityError = string.Empty;
     private int quantityEditVersion;
@@ -448,10 +469,50 @@
         _ => "Medio inválido"
     };
 
+    private void EditPaymentMethod(ChangeEventArgs e)
+    {
+        selectedPaymentMethod = Enum.TryParse<PaymentMethod>(e.Value?.ToString(), out var method)
+            && Enum.IsDefined(typeof(PaymentMethod), method) ? method : null;
+        // No conservar efectivo al cambiar de medio (ni reutilizarlo al volver).
+        cashReceivedInput = string.Empty;
+        stockError = string.Empty;
+    }
+
+    private void EditCashReceived(ChangeEventArgs e)
+    {
+        // Guardar el texto actual, incluso si es inválido: nunca reutilizar el último valor válido.
+        cashReceivedInput = e.Value?.ToString() ?? string.Empty;
+        stockError = string.Empty;
+    }
+
+    private bool TryGetCashReceived(out decimal received)
+    {
+        const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
+            | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
+        return decimal.TryParse(cashReceivedInput, styles, CultureInfo.CurrentCulture, out received);
+    }
+
+    private string CashTenderError
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(cashReceivedInput))
+                return "Ingresá el efectivo recibido para completar la venta.";
+            if (!TryGetCashReceived(out var received))
+                return "El efectivo recibido debe ser un número decimal válido, sin separador de miles.";
+            if (received < 0m)
+                return "El efectivo recibido no puede ser negativo.";
+            if (received < currentSale.Total)
+                return "El efectivo recibido debe ser igual o mayor al total final.";
+            return string.Empty;
+        }
+    }
+
     private void ClearCart()
     {
         currentSale = new Sale();
         selectedPaymentMethod = null;
+        cashReceivedInput = string.Empty;
         stockError = string.Empty;
         quantityError = string.Empty;
         discountError = string.Empty;
@@ -468,6 +529,12 @@
             return;
         }
 
+        if (total > 0m && selectedPaymentMethod == PaymentMethod.Cash && CashTenderError != string.Empty)
+        {
+            stockError = CashTenderError;
+            return;
+        }
+
         // Crear el pago al cobrar, sin dejar importes obsoletos en el carrito si falla la validación.
         var checkoutSale = new Sale
         {
@@ -480,7 +547,9 @@
             checkoutSale.Payments.Add(new SalePayment
             {
                 PaymentMethod = selectedPaymentMethod!.Value,
-                Amount = total
+                Amount = total,
+                ReceivedAmount = selectedPaymentMethod == PaymentMethod.Cash && TryGetCashReceived(out var received)
+                    ? received : null
             });
         }
 

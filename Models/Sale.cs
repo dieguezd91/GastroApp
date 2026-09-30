@@ -20,7 +20,12 @@ public enum PaymentMethod
 public class SalePayment
 {
     public PaymentMethod PaymentMethod { get; set; }
+    // Importe aplicado a la venta; el efectivo entregado puede ser mayor.
     public decimal Amount { get; set; }
+    public decimal? ReceivedAmount { get; set; }
+    // Los pagos históricos o inválidos nunca muestran un vuelto ficticio.
+    public decimal Change => PaymentMethod == PaymentMethod.Cash && Amount > 0m
+        && ReceivedAmount >= Amount ? ReceivedAmount.Value - Amount : 0m;
 }
 
 public class Sale

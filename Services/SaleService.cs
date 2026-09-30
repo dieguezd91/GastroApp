@@ -106,6 +106,16 @@ public class SaleService
         if (payment.Amount <= 0m || payment.Amount != sale.Total)
             return (false, "El importe del pago debe ser positivo e igual al total final de la venta.");
 
+        if (payment.PaymentMethod == PaymentMethod.Cash)
+        {
+            if (!payment.ReceivedAmount.HasValue || payment.ReceivedAmount.Value < payment.Amount)
+                return (false, "El efectivo recibido debe ser igual o mayor al total final de la venta.");
+        }
+        else if (payment.ReceivedAmount.HasValue)
+        {
+            return (false, "El efectivo recibido sólo corresponde a pagos en efectivo.");
+        }
+
         return (true, string.Empty);
     }
 
