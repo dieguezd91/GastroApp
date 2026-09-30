@@ -171,47 +171,53 @@
                         <h2>Total final: $@currentSale.Total</h2>
                         @if (currentSale.Total > 0m)
                         {
-                            <div class="form-group">
-                                <label for="sale-payment-method">Medio de pago (obligatorio)</label>
-                                <select id="sale-payment-method" class="form-control"
-                                        aria-describedby="sale-payment-help" value="@selectedPaymentMethod" @onchange="EditPaymentMethod">
-                                    <option value="">Seleccioná un medio de pago</option>
-                                    @foreach (var method in Enum.GetValues<PaymentMethod>())
+                            <p id="sale-payment-help">Distribuí el total entre medios distintos. Usá «@CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator» como separador decimal, sin separador de miles.</p>
+                            @foreach (var allocation in allocations)
+                            {
+                                <div class="form-group" @key="allocation">
+                                    <label for="@($"sale-payment-amount-{allocation.Method}")">@PaymentMethodLabel(allocation.Method): importe aplicado</label>
+                                    <input id="@($"sale-payment-amount-{allocation.Method}")" type="text" inputmode="decimal" class="form-control"
+                                           value="@allocation.AmountInput" @oninput="e => EditPaymentAmount(allocation, e)"
+                                           aria-describedby="sale-payment-help sale-payment-error" />
+                                    @if (allocation.Method == PaymentMethod.Cash)
                                     {
-                                        <option value="@method">@PaymentMethodLabel(method)</option>
+                                        <label for="sale-cash-received">Efectivo recibido (obligatorio)</label>
+                                        <input id="sale-cash-received" type="text" inputmode="decimal" class="form-control"
+                                               value="@allocation.TenderInput" @oninput="e => EditCashReceived(allocation, e)"
+                                               aria-describedby="sale-payment-help sale-payment-error" />
+                                        @if (!allocation.InvalidTender && allocation.ReceivedAmount >= allocation.Amount)
+                                        {
+                                            <div>Vuelto: $@(allocation.ReceivedAmount.Value - allocation.Amount)</div>
+                                        }
                                     }
-                                </select>
-                                <small id="sale-payment-help">El pago se aplica al total final. En efectivo, ingresá el importe entregado.</small>
-                            </div>
-                            @if (selectedPaymentMethod == PaymentMethod.Cash)
+                                    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => RemovePayment(allocation)">
+                                        Quitar @PaymentMethodLabel(allocation.Method)
+                                    </button>
+                                </div>
+                            }
+                            @if (AvailableMethods.Any())
                             {
                                 <div class="form-group">
-                                    <label for="sale-cash-received">Efectivo recibido (obligatorio)</label>
-                                    <input id="sale-cash-received" type="text" inputmode="decimal" class="form-control"
-                                           value="@cashReceivedInput" @oninput="EditCashReceived"
-                                           aria-describedby="sale-cash-help sale-cash-error" />
-                                    <small id="sale-cash-help">Usá «@CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator» como separador decimal, sin separador de miles.</small>
-                                    <div id="sale-cash-error" role="alert" aria-live="polite">
-                                        @if (!string.IsNullOrEmpty(CashTenderError))
+                                    <label for="sale-payment-method">Agregar medio de pago</label>
+                                    <select id="sale-payment-method" class="form-control" @bind="addPaymentMethod">
+                                        @foreach (var method in AvailableMethods)
                                         {
-                                            <span class="text-danger">@CashTenderError</span>
+                                            <option value="@method">@PaymentMethodLabel(method)</option>
                                         }
-                                    </div>
+                                    </select>
+                                    <button type="button" class="btn btn-secondary" disabled="@(Remaining <= 0m)" @onclick="AddPayment">Agregar pago</button>
                                 </div>
-                                @if (TryGetCashReceived(out var received) && received >= currentSale.Total)
-                                {
-                                    <div>Vuelto: $@(received - currentSale.Total)</div>
-                                }
                             }
-                            <div>Medio de pago: @(selectedPaymentMethod.HasValue ? PaymentMethodLabel(selectedPaymentMethod.Value) : "Sin seleccionar")</div>
+                            <div>Asignado: $@Assigned / Total: $@currentSale.Total / Restante: $@Remaining</div>
+                            <div id="sale-payment-error" role="alert" aria-live="polite" class="text-danger">@PaymentError</div>
                         }
                         else
                         {
-                            <div>Total cero: no requiere medio de pago ni registra un pago.</div>
+                            <div>Total cero: no requiere pagos ni registra un pago.</div>
                         }
                     </div>
 
-                    <button class="btn btn-success btn-large" @onclick="CompleteSale">
+                    <button class="btn btn-success btn-large" disabled="@(!CanCheckout)" @onclick="CompleteSale">
                         ✅ Cobrar
                     </button>
                     <button class="btn btn-secondary" @onclick="ClearCart">Limpiar</button>
@@ -231,8 +237,46 @@
     private string categoryFilter = string.Empty;
     private string nameSearch = string.Empty;
     private Sale currentSale = new();
-    private PaymentMethod? selectedPaymentMethod;
-    private string cashReceivedInput = string.Empty;
+    private readonly List<PaymentAllocation> allocations = new();
+    private PaymentMethod addPaymentMethod = PaymentMethod.Cash;
+
+    private sealed class PaymentAllocation
+    {
+        public PaymentMethod Method { get; init; }
+        public decimal Amount { get; set; }
+        public string AmountInput { get; set; } = string.Empty;
+        public bool InvalidAmount { get; set; }
+        public decimal? ReceivedAmount { get; set; }
+        public string TenderInput { get; set; } = string.Empty;
+        public bool InvalidTender { get; set; }
+    }
+
+    private IEnumerable<PaymentMethod> AvailableMethods => Enum.GetValues<PaymentMethod>()
+        .Where(method => allocations.All(a => a.Method != method));
+
+    private decimal Assigned
+    {
+        get
+        {
+            try { return allocations.Aggregate(0m, (sum, a) => checked(sum + a.Amount)); }
+            catch (OverflowException) { return decimal.MaxValue; }
+        }
+    }
+
+    private decimal Remaining => currentSale.Total - Assigned;
+    private bool HasInvalidInput => allocations.Any(a => a.InvalidAmount || a.InvalidTender);
+    private List<SalePayment> CurrentPayments() => currentSale.Total == 0m ? new() : allocations.Select(a => new SalePayment
+    {
+        PaymentMethod = a.Method,
+        Amount = a.Amount,
+        ReceivedAmount = a.Method == PaymentMethod.Cash ? a.ReceivedAmount : null
+    }).ToList();
+
+    private string PaymentError => currentSale.Total == 0m ? string.Empty
+        : HasInvalidInput ? "Corregí los importes y el efectivo recibido antes de cobrar."
+        : GastroApp.Services.SaleService.ValidatePayments(CurrentPayments(), currentSale.Total).ErrorMessage;
+    private bool CanCheckout => currentSale.Items.Count > 0 && PaymentError == string.Empty
+        && GastroApp.Services.SaleService.ValidatePayments(CurrentPayments(), currentSale.Total).IsValid;
     private string stockError = string.Empty;
     private string quantityError = string.Empty;
     private int quantityEditVersion;
@@ -281,6 +325,7 @@
                 Price = product.Price,
                 Quantity = 1
             });
+            RefreshPaymentsForTotal();
         }
     }
 
@@ -298,6 +343,7 @@
         if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
 
         item.Quantity++;
+        RefreshPaymentsForTotal();
         stockError = string.Empty;
         quantityError = string.Empty;
     }
@@ -316,6 +362,7 @@
         if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
 
         item.Quantity--;
+        RefreshPaymentsForTotal();
         stockError = string.Empty;
         quantityError = string.Empty;
     }
@@ -336,6 +383,7 @@
         if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
 
         item.Quantity = quantity;
+        RefreshPaymentsForTotal();
         stockError = string.Empty;
         quantityError = string.Empty;
     }
@@ -438,6 +486,7 @@
         }
 
         discountEditVersion++;
+        RefreshPaymentsForTotal();
         stockError = string.Empty;
         quantityError = string.Empty;
     }
@@ -454,6 +503,7 @@
         if (!CanApplyCartChange(item, null, currentSale.DiscountType, currentSale.DiscountValue)) return;
 
         currentSale.Items.Remove(item);
+        RefreshPaymentsForTotal();
         stockError = string.Empty;
         quantityError = string.Empty;
     }
@@ -469,50 +519,82 @@
         _ => "Medio inválido"
     };
 
-    private void EditPaymentMethod(ChangeEventArgs e)
-    {
-        selectedPaymentMethod = Enum.TryParse<PaymentMethod>(e.Value?.ToString(), out var method)
-            && Enum.IsDefined(typeof(PaymentMethod), method) ? method : null;
-        // No conservar efectivo al cambiar de medio (ni reutilizarlo al volver).
-        cashReceivedInput = string.Empty;
-        stockError = string.Empty;
-    }
-
-    private void EditCashReceived(ChangeEventArgs e)
-    {
-        // Guardar el texto actual, incluso si es inválido: nunca reutilizar el último valor válido.
-        cashReceivedInput = e.Value?.ToString() ?? string.Empty;
-        stockError = string.Empty;
-    }
-
-    private bool TryGetCashReceived(out decimal received)
+    private static bool TryParseAmount(string? input, out decimal amount)
     {
         const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
             | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
-        return decimal.TryParse(cashReceivedInput, styles, CultureInfo.CurrentCulture, out received);
+        amount = 0m;
+        return !string.IsNullOrWhiteSpace(input)
+            && decimal.TryParse(input, styles, CultureInfo.CurrentCulture, out amount);
     }
 
-    private string CashTenderError
+    private void AddPayment()
     {
-        get
+        if (Remaining <= 0m || !AvailableMethods.Contains(addPaymentMethod)) return;
+        var amount = Remaining;
+        allocations.Add(new PaymentAllocation
         {
-            if (string.IsNullOrWhiteSpace(cashReceivedInput))
-                return "Ingresá el efectivo recibido para completar la venta.";
-            if (!TryGetCashReceived(out var received))
-                return "El efectivo recibido debe ser un número decimal válido, sin separador de miles.";
-            if (received < 0m)
-                return "El efectivo recibido no puede ser negativo.";
-            if (received < currentSale.Total)
-                return "El efectivo recibido debe ser igual o mayor al total final.";
-            return string.Empty;
-        }
+            Method = addPaymentMethod,
+            Amount = amount,
+            AmountInput = amount.ToString(CultureInfo.CurrentCulture),
+            InvalidTender = addPaymentMethod == PaymentMethod.Cash
+        });
+        addPaymentMethod = AvailableMethods.FirstOrDefault();
+        stockError = string.Empty;
+    }
+
+    private void RemovePayment(PaymentAllocation allocation)
+    {
+        allocations.Remove(allocation);
+        addPaymentMethod = allocation.Method;
+        stockError = string.Empty;
+    }
+
+    private void EditPaymentAmount(PaymentAllocation allocation, ChangeEventArgs e)
+    {
+        if (!allocations.Contains(allocation)) return;
+        allocation.AmountInput = e.Value?.ToString() ?? string.Empty;
+        allocation.InvalidAmount = !TryParseAmount(allocation.AmountInput, out var amount)
+            || amount <= 0m || amount > currentSale.Total;
+        if (!allocation.InvalidAmount)
+            allocation.Amount = amount;
+        // Un cambio de importe puede invalidar el efectivo previamente aceptado.
+        if (allocation.Method == PaymentMethod.Cash)
+            UpdateTender(allocation);
+        stockError = string.Empty;
+    }
+
+    private void EditCashReceived(PaymentAllocation allocation, ChangeEventArgs e)
+    {
+        if (!allocations.Contains(allocation)) return;
+        allocation.TenderInput = e.Value?.ToString() ?? string.Empty;
+        UpdateTender(allocation);
+        stockError = string.Empty;
+    }
+
+    private static void UpdateTender(PaymentAllocation allocation)
+    {
+        allocation.InvalidTender = !TryParseAmount(allocation.TenderInput, out var received)
+            || received < allocation.Amount;
+        if (!allocation.InvalidTender)
+            allocation.ReceivedAmount = received;
+    }
+
+    private void RefreshPaymentsForTotal()
+    {
+        // Un total cero nunca conserva pagos locales; otros cambios se revalidan contra el total actual.
+        if (currentSale.Total == 0m)
+            allocations.Clear();
+        else
+            foreach (var allocation in allocations.Where(a => a.Method == PaymentMethod.Cash))
+                UpdateTender(allocation);
     }
 
     private void ClearCart()
     {
         currentSale = new Sale();
-        selectedPaymentMethod = null;
-        cashReceivedInput = string.Empty;
+        allocations.Clear();
+        addPaymentMethod = PaymentMethod.Cash;
         stockError = string.Empty;
         quantityError = string.Empty;
         discountError = string.Empty;
@@ -522,36 +604,21 @@
     {
         if (!currentSale.Items.Any()) return;
 
-        var total = currentSale.Total;
-        if (total > 0m && !selectedPaymentMethod.HasValue)
+        RefreshPaymentsForTotal();
+        if (!CanCheckout)
         {
-            stockError = "Seleccioná un medio de pago para completar la venta.";
+            stockError = PaymentError;
             return;
         }
 
-        if (total > 0m && selectedPaymentMethod == PaymentMethod.Cash && CashTenderError != string.Empty)
-        {
-            stockError = CashTenderError;
-            return;
-        }
-
-        // Crear el pago al cobrar, sin dejar importes obsoletos en el carrito si falla la validación.
+        // Crear pagos nuevos desde las asignaciones aceptadas, nunca desde texto inválido.
         var checkoutSale = new Sale
         {
             Items = currentSale.Items,
             DiscountType = currentSale.DiscountType,
             DiscountValue = currentSale.DiscountValue
         };
-        if (total > 0m)
-        {
-            checkoutSale.Payments.Add(new SalePayment
-            {
-                PaymentMethod = selectedPaymentMethod!.Value,
-                Amount = total,
-                ReceivedAmount = selectedPaymentMethod == PaymentMethod.Cash && TryGetCashReceived(out var received)
-                    ? received : null
-            });
-        }
+        checkoutSale.Payments = CurrentPayments();
 
         // Validar descuentos, pago, elegibilidad y stock antes de registrar la venta.
         var (isValid, errorMessage) = SaleService.ValidateSale(checkoutSale);

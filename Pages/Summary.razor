@@ -45,6 +45,36 @@
         }
     </div>
 
+    <section aria-label="Cancelar venta de hoy">
+        <h2>Cancelar venta de hoy</h2>
+        @if (todaySales.Count == 0)
+        {
+            <p>No hay ventas completadas hoy.</p>
+        }
+        else
+        {
+            <label for="sale-to-cancel">Venta completada</label>
+            <select id="sale-to-cancel" class="form-control" @bind="selectedSaleId">
+                <option value="0">Seleccione una venta</option>
+                @foreach (var sale in todaySales)
+                {
+                    <option value="@sale.Id">#@sale.Id — @sale.Date.ToString("HH:mm") — $@sale.Total</option>
+                }
+            </select>
+            <label for="cancellation-reason">Motivo de cancelación</label>
+            <textarea id="cancellation-reason" class="form-control" @bind="cancellationReason"></textarea>
+            <button class="btn btn-danger" @onclick="CancelSelectedSale">Cancelar venta</button>
+        }
+        @if (!string.IsNullOrEmpty(cancellationError))
+        {
+            <p role="alert">@cancellationError</p>
+        }
+        @if (!string.IsNullOrEmpty(cancellationSuccess))
+        {
+            <p role="status">@cancellationSuccess</p>
+        }
+    </section>
+
     <div class="summary-actions">
         <button class="btn btn-primary" @onclick="GoHome">Volver al Inicio</button>
     </div>
@@ -56,6 +86,11 @@
     private string topProduct = "Ninguno";
     private int topProductQty;
     private CashRegister? cashRegister;
+    private List<Sale> todaySales = new();
+    private int selectedSaleId;
+    private string? cancellationReason;
+    private string? cancellationError;
+    private string? cancellationSuccess;
 
     protected override async Task OnInitializedAsync()
     {
@@ -71,15 +106,57 @@
             return;
         }
 
+        RefreshSummary();
+        await Task.CompletedTask;
+    }
+
+    private void RefreshSummary()
+    {
+        todaySales = SaleService.GetToday();
         totalSales = SaleService.GetTodayTotal();
         salesCount = SaleService.GetTodayCount();
-
         var top = SaleService.GetTopProduct();
         topProduct = top.Name;
         topProductQty = top.Quantity;
-
         cashRegister = CashService.GetCurrent();
-        await Task.CompletedTask;
+    }
+
+    private void CancelSelectedSale()
+    {
+        cancellationError = null;
+        cancellationSuccess = null;
+        // AuthService is singleton: check its current state again on every action.
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized", true);
+            return;
+        }
+        if (selectedSaleId == 0 || !SaleService.GetToday().Any(s => s.Id == selectedSaleId))
+        {
+            cancellationError = "Seleccione una venta completada de hoy.";
+            return;
+        }
+        try
+        {
+            SaleService.Cancel(selectedSaleId, cancellationReason, AuthService.CurrentUser);
+            cancellationSuccess = "Venta cancelada; stock restaurado.";
+            selectedSaleId = 0;
+            cancellationReason = null;
+            RefreshSummary();
+        }
+        catch (InvalidOperationException ex)
+        {
+            cancellationError = ex.Message;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            cancellationError = ex.Message;
+        }
     }
 
     private void GoHome()

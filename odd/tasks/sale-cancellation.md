@@ -1,0 +1,28 @@
+# Sale cancellation — Block 1 / Task 8
+
+## Objective
+Non-destructive cancellation with exact original stock restoration, persisted audit fields and Admin-only daily Summary flow. Preserve prior uncommitted Task 7 mixed payments and tender changes.
+
+## Scope and acceptance
+SaleStatus: Completed=0, Cancelled=1. Persist Status, CancellationReason, CancelledAt, CancelledByUserId, CancelledByUsername. Legacy status defaults Completed. Persist snapshot of successful actual ingredient deductions (IDs, stock/base-unit quantities and captured units) and an explicit reliability marker: legacy false; new reliable empty snapshots true. Never reconstruct from recipes. Prevalidate all cancellation inputs/snapshot entries/ingredients/units/overflow before restoring, then mark cancellation and save. Reject repeated cancellation. Keep all items/payments/discounts/notes. Exclude cancelled sales from today's active totals/count/top product. Minimal Admin Summary selection/reason/action/feedback.
+No refunds, reversals, cash movements, full history, ledger, DB or transactional redesign. Frozen closed DailySummary records and cash reconciliation are not updated; document limit. Existing singleton AuthService user isolation is a known pre-existing limit; no auth lifetime redesign.
+
+## Tasks and routing
+- [x] SC-1: Implement persisted status/audit/snapshot and authoritative exact restoration/cancellation plus completed-only daily aggregates. Delegated writer: multiple shared files and stock/persistence boundary.
+- [x] SC-2: Minimal Admin daily Summary cancellation and needed Sales/feature documentation. Same single writer, no concurrent writes.
+- [x] SC-3: Build and isolated service/component/JSON functional checks; independent verification and final spot check. Delegated verifier: command execution and high-consequence stock handling.
+
+## Configuration
+ODD delegated direct; no SDD. RDD off (session). TDD disabled for this work (no enabling config or repository runner detected); ordinary checks, no RED/GREEN claims. Commands: dotnet build; git diff --check; isolated temporary harness and runtime smoke, never root data.json. No dependencies/framework upgrades. No commits/publishing without explicit request. Forecast ~350–500 authored lines for coherent stock audit and UI; no PR requested, retain clear code rather than compress to budget. Engram mirror pending: callable memory tools unavailable.
+
+## Verification checklist
+Legacy Completed defaults; successful exact consumption and reliable empty snapshots; cancellation restores once; edited recipe irrelevant; repeated/missing reason/missing user/no-snapshot rejects; invalid data causes no sale/stock mutation; persisted cancelled items/payments/audit; completed-only daily aggregates; mixed payments/cash change/discounts/notes preserved. Missing ingredients, unit changes, malformed snapshot and overflow fail before restoration where possible. No browser coverage claims without executed browser checks.
+
+## Progress
+Read AGENTS.md, current worktree and Sales architecture first. Prior Task 7 dirty files preserved: Services/SaleService.cs, Pages/Sales.razor, Docs/Architecture/Sales.md, IMPLEMENTED_FEATURES.md and odd/tasks/mixed-payments.md. Scout mapped actual stock in Ingredient.Unit, successful TryRemoveStock calls and existing per-ingredient saves; current recipe must never be restoration source. SC-1, SC-2 and SC-3 complete after corrected implementation independently verified. Writer build and diff check passed; isolated cancellation harness passed; runtime started in isolated cwd and stopped by timeout. Writer did not check browser or Summary handlers; independent verification later exercised Summary handlers directly, not browser rendering. Native assessment unassessable due to untracked files; returned high-risk independent verifier plan. Commit identities: none authorized.
+
+## Next step
+Implementation complete; no commits/publishing authorized. Browser-rendered validation remains unperformed. Independent verifier previously passed 36 writer checks, 59 Task 7 checks and 32 extra snapshot/Summary checks, but found supplied Employee role matching stored Admin identity accepted. Narrow fix now requires supplied Admin role and matching stored role; existing auth identity/isolation limitation unchanged. Corrected behavior now independently tested: supplied Employee rejected without stock/status/audit/JSON changes; legitimate Admin cancellation still restores and persists correctly. Initial temporary harness compilation failures were corrected. Fix writer isolated-output build initially encountered generated-attribute duplication; excluded generated directories and passed; final normal builds passed with zero errors and two net7.0 end-of-support warnings.
+
+## Final verification
+Independent final reruns in fresh isolated directories: cancellation harness 36 PASS checks; prior Task 7 regression harness 59 passed / 0 failed; extra snapshot and Summary handler harness 36 passed / 0 failed. Fixtures and logs retained under OS temporary directory gastro-reverify-EQ8DmV. Build passed before checks and again as parent-directed final spot check; git diff --check clean. Root data.json hash unchanged: 1f889a39fd89da611defdaf014025da5febb8180450f4b18956099abebf63b01. Runtime startup verified using DOTNET_ROLL_FORWARD=Major because .NET 7 runtime absent, process stopped by timeout. No browser rendering/concurrent sessions/durable-write failure testing claimed. Existing per-ingredient intermediate writes and singleton-auth session isolation remain documented out-of-scope limits. Engram mirror pending: no callable tools.

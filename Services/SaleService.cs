@@ -30,7 +30,7 @@ public class SaleService
     {
         var today = DateTime.Today;
         return _storage.Sales
-            .Where(s => s.Date.Date == today)
+            .Where(s => s.Date.Date == today && s.Status == SaleStatus.Completed)
             .ToList();
     }
 
@@ -45,6 +45,9 @@ public class SaleService
             item.Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim();
         }
 
+        // The checkout owns the snapshot; no caller-provided deductions are trusted.
+        sale.StockConsumption = new();
+        sale.IsStockConsumptionReliable = false;
         sale.Id = _storage.GetNextSaleId();
         sale.Date = DateTime.Now;
         _storage.Sales.Add(sale);
@@ -56,10 +59,84 @@ public class SaleService
         _storage.SaveToFile();
     }
 
+    // Validate the entire restoration before changing any ingredient or audit state.
+    public void Cancel(int saleId, string? reason, User? cancellingUser)
+    {
+        var sale = _storage.Sales.FirstOrDefault(s => s.Id == saleId)
+            ?? throw new InvalidOperationException("La venta no existe.");
+        if (sale.Status != SaleStatus.Completed)
+            throw new InvalidOperationException("La venta ya no está completada.");
+        var trimmedReason = reason?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedReason))
+            throw new InvalidOperationException("Debe indicar un motivo de cancelación.");
+
+        if (cancellingUser == null || cancellingUser.Role != UserRole.Admin)
+            throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
+
+        var user = _storage.Users.FirstOrDefault(u => u.Id == cancellingUser.Id);
+        if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username)
+            || user.Username != cancellingUser.Username || user.Role != UserRole.Admin
+            || user.Role != cancellingUser.Role)
+            throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
+
+        if (!sale.IsStockConsumptionReliable || sale.StockConsumption == null)
+            throw new InvalidOperationException("La venta no tiene un registro confiable de stock consumido.");
+
+        var additions = new Dictionary<int, (Ingredient Ingredient, decimal Quantity)>();
+        foreach (var entry in sale.StockConsumption)
+        {
+            if (entry == null || entry.IngredientId <= 0 || entry.Quantity <= 0m
+                || string.IsNullOrWhiteSpace(entry.Unit))
+                throw new InvalidOperationException("El registro de stock consumido es inválido.");
+
+            var ingredient = _storage.Ingredients.FirstOrDefault(i => i.Id == entry.IngredientId);
+            if (ingredient == null || ingredient.Unit != entry.Unit)
+                throw new InvalidOperationException("El ingrediente ya no existe o cambió de unidad.");
+
+            try
+            {
+                var previous = additions.TryGetValue(entry.IngredientId, out var aggregate)
+                    ? aggregate.Quantity : 0m;
+                additions[entry.IngredientId] = (ingredient, checked(previous + entry.Quantity));
+            }
+            catch (OverflowException)
+            {
+                throw new InvalidOperationException("El stock a restaurar supera el límite permitido.");
+            }
+        }
+
+        foreach (var addition in additions.Values)
+        {
+            try
+            {
+                _ = checked(addition.Ingredient.CurrentStock + addition.Quantity);
+            }
+            catch (OverflowException)
+            {
+                throw new InvalidOperationException("El stock a restaurar supera el límite permitido.");
+            }
+        }
+
+        foreach (var addition in additions.Values)
+            addition.Ingredient.CurrentStock += addition.Quantity;
+
+        sale.Status = SaleStatus.Cancelled;
+        sale.CancellationReason = trimmedReason;
+        sale.CancelledAt = DateTime.Now;
+        sale.CancelledByUserId = user.Id;
+        sale.CancelledByUsername = user.Username;
+        _storage.SaveToFile();
+    }
+
     public (bool IsValid, string ErrorMessage) ValidateSale(Sale sale)
     {
         if (sale == null || sale.Items == null || sale.Items.Count == 0)
             return (false, "La venta debe contener al menos un producto.");
+        if (sale.Status != SaleStatus.Completed || sale.CancellationReason != null
+            || sale.CancelledAt != null || sale.CancelledByUserId != null
+            || sale.CancelledByUsername != null || sale.IsStockConsumptionReliable
+            || sale.StockConsumption == null || sale.StockConsumption.Count != 0)
+            return (false, "Una venta nueva no puede contener datos de cancelación o consumo de stock.");
 
         foreach (var item in sale.Items)
         {
@@ -77,46 +154,59 @@ public class SaleService
         if (!saleValidation.IsValid)
             return saleValidation;
 
-        var paymentValidation = ValidatePayments(sale);
+        var paymentValidation = ValidatePayments(sale.Payments, sale.Total);
         if (!paymentValidation.IsValid)
             return paymentValidation;
 
         return ValidateStock(sale.Items);
     }
 
-    private static (bool IsValid, string ErrorMessage) ValidatePayments(Sale sale)
+    // La misma regla se usa para el estado provisional del POS y para Add(), sin mutaciones.
+    public static (bool IsValid, string ErrorMessage) ValidatePayments(List<SalePayment>? payments, decimal total)
     {
-        if (sale.Payments == null)
+        if (payments == null)
             return (false, "La colección de pagos de la venta es inválida.");
 
-        if (sale.Total == 0m)
-        {
-            return sale.Payments.Count == 0
+        if (total == 0m)
+            return payments.Count == 0
                 ? (true, string.Empty)
                 : (false, "Una venta con total cero no debe contener pagos.");
-        }
 
-        if (sale.Payments.Count != 1)
-            return (false, "La venta debe contener exactamente un pago por el total final.");
+        if (total < 0m || payments.Count == 0)
+            return (false, "La venta debe contener pagos por el total final.");
 
-        var payment = sale.Payments[0];
-        if (payment == null || !Enum.IsDefined(typeof(PaymentMethod), payment.PaymentMethod))
-            return (false, "El medio de pago de la venta es inválido.");
-
-        if (payment.Amount <= 0m || payment.Amount != sale.Total)
-            return (false, "El importe del pago debe ser positivo e igual al total final de la venta.");
-
-        if (payment.PaymentMethod == PaymentMethod.Cash)
+        var methods = new HashSet<PaymentMethod>();
+        decimal assigned = 0m;
+        foreach (var payment in payments)
         {
-            if (!payment.ReceivedAmount.HasValue || payment.ReceivedAmount.Value < payment.Amount)
-                return (false, "El efectivo recibido debe ser igual o mayor al total final de la venta.");
-        }
-        else if (payment.ReceivedAmount.HasValue)
-        {
-            return (false, "El efectivo recibido sólo corresponde a pagos en efectivo.");
+            if (payment == null || !Enum.IsDefined(typeof(PaymentMethod), payment.PaymentMethod))
+                return (false, "El medio de pago de la venta es inválido.");
+            if (!methods.Add(payment.PaymentMethod))
+                return (false, "No se puede repetir un medio de pago en la venta.");
+            if (payment.Amount <= 0m)
+                return (false, "Cada importe de pago debe ser positivo.");
+
+            if (payment.PaymentMethod == PaymentMethod.Cash)
+            {
+                if (!payment.ReceivedAmount.HasValue || payment.ReceivedAmount.Value < payment.Amount)
+                    return (false, "El efectivo recibido debe ser igual o mayor al importe aplicado en efectivo.");
+            }
+            else if (payment.ReceivedAmount.HasValue)
+                return (false, "El efectivo recibido sólo corresponde a pagos en efectivo.");
+
+            try
+            {
+                assigned = checked(assigned + payment.Amount);
+            }
+            catch (OverflowException)
+            {
+                return (false, "La suma de pagos supera el importe permitido.");
+            }
         }
 
-        return (true, string.Empty);
+        return assigned == total
+            ? (true, string.Empty)
+            : (false, "La suma de pagos debe ser exactamente igual al total final de la venta.");
     }
 
     // Compartido por checkout y los candidatos de edición del POS, sin mutar estado.
@@ -190,6 +280,8 @@ public class SaleService
                 );
 
                 if (quantityNeeded == null) continue; // Unidades incompatibles
+                if (quantityNeeded <= 0m)
+                    return (false, "La receta contiene una cantidad de ingrediente no positiva.");
 
                 // Verificar si hay stock suficiente
                 if (ingredient.CurrentStock < quantityNeeded.Value)
@@ -204,7 +296,11 @@ public class SaleService
 
     private void DeductStockFromSale(Sale sale)
     {
-        if (_recipeService == null || _ingredientService == null) return;
+        if (_recipeService == null || _ingredientService == null)
+        {
+            sale.IsStockConsumptionReliable = true;
+            return;
+        }
 
         foreach (var item in sale.Items)
         {
@@ -227,10 +323,20 @@ public class SaleService
 
                 if (quantityToDeduct == null) continue; // Unidades incompatibles
 
-                // Descontar stock
-                _ingredientService.TryRemoveStock(recipeIngredient.IngredientId, quantityToDeduct.Value);
+                // TryRemoveStock persists each successful deduction as before. Capture only
+                // those successes, never recipe projections or failed attempts.
+                if (!_ingredientService.TryRemoveStock(recipeIngredient.IngredientId, quantityToDeduct.Value))
+                    throw new InvalidOperationException($"No se pudo descontar stock de {ingredient.Name}.");
+                sale.StockConsumption!.Add(new SaleStockConsumption
+                {
+                    IngredientId = ingredient.Id,
+                    Quantity = quantityToDeduct.Value,
+                    Unit = ingredient.Unit
+                });
             }
         }
+
+        sale.IsStockConsumptionReliable = true;
     }
 
     public decimal GetTodayTotal()

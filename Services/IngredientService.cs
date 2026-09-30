@@ -66,7 +66,7 @@ public class IngredientService
     public bool TryRemoveStock(int ingredientId, decimal quantity)
     {
         var ingredient = GetById(ingredientId);
-        if (ingredient == null || ingredient.CurrentStock < quantity)
+        if (ingredient == null || quantity <= 0m || ingredient.CurrentStock < quantity)
             return false;
 
         ingredient.CurrentStock -= quantity;

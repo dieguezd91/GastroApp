@@ -35,6 +35,14 @@ public class Sale
     public List<SaleItem> Items { get; set; } = new();
     // Las ventas históricas sin Payments conservan una colección vacía.
     public List<SalePayment> Payments { get; set; } = new();
+    // Missing historical fields default to Completed and an unreliable snapshot.
+    public SaleStatus Status { get; set; } = SaleStatus.Completed;
+    public string? CancellationReason { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public int? CancelledByUserId { get; set; }
+    public string? CancelledByUsername { get; set; }
+    public bool IsStockConsumptionReliable { get; set; }
+    public List<SaleStockConsumption>? StockConsumption { get; set; } = new();
 
     public DiscountType DiscountType { get; set; } = DiscountType.None;
     public decimal DiscountValue { get; set; } = 0m;
