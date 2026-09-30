@@ -110,7 +110,7 @@ Search and category filters affect only the displayed catalog, never the cart. T
 
 Checkout rejects empty carts, invalid line or sale discounts, invalid payments, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name. Positive totals require one or more positive payments with distinct defined methods whose sum exactly equals the final total; cash requires received tender at least its allocated amount, while noncash requires null tender. Zero totals require no payments. The POS parses decimal inputs with the current culture and no grouping, retains accepted allocations on invalid raw edits but blocks checkout until corrected, and creates fresh payments from accepted state at checkout. Cart and discount changes revalidate allocations against the current total; zero totals clear them. Sale discounts apply after line discounts; percentage arithmetic uses decimal without a new currency-rounding policy. Quantity changes or removals that invalidate a fixed discount are rejected until the discount is adjusted.
 
-When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. Each sale also persists its payment collection with method, applied decimal amount, and nullable cash received amount; change is derived, not a separate tender applied to the sale. Historical JSON missing payments loads with an empty collection, and old cash payments missing received amount retain null and show zero change without inventing tender; new checkout validation does not run during loading. There are no fees, refunds, or external payment processing; completed-only daily aggregates feed the current cash close, but closed summaries and cash reconciliation are not reversed. The notes, discount and payment semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
+When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. Each sale also persists its payment collection with method, applied decimal amount, and nullable cash received amount; change is derived, not a separate tender applied to the sale. Historical JSON missing payments loads with an empty collection, and old cash payments missing received amount retain null and show zero change without inventing tender; new checkout validation does not run during loading. There are no fees, refunds, or external payment processing; daily sales aggregates remain separate from session cash. Applied cash (not tender or change) creates a movement only after successful stock completion, and closed summaries and cash movements are not reversed. The notes, discount and payment semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
 
 Admins can cancel a selected completed sale from today's Summary with a required reason. Checkout captures only successfully deducted stock quantities, ingredient IDs and units in a reliable snapshot; a new no-ingredient sale has a reliable empty snapshot while legacy sales without a snapshot cannot be restored. Cancellation verifies the current stored Admin, validates all snapshot entries and stock additions before restoring exact stock once, and persists status and user/time/reason audit without changing payments, items, discounts or notes. Cancelled records remain available for audit but are excluded from today's total, count and top product. There are no refunds or retroactive closed DailySummary/cash corrections; singleton authentication remains a prototype isolation limitation.
 
@@ -127,10 +127,10 @@ Admin functionality:
 - open the register with an initial amount;
 - view register state;
 - close the register with a final counted amount;
-- calculate expected cash;
+- view the session's cash inflow and expected drawer balance;
 - calculate the final difference.
 
-Closing the register creates a daily summary entry.
+Sessions have stable IDs, persist at open/close, and reject a second open register. Each checkout requires an open register and links the sale to that session, including zero-total and noncash sales. Only applied cash creates an automatic movement after stock completion. Expected drawer cash is opening amount plus Sale and Income movements minus Expense and Withdrawal movements for that session; no manual movement entry is available yet. Closing the register creates a daily summary entry. See [CashRegisters.md](Docs/Architecture/CashRegisters.md).
 
 ## Daily Summary
 
@@ -299,7 +299,7 @@ Persisted collections include:
 - products (including optional category IDs and availability);
 - product categories;
 - sales;
-- current cash register;
+- canonical cash register sessions, cash movements, and current session ID;
 - daily summaries;
 - users;
 - ingredients;
@@ -310,7 +310,7 @@ Persisted collections include:
 
 The application loads this file at startup and seeds initial data when no products are present.
 
-Legacy JSON without categories loads with an empty category collection and uncategorized products. The category next-ID counter is recovered from saved state and existing category IDs.
+Legacy JSON containing only a current cash register imports that one session without inferring historical sale links or movements. Canonical sessions take precedence when present. Historical sales without register IDs remain unlinked. Legacy JSON without categories loads with an empty category collection and uncategorized products. The category next-ID counter is recovered from saved state and existing category IDs.
 
 Product and category CRUD call `SaveToFile()`. Persistence remains prototype-level, and not every other service mutation currently calls it consistently. Save errors are logged rather than propagated to the UI.
 

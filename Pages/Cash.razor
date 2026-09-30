@@ -2,7 +2,6 @@
 @using GastroApp.Models
 @using GastroApp.Services
 @inject CashRegisterService CashService
-@inject SaleService SaleService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
@@ -37,13 +36,13 @@
             </div>
 
             <div class="info-card">
-                <h4>Ventas de Hoy</h4>
-                <p class="amount success">$@expectedSales</p>
+                <h4>Efectivo ingresado en esta caja</h4>
+                <p class="amount success">$@CashService.GetCashInflow(cashRegister.Id)</p>
             </div>
 
             <div class="info-card">
                 <h4>Esperado en Caja</h4>
-                <p class="amount">$@(cashRegister.InitialAmount + expectedSales)</p>
+                <p class="amount">$@CashService.GetExpectedCash(cashRegister.Id)</p>
             </div>
         </div>
 
@@ -58,7 +57,7 @@
 
             @if (finalAmount > 0)
             {
-                var difference = finalAmount - (cashRegister.InitialAmount + expectedSales);
+                var difference = finalAmount - CashService.GetExpectedCash(cashRegister.Id);
                 <div class="difference @(difference >= 0 ? "positive" : "negative")">
                     Diferencia: @(difference >= 0 ? "+" : "")$@difference
                 </div>
@@ -69,13 +68,17 @@
             </button>
         </div>
     }
+    @if (!string.IsNullOrEmpty(cashError))
+    {
+        <p role="alert">@cashError</p>
+    }
 </div>
 
 @code {
     private CashRegister? cashRegister;
     private decimal initialAmount;
     private decimal finalAmount;
-    private decimal expectedSales => SaleService.GetTodayTotal();
+    private string? cashError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -97,18 +100,24 @@
 
     private void OpenCash()
     {
-        if (initialAmount < 0) return;
-
-        CashService.Open(initialAmount);
-        cashRegister = CashService.GetCurrent();
-        initialAmount = 0;
+        cashError = null;
+        try
+        {
+            CashService.Open(initialAmount);
+            cashRegister = CashService.GetCurrent();
+            initialAmount = 0;
+        }
+        catch (InvalidOperationException ex) { cashError = ex.Message; }
     }
 
     private void CloseCash()
     {
-        if (finalAmount < 0) return;
-
-        var summary = CashService.Close(finalAmount);
-        Navigation.NavigateTo("/summary");
+        cashError = null;
+        try
+        {
+            CashService.Close(finalAmount);
+            Navigation.NavigateTo("/summary");
+        }
+        catch (InvalidOperationException ex) { cashError = ex.Message; }
     }
 }

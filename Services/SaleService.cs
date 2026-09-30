@@ -40,6 +40,17 @@ public class SaleService
         if (!isValid)
             throw new InvalidOperationException(errorMessage);
 
+        _storage.EnsureSaleCapacity();
+        var registerId = _storage.CurrentCashRegister!.Id;
+        var cashAmount = sale.Payments.Where(p => p.PaymentMethod == PaymentMethod.Cash)
+            .Sum(p => p.Amount);
+        if (cashAmount > 0m)
+        {
+            _storage.EnsureCashMovementCapacity();
+            try { _ = checked(_storage.GetExpectedCash(registerId) + cashAmount); }
+            catch (OverflowException) { throw new InvalidOperationException("El saldo de caja supera el límite permitido."); }
+        }
+
         foreach (var item in sale.Items)
         {
             item.Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim();
@@ -49,11 +60,20 @@ public class SaleService
         sale.StockConsumption = new();
         sale.IsStockConsumptionReliable = false;
         sale.Id = _storage.GetNextSaleId();
+        sale.CashRegisterId = registerId;
         sale.Date = DateTime.Now;
         _storage.Sales.Add(sale);
 
         // Descontar stock por cada producto vendido
         DeductStockFromSale(sale);
+
+        if (cashAmount > 0m)
+            _storage.CashMovements.Add(new CashMovement
+            {
+                Id = _storage.GetNextCashMovementId(), CashRegisterId = registerId,
+                Date = sale.Date, Type = CashMovementType.Sale,
+                Amount = cashAmount, SaleId = sale.Id
+            });
 
         // Guardar el estado final incluso si ningún producto tiene receta.
         _storage.SaveToFile();
@@ -130,6 +150,8 @@ public class SaleService
 
     public (bool IsValid, string ErrorMessage) ValidateSale(Sale sale)
     {
+        if (_storage.CurrentCashRegister?.IsOpen != true)
+            return (false, "Debe haber una caja abierta para vender.");
         if (sale == null || sale.Items == null || sale.Items.Count == 0)
             return (false, "La venta debe contener al menos un producto.");
         if (sale.Status != SaleStatus.Completed || sale.CancellationReason != null

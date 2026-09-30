@@ -37,7 +37,9 @@
                 <div class="summary-icon">💵</div>
                 <h3>Estado de Caja</h3>
                 <p class="summary-detail">Inicial: $@cashRegister.InitialAmount</p>
-                <p class="summary-detail">Final: $@cashRegister.FinalAmount</p>
+                <p class="summary-detail">Esperado en caja: $@cashRegister.ExpectedAmount</p>
+                <p class="summary-detail">Efectivo contado: $@cashRegister.FinalAmount</p>
+                <p class="summary-detail">Diferencia del cierre (no ventas):</p>
                 <p class="summary-value @(cashRegister.Difference >= 0 ? "positive" : "negative")">
                     @(cashRegister.Difference >= 0 ? "+" : "")$@cashRegister.Difference
                 </p>

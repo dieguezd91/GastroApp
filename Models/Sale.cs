@@ -31,6 +31,8 @@ public class SalePayment
 public class Sale
 {
     public int Id { get; set; }
+    // Historical sales without a register link remain unlinked.
+    public int? CashRegisterId { get; set; }
     public DateTime Date { get; set; } = DateTime.Now;
     public List<SaleItem> Items { get; set; } = new();
     // Las ventas históricas sin Payments conservan una colección vacía.

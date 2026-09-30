@@ -2,6 +2,7 @@ namespace GastroApp.Models;
 
 public class CashRegister
 {
+    public int Id { get; set; }
     public DateTime OpenDate { get; set; }
     public decimal InitialAmount { get; set; }
     public decimal FinalAmount { get; set; }

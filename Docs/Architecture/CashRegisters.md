@@ -1,0 +1,17 @@
+# Cash register sessions and movements
+
+A register is a persisted session, not today's sales total. `DataStorageService.CashRegisters` owns the canonical objects; `CurrentCashRegisterId` selects the open or latest closed session and `CurrentCashRegister` resolves that same object. `CashRegisterService` opens and closes sessions, computes the drawer view through storage, and records the existing daily sales summary separately through `SaleService`.
+
+## Drawer calculation
+
+For a given register ID, expected cash is `InitialAmount + Sale + Income - Expense - Withdrawal`, using only movements with that register ID. `GetCashInflow` sums Sale and Income movements for that register. A movement has a positive amount and a stable ID/type (`Sale=0`, `Income=1`, `Expense=2`, `Withdrawal=3`), timestamp, register ID and optional sale/user/username/reason. Only successful cash checkouts create movements now; there is no manual movement API or UI. Cash applied to the sale, not received tender or change, is counted. Noncash and zero-total checkouts still link to the open register but do not add a movement.
+
+Open and close reject negative amounts, and opening refuses a second open session. Both request an immediate JSON save. Close stores the expected amount and final count on the same session and appends a `DailySummary` whose completed-today sales total/count/top product are **not** drawer inputs. Summary shows the stored closed-session difference separately from current completed sales. Cancelling a sale changes today's completed metrics and restores its exact stock snapshot, but never removes or reverses the original money movement or recomputes a past closed summary. Refunds and reconciliation are out of scope.
+
+## JSON compatibility and identity
+
+JSON persists `CashRegisters`, `CashMovements`, `CurrentCashRegisterId`, `NextCashRegisterId`, and `NextCashMovementId`. Loading recovers register, movement, and sale next counters from the larger of their saved values and the maximum existing IDs plus one. Duplicate/nonpositive IDs, exhausted IDs/counters, null session or movement entries, invalid movement references or types, multiple open sessions, or a pointer to a nonexistent session fail loading clearly instead of silently reassigning linked identities. A legacy file containing only `CurrentCashRegister` imports that one session (ID 1 when the old field had no ID or ID 0); negative IDs fail and positive IDs are preserved. Canonical sessions with ID 0 are never repaired. If `CashRegisters` is present, it wins even when empty; the old object is never imported again. Missing pointer selects the open session or the latest closed session by opening date (then ID). Repeated loads replace these collections rather than duplicating imported sessions. Historical sales without `CashRegisterId` remain null: no link, tender, or movement is guessed from old sales or old expected-cash values.
+
+## Limits
+
+This is single-process, prototype-level JSON persistence. `SaveToFile` logs write failures rather than guaranteeing disk durability; ingredient deductions may perform intermediate saves before the final sale/snapshot/movement save. Failed deduction leaves earlier writes and an unreliable sale snapshot, but no cash movement. Mutable shared collections have no locking or transaction rollback; callers must not infer durable atomic checkout from a normal return. Future manual movements or refund policy require separate validation and UI work.
