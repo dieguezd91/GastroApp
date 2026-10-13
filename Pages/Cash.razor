@@ -82,24 +82,30 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
+        if (!EnsureAdmin()) return;
 
         cashRegister = CashService.GetCurrent();
         await Task.CompletedTask;
     }
 
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
+    }
+
     private void OpenCash()
     {
+        if (!EnsureAdmin()) return;
         cashError = null;
         try
         {
@@ -112,6 +118,7 @@
 
     private void CloseCash()
     {
+        if (!EnsureAdmin()) return;
         cashError = null;
         try
         {

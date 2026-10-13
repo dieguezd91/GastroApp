@@ -70,13 +70,13 @@
     {
         if (!AuthService.IsAuthenticated)
         {
-            Navigation.NavigateTo("/login", true);
+            Navigation.NavigateTo("/login");
             return false;
         }
 
         if (!AuthService.IsInRole(UserRole.Admin))
         {
-            Navigation.NavigateTo("/unauthorized", true);
+            Navigation.NavigateTo("/unauthorized");
             return false;
         }
 

@@ -179,20 +179,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
+        if (!EnsureAdmin()) return;
 
         LoadIngredients();
         await Task.CompletedTask;
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
     }
 
     private void LoadIngredients()
@@ -202,12 +207,14 @@
 
     private void ShowAddForm()
     {
+        if (!EnsureAdmin()) return;
         editingIngredient = new Ingredient();
         showForm = true;
     }
 
     private void EditIngredient(Ingredient ingredient)
     {
+        if (!EnsureAdmin()) return;
         editingIngredient = new Ingredient
         {
             Id = ingredient.Id,
@@ -222,12 +229,14 @@
 
     private void ShowStockAdjust(Ingredient ingredient)
     {
+        if (!EnsureAdmin()) return;
         adjustingStockId = ingredient.Id;
         newStockValue = ingredient.CurrentStock;
     }
 
     private void SaveStockAdjustment(int ingredientId)
     {
+        if (!EnsureAdmin()) return;
         IngredientService.AdjustStock(ingredientId, newStockValue);
         LoadIngredients();
         CancelStockAdjustment();
@@ -241,6 +250,7 @@
 
     private void SaveIngredient()
     {
+        if (!EnsureAdmin()) return;
         if (string.IsNullOrWhiteSpace(editingIngredient.Name))
             return;
 
@@ -259,6 +269,7 @@
 
     private void DeleteIngredient(int id)
     {
+        if (!EnsureAdmin()) return;
         IngredientService.Delete(id);
         LoadIngredients();
     }

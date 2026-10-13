@@ -104,20 +104,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
+        if (!EnsureAdmin()) return;
 
         LoadProducts();
         await Task.CompletedTask;
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
     }
 
     private void LoadProducts()
@@ -128,6 +133,7 @@
 
     private void ShowAddForm()
     {
+        if (!EnsureAdmin()) return;
         categories = CategoryService.GetAll();
         errorMessage = string.Empty;
         editingProduct = new Product();
@@ -136,6 +142,7 @@
 
     private void EditProduct(Product product)
     {
+        if (!EnsureAdmin()) return;
         categories = CategoryService.GetAll();
         errorMessage = string.Empty;
         editingProduct = new Product
@@ -152,6 +159,7 @@
 
     private void SaveProduct()
     {
+        if (!EnsureAdmin()) return;
         if (string.IsNullOrWhiteSpace(editingProduct.Name) || editingProduct.Price <= 0)
             return;
 
@@ -179,6 +187,7 @@
 
     private void DeleteProduct(int id)
     {
+        if (!EnsureAdmin()) return;
         ProductService.Delete(id);
         LoadProducts();
     }

@@ -262,20 +262,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
+        if (!EnsureAdmin()) return;
 
         LoadData();
         await Task.CompletedTask;
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
     }
 
     private void LoadData()
@@ -286,6 +291,7 @@
 
     private void ShowAddForm()
     {
+        if (!EnsureAdmin()) return;
         editingRecipe = new Recipe { Yield = 1 };
         showForm = true;
         UpdatePreview();
@@ -293,6 +299,7 @@
 
     private void AddIngredient()
     {
+        if (!EnsureAdmin()) return;
         if (selectedIngredientId == 0 || ingredientQuantity <= 0)
             return;
 
@@ -321,6 +328,7 @@
 
     private void RemoveIngredient(RecipeIngredient item)
     {
+        if (!EnsureAdmin()) return;
         editingRecipe.Ingredients.Remove(item);
         UpdatePreview();
     }
@@ -361,6 +369,7 @@
 
     private void SaveRecipe()
     {
+        if (!EnsureAdmin()) return;
         if (!CanSaveRecipe())
             return;
 
@@ -379,6 +388,7 @@
 
     private void EditRecipe(Recipe recipe)
     {
+        if (!EnsureAdmin()) return;
         // Crear copia profunda para editar
         editingRecipe = new Recipe
         {
@@ -402,6 +412,7 @@
 
     private void RecalculateCost(int recipeId)
     {
+        if (!EnsureAdmin()) return;
         var recipe = RecipeService.GetById(recipeId);
         if (recipe != null)
         {
@@ -413,6 +424,7 @@
 
     private void DeleteRecipe(int id)
     {
+        if (!EnsureAdmin()) return;
         RecipeService.Delete(id);
         LoadData();
     }

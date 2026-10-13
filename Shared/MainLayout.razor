@@ -35,19 +35,27 @@
 </div>
 
 @code {
+    private bool disposed;
+
     protected override void OnInitialized()
     {
-        AuthService.OnAuthStateChanged += StateHasChanged;
+        AuthService.OnAuthStateChanged += HandleAuthStateChanged;
+    }
+
+    private void HandleAuthStateChanged()
+    {
+        if (!disposed) _ = InvokeAsync(() => { if (!disposed) StateHasChanged(); });
     }
 
     public void Dispose()
     {
-        AuthService.OnAuthStateChanged -= StateHasChanged;
+        disposed = true;
+        AuthService.OnAuthStateChanged -= HandleAuthStateChanged;
     }
 
     private void HandleLogout()
     {
         AuthService.Logout();
-        Navigation.NavigateTo("/login", true);
+        Navigation.NavigateTo("/login");
     }
 }

@@ -199,20 +199,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
+        if (!EnsureAdmin()) return;
 
         LoadData();
         await Task.CompletedTask;
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
     }
 
     private void LoadData()
@@ -224,12 +229,14 @@
 
     private void ShowAddForm()
     {
+        if (!EnsureAdmin()) return;
         editingInvoice = new Invoice { Date = DateTime.Now };
         showForm = true;
     }
 
     private void AddItem()
     {
+        if (!EnsureAdmin()) return;
         if (selectedIngredientId == 0 || itemQuantity <= 0 || itemUnitPrice <= 0)
             return;
 
@@ -254,6 +261,7 @@
 
     private void RemoveItem(InvoiceItem item)
     {
+        if (!EnsureAdmin()) return;
         editingInvoice.Items.Remove(item);
     }
 
@@ -264,6 +272,7 @@
 
     private void SaveInvoice()
     {
+        if (!EnsureAdmin()) return;
         if (!CanSaveInvoice())
             return;
 
@@ -274,6 +283,7 @@
 
     private void DeleteInvoice(int id)
     {
+        if (!EnsureAdmin()) return;
         InvoiceService.Delete(id);
         LoadData();
     }

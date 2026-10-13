@@ -124,7 +124,7 @@
         // Si ya está autenticado, redirigir al dashboard
         if (AuthService.IsAuthenticated)
         {
-            Navigation.NavigateTo("/", true);
+            Navigation.NavigateTo("/");
         }
     }
 
@@ -140,7 +140,7 @@
 
         if (AuthService.Login(loginModel.Username, loginModel.Password))
         {
-            Navigation.NavigateTo("/", true);
+            Navigation.NavigateTo("/");
         }
         else
         {

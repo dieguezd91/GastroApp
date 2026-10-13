@@ -31,12 +31,12 @@ This is not a transactional store. Save/load exceptions are caught and logged by
 ## Administration and authentication
 
 - `/product-categories` exposes category creation, listing, renaming, and deletion with Spanish validation feedback from the service.
-- Its initialization and CRUD callbacks check `AuthService`: unauthenticated users redirect to `/login`, and non-admin users redirect to `/unauthorized`, with the same destinations and forced navigation used by `/products`.
+- Its initialization and CRUD callbacks check circuit-scoped `AuthService`: unauthenticated users redirect to `/login`, and non-admin users redirect to `/unauthorized`, without forced reload.
 - The category navigation link appears in the admin-only **PRODUCTOS** section.
-- `/products` retains its existing initialization checks. Its form supports assigning/changing a category or selecting **Sin categoría** to remove the assignment; the list displays the category name or **Sin categoría**. Category choices refresh when loading products or opening a form, and after an invalid assignment error.
+- `/products` checks current Admin permissions at initialization and again before form/CRUD actions. Its form supports assigning/changing a category or selecting **Sin categoría** to remove the assignment; the list displays the category name or **Sin categoría**. Category choices refresh when loading products or opening a form, and after an invalid assignment error.
 - The product form exposes an **Activo (disponible para la venta)** checkbox for creation and editing; new forms start active. The list shows **Activo** or **Inactivo**. Editing copies `IsActive` into the separate form model, and `ProductService.Update()` copies it back before saving.
 
-These are application-level component checks, not ASP.NET authorization policies. `AuthService` remains a singleton with shared current-user state, not isolated per Blazor circuit. This feature does not redesign authentication or add authorization to the catalog services.
+These are application-level component checks, not ASP.NET authorization policies or authorization inside the catalog services. [Authentication.md](Authentication.md) defines circuit-isolated identity, live role/stale-user checks and circuit-preserving navigation; catalog business data remains shared.
 
 ## Point of sale boundary
 

@@ -15,7 +15,8 @@ builder.Services.AddSingleton<ProductCategoryService>();
 builder.Services.AddSingleton<SaleService>();
 builder.Services.AddSingleton<CashRegisterService>();
 builder.Services.AddSingleton<UserService>();
-builder.Services.AddSingleton<AuthService>();
+// Authentication belongs to the Blazor circuit, not the shared business state.
+builder.Services.AddScoped<AuthService>();
 
 // Nuevos servicios para gestión de ingredientes y recetas
 builder.Services.AddSingleton<SupplierService>();

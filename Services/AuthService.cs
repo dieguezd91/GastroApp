@@ -5,7 +5,9 @@ namespace GastroApp.Services;
 public class AuthService
 {
     private readonly UserService _userService;
-    private User? _currentUser;
+    private int? _currentUserId;
+    private string? _loginUsername;
+    private string? _loginPasswordHash;
 
     public event Action? OnAuthStateChanged;
 
@@ -14,32 +16,56 @@ public class AuthService
         _userService = userService;
     }
 
-    public User? CurrentUser => _currentUser;
-    public bool IsAuthenticated => _currentUser != null;
+    public User? CurrentUser
+    {
+        get
+        {
+            if (!_currentUserId.HasValue) return null;
+            var user = _userService.GetById(_currentUserId.Value);
+            if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username)
+                || user.Username != _loginUsername || user.PasswordHash != _loginPasswordHash)
+            {
+                // Lazy invalidation must not notify/re-enter components during rendering.
+                ClearIdentity();
+                return null;
+            }
+            return user;
+        }
+    }
+    public bool IsAuthenticated => CurrentUser != null;
 
     public bool Login(string username, string password)
     {
         var user = _userService.GetByUsername(username);
-        if (user == null)
+        if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username))
             return false;
 
         if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             return false;
 
-        _currentUser = user;
+        _currentUserId = user.Id;
+        _loginUsername = user.Username;
+        _loginPasswordHash = user.PasswordHash;
         OnAuthStateChanged?.Invoke();
         return true;
     }
 
     public void Logout()
     {
-        _currentUser = null;
+        ClearIdentity();
         OnAuthStateChanged?.Invoke();
+    }
+
+    private void ClearIdentity()
+    {
+        _currentUserId = null;
+        _loginUsername = null;
+        _loginPasswordHash = null;
     }
 
     public bool IsInRole(UserRole role)
     {
-        return _currentUser?.Role == role;
+        return CurrentUser?.Role == role;
     }
 
     public void RequireAuth()

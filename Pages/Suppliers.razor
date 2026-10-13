@@ -58,20 +58,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
+        if (!EnsureAdmin()) return;
 
         LoadSuppliers();
         await Task.CompletedTask;
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
     }
 
     private void LoadSuppliers()
@@ -81,12 +86,14 @@
 
     private void ShowAddForm()
     {
+        if (!EnsureAdmin()) return;
         editingSupplier = new Supplier();
         showForm = true;
     }
 
     private void EditSupplier(Supplier supplier)
     {
+        if (!EnsureAdmin()) return;
         editingSupplier = new Supplier
         {
             Id = supplier.Id,
@@ -97,6 +104,7 @@
 
     private void SaveSupplier()
     {
+        if (!EnsureAdmin()) return;
         if (string.IsNullOrWhiteSpace(editingSupplier.Name))
             return;
 
@@ -115,6 +123,7 @@
 
     private void DeleteSupplier(int id)
     {
+        if (!EnsureAdmin()) return;
         SupplierService.Delete(id);
         LoadSuppliers();
     }

@@ -294,7 +294,7 @@
     {
         if (!AuthService.IsAuthenticated)
         {
-            Navigation.NavigateTo("/login", true);
+            Navigation.NavigateTo("/login");
             return;
         }
 
@@ -602,6 +602,11 @@
 
     private void CompleteSale()
     {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
         if (!currentSale.Items.Any()) return;
 
         RefreshPaymentsForTotal();

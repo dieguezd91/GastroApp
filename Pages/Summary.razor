@@ -98,13 +98,13 @@
     {
         if (!AuthService.IsAuthenticated)
         {
-            Navigation.NavigateTo("/login", true);
+            Navigation.NavigateTo("/login");
             return;
         }
 
         if (!AuthService.IsInRole(UserRole.Admin))
         {
-            Navigation.NavigateTo("/unauthorized", true);
+            Navigation.NavigateTo("/unauthorized");
             return;
         }
 
@@ -125,19 +125,20 @@
 
     private void CancelSelectedSale()
     {
+        // Resolve the live circuit actor once for permission and audit attribution.
+        var actor = AuthService.CurrentUser;
+        if (actor == null)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+        if (actor.Role != UserRole.Admin)
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return;
+        }
         cancellationError = null;
         cancellationSuccess = null;
-        // AuthService is singleton: check its current state again on every action.
-        if (!AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/login", true);
-            return;
-        }
-        if (!AuthService.IsInRole(UserRole.Admin))
-        {
-            Navigation.NavigateTo("/unauthorized", true);
-            return;
-        }
         if (selectedSaleId == 0 || !SaleService.GetToday().Any(s => s.Id == selectedSaleId))
         {
             cancellationError = "Seleccione una venta completada de hoy.";
@@ -145,7 +146,7 @@
         }
         try
         {
-            SaleService.Cancel(selectedSaleId, cancellationReason, AuthService.CurrentUser);
+            SaleService.Cancel(selectedSaleId, cancellationReason, actor);
             cancellationSuccess = "Venta cancelada; stock restaurado.";
             selectedSaleId = 0;
             cancellationReason = null;
