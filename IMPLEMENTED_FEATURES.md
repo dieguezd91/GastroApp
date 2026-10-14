@@ -126,15 +126,15 @@ Admin functionality:
 
 - open the register with an initial amount;
 - view register state;
-- close the register with a final counted amount;
+- close the register through a detailed cash count (**Arqueo y cierre de caja**);
 - view the session's cash inflow and expected drawer balance;
 - review **Cobros registrados por medio de pago** for the current open or closed session: six methods (including zero) and registered total, distinct from completed sales and drawer cash;
 - record Income (**Ingreso**), Expense (**Gasto**) or Withdrawal (**Retiro**) with a positive decimal amount and mandatory trimmed reason;
 - review all current-session movements, including automatic sales, with date/type/amount, responsible snapshots, reason and sale reference where present;
 - receive Spanish validation feedback and in-memory registration confirmation with immediate balance/list update, without reloading;
-- calculate the final difference.
+- see the counted total, expected amount and a **Faltante**/**Sobrante**/**Exacto** difference.
 
-Sessions have stable IDs, persist at open/close, and reject a second open register. Each checkout requires an open register and links the sale to that session, including zero-total and noncash sales. Only applied cash creates an automatic movement after stock completion. Expected drawer cash is opening amount plus Sale and Income movements minus Expense and Withdrawal movements for that session. Manual entries require the current open session and a freshly validated circuit Admin actor, revalidated against stored ID/username/password identity and live Admin role. Expense/Withdrawal cannot exceed available cash. Expected-balance overflow, gross Income inflow overflow and exhausted movement IDs are rejected before mutation or ID allocation. The server owns ID/time/session/audit fields and appends once; no editing or deleting existing entries is offered. Listing uses detached read-only collection snapshots and explicit legacy audit fallbacks. Closing the register creates a daily summary entry. See [CashRegisters.md](Docs/Architecture/CashRegisters.md).
+Sessions have stable IDs, persist at open/close, and reject a second open register. Each checkout requires an open register and links the sale to that session, including zero-total and noncash sales. Only applied cash creates an automatic movement after stock completion. Expected drawer cash is opening amount plus Sale and Income movements minus Expense and Withdrawal movements for that session. Manual entries require the current open session and a freshly validated circuit Admin actor, revalidated against stored ID/username/password identity and live Admin role. Expense/Withdrawal cannot exceed available cash. Expected-balance overflow, gross Income inflow overflow and exhausted movement IDs are rejected before mutation or ID allocation. The server owns ID/time/session/audit fields and appends once; no editing or deleting existing entries is offered. Listing uses detached read-only collection snapshots and explicit legacy audit fallbacks. Closing the register creates a daily summary entry. Closing requires a cash count by denomination (positive denominations, non-negative integer quantities, no duplicates, at most 100 lines), an explicit confirmation step, a reason for any nonzero difference and an explicit confirmation of a zero count. The service revalidates the live Admin and rejects the close if movements changed since the review; the stored count records the closing admin and is shown on `/cash`, while registers closed before this feature show no count. See [CashRegisters.md](Docs/Architecture/CashRegisters.md#cash-count-arqueo-and-close).
 
 Registered receipts are a derived, detached read-only cash-service snapshot of payment **Amount** for the exact canonical current session ID, with full decimal precision. Cancelled sales retain their receipts; dates, tender/change, opening funds and manual movements are excluded. Historical unlinked sales produce an explicitly global warning without invented attribution. Invalid selected-session items/discounts or allocations exclude the whole sale with grouped reason/count warnings; valid zero-total sales need no allocations. Missing historical tender is acceptable. Typed completeness states distinguish no session, complete, partial and unavailable; any monetary overflow suppresses every numeric total rather than displaying partial or fabricated zero totals. The Spanish UI refreshes session metadata and receipts on existing renders/navigation/local cash callbacks, without polling or new broadcasts. No derived totals are persisted. See [CashRegisters.md](Docs/Architecture/CashRegisters.md#registered-receipts-by-payment-method).
 
@@ -305,7 +305,7 @@ Persisted collections include:
 - products (including optional category IDs and availability);
 - product categories;
 - sales;
-- canonical cash register sessions, cash movements, and current session ID;
+- canonical cash register sessions, cash movements, cash counts, and current session ID;
 - daily summaries;
 - users;
 - ingredients;

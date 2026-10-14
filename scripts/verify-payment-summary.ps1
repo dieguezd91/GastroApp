@@ -180,7 +180,15 @@ foreach (var list in new object[] { result.Rows, result.Warnings })
 Check(Rows(result).All(r => ((Type)r.GetType()).GetProperties().All(p => p.SetMethod == null)) && query.ReturnType.GetProperties().All(p => p.SetMethod == null), "summary and row properties have no setters");
 var warningType = typeof(Sale).Assembly.GetType("GastroApp.Models.CashPaymentWarning")!;
 Check(warningType.GetProperties().All(p => p.SetMethod == null), "warning values are immutable too");
-cash.Close(cash.GetExpectedCash(firstId));
+DailySummary CloseWith(CashRegisterService service, decimal amount, User actor)
+{
+    var review = service.GetCountReview();
+    return service.Close(new CashCountRequest { Review = review,
+        Lines = amount > 0m ? new[] { new CashCountLineInput(amount, 1) } : Array.Empty<CashCountLineInput>(),
+        Reason = amount != review.ExpectedAmount ? "fixture" : null, Confirmed = true, ZeroCountConfirmed = amount == 0m },
+        new User { Id = actor.Id, Username = actor.Username, PasswordHash = actor.PasswordHash, Role = actor.Role });
+}
+CloseWith(cash, cash.GetExpectedCash(firstId), admin);
 Totals(Summary(), 9.12345m, "current closed session retains receipts");
 var reload = new DataStorageService(); var reloadedCash = new CashRegisterService(reload, new SaleService(reload));
 Check(JsonSerializer.Serialize(query.Invoke(reloadedCash, null)) == JsonSerializer.Serialize((object)Summary()), "save/reload exact summary parity including cancelled receipts");

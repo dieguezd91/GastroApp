@@ -125,14 +125,7 @@ public class CashRegisterService
         if (register?.IsOpen != true)
             throw new InvalidOperationException("Debe haber una caja abierta para registrar movimientos.");
 
-        // Trusted in-process boundary: the component supplies a fresh scoped actor.
-        // Revalidate identity and live role without capturing scoped AuthService here.
-        var user = actor == null ? null : _storage.Users.FirstOrDefault(u => u.Id == actor.Id);
-        if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username)
-            || string.IsNullOrWhiteSpace(user.PasswordHash) || user.Username != actor!.Username
-            || user.PasswordHash != actor.PasswordHash || user.Role != UserRole.Admin
-            || actor.Role != UserRole.Admin)
-            throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
+        var user = RequireLiveAdmin(actor);
 
         try
         {
@@ -160,24 +153,107 @@ public class CashRegisterService
         _storage.SaveToFile();
     }
 
+    // Trusted in-process boundary: the component supplies a fresh scoped actor.
+    // Revalidate identity and live role without capturing scoped AuthService here.
+    private User RequireLiveAdmin(User? actor)
+    {
+        var user = actor == null ? null : _storage.Users.FirstOrDefault(u => u.Id == actor.Id);
+        if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username)
+            || string.IsNullOrWhiteSpace(user.PasswordHash) || user.Username != actor!.Username
+            || user.PasswordHash != actor.PasswordHash || user.Role != UserRole.Admin
+            || actor.Role != UserRole.Admin)
+            throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
+        return user;
+    }
+
     public void Open(decimal initialAmount) => _storage.OpenCashRegister(initialAmount);
 
-    public DailySummary Close(decimal finalAmount)
+    public CashCountReview GetCountReview()
     {
-        if (finalAmount < 0m)
-            throw new InvalidOperationException("El monto final no puede ser negativo.");
-        if (_storage.CurrentCashRegister == null || !_storage.CurrentCashRegister.IsOpen)
+        var register = _storage.CurrentCashRegister;
+        if (register?.IsOpen != true)
             throw new InvalidOperationException("No hay caja abierta");
+        return BuildReview(register);
+    }
+
+    // The expected amount always comes from the session movements, never from the UI.
+    private CashCountReview BuildReview(CashRegister register)
+    {
+        var movements = _storage.CashMovements.Where(m => m.CashRegisterId == register.Id).ToList();
+        try
+        {
+            return new CashCountReview(register.Id, GetExpectedCash(register.Id), movements.Count,
+                movements.Count == 0 ? 0 : movements.Max(m => m.Id));
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidOperationException("El saldo de caja supera el límite permitido.");
+        }
+    }
+
+    // Pure: validates and calculates without touching any state.
+    public CashCountPreview PreviewCount(IEnumerable<CashCountLineInput>? lines, decimal expectedAmount)
+    {
+        try
+        {
+            var built = CashCountCalculator.Build(lines);
+            var counted = CashCountCalculator.Total(built);
+            return new CashCountPreview(built, counted, expectedAmount, checked(counted - expectedAmount));
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidOperationException("El conteo supera el límite permitido.");
+        }
+    }
+
+    public CashCount? GetCount(int registerId) =>
+        _storage.CashCounts.FirstOrDefault(c => c.CashRegisterId == registerId)?.Clone();
+
+    // Every rejection happens before the single mutation block below.
+    public DailySummary Close(CashCountRequest request, User? actor)
+    {
+        if (request == null)
+            throw new InvalidOperationException("Debe indicar el arqueo de caja.");
+        var user = RequireLiveAdmin(actor);
 
         var cashRegister = _storage.CurrentCashRegister;
-        var expected = GetExpectedCash(cashRegister.Id);
+        if (cashRegister == null || !cashRegister.IsOpen)
+            throw new InvalidOperationException("No hay caja abierta");
+        if (request.Review == null || request.Review.RegisterId != cashRegister.Id)
+            throw new InvalidOperationException("El arqueo no corresponde a la caja abierta.");
+        if (_storage.CashCounts.Any(c => c.CashRegisterId == cashRegister.Id))
+            throw new InvalidOperationException("La caja ya tiene un arqueo registrado.");
+
+        var current = BuildReview(cashRegister);
+        if (current != request.Review)
+            throw new CashCountReviewOutdatedException(current);
+
+        var expected = current.ExpectedAmount;
+        var preview = PreviewCount(request.Lines, expected);
+        var reason = request.Reason?.Trim();
+        if (preview.Difference != 0m && string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Debe indicar un motivo para la diferencia.");
+        if (preview.CountedAmount == 0m && !request.ZeroCountConfirmed)
+            throw new InvalidOperationException("Debe confirmar que el conteo de caja es cero.");
+        if (!request.Confirmed)
+            throw new InvalidOperationException("Debe confirmar el arqueo antes de cerrar la caja.");
+
         var topProduct = _saleService.GetTopProduct();
         var totalSales = _saleService.GetTodayTotal();
         var salesCount = _saleService.GetTodayCount();
-        cashRegister.FinalAmount = finalAmount;
+
+        var now = DateTime.Now;
+        cashRegister.FinalAmount = preview.CountedAmount;
         cashRegister.ExpectedAmount = expected;
         cashRegister.IsOpen = false;
-        cashRegister.CloseDate = DateTime.Now;
+        cashRegister.CloseDate = now;
+        _storage.CashCounts.Add(new CashCount
+        {
+            CashRegisterId = cashRegister.Id, CountedAt = now, UserId = user.Id, Username = user.Username,
+            Lines = preview.Lines.Select(l => l.Clone()).ToList(), ExpectedAmount = expected,
+            CountedAmount = preview.CountedAmount, Difference = preview.Difference,
+            Reason = string.IsNullOrWhiteSpace(reason) ? null : reason
+        });
 
         var summary = new DailySummary
         {
@@ -188,7 +264,8 @@ public class CashRegisterService
             TopProductQuantity = topProduct.Quantity,
             InitialCash = cashRegister.InitialAmount,
             FinalCash = cashRegister.FinalAmount,
-            Difference = cashRegister.Difference
+            Difference = cashRegister.Difference,
+            CashRegisterId = cashRegister.Id
         };
 
         _storage.Summaries.Add(summary);

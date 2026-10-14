@@ -10,6 +10,7 @@ public class DataStorageService
     public List<Sale> Sales { get; set; } = new();
     public List<CashRegister> CashRegisters { get; private set; } = new();
     public List<CashMovement> CashMovements { get; private set; } = new();
+    public List<CashCount> CashCounts { get; private set; } = new();
     public int? CurrentCashRegisterId { get; private set; }
     public CashRegister? CurrentCashRegister => CashRegisters.FirstOrDefault(r => r.Id == CurrentCashRegisterId);
     public List<DailySummary> Summaries { get; set; } = new();
@@ -184,6 +185,7 @@ public class DataStorageService
                 Sales,
                 CashRegisters,
                 CashMovements,
+                CashCounts,
                 CurrentCashRegisterId,
                 Summaries,
                 Users,
@@ -234,6 +236,28 @@ public class DataStorageService
         return Math.Max(saved, maximum + 1);
     }
 
+    // Closed registers without a count are historical and valid; a count must mirror its closed register.
+    private static void ValidateCashCounts(List<CashCount> counts, List<CashRegister> registers)
+    {
+        var seen = new HashSet<int>();
+        foreach (var count in counts)
+        {
+            if (count == null)
+                throw new InvalidDataException("CashCounts contiene un arqueo null.");
+            var register = registers.FirstOrDefault(r => r.Id == count.CashRegisterId)
+                ?? throw new InvalidDataException("Arqueo de una caja inexistente.");
+            if (!seen.Add(count.CashRegisterId))
+                throw new InvalidDataException("Hay varios arqueos para la misma caja.");
+            if (register.IsOpen)
+                throw new InvalidDataException("Una caja abierta no puede tener arqueo.");
+            var total = CashCountCalculator.ValidateStored(count.Lines);
+            if (count.CountedAmount != total || count.Difference != checked(count.CountedAmount - count.ExpectedAmount))
+                throw new InvalidDataException("Los totales del arqueo no coinciden con su detalle.");
+            if (register.FinalAmount != count.CountedAmount || register.ExpectedAmount != count.ExpectedAmount)
+                throw new InvalidDataException("El arqueo no coincide con el cierre de su caja.");
+        }
+    }
+
     private void LoadCashState(JsonElement root)
     {
         // A canonical list, even an empty one, takes precedence over the old single object.
@@ -255,6 +279,11 @@ public class DataStorageService
             ? JsonSerializer.Deserialize<List<CashMovement>>(movementsElement.GetRawText())
                 ?? throw new InvalidDataException("CashMovements no puede ser null.")
             : new List<CashMovement>();
+        // A missing property is a legacy file; an explicit null is corruption.
+        var counts = root.TryGetProperty("CashCounts", out var countsElement)
+            ? JsonSerializer.Deserialize<List<CashCount>>(countsElement.GetRawText())
+                ?? throw new InvalidDataException("CashCounts no puede ser null.")
+            : new List<CashCount>();
         if (registers.Any(r => r == null))
             throw new InvalidDataException("CashRegisters contiene una caja null.");
         if (movements.Any(m => m == null))
@@ -281,8 +310,11 @@ public class DataStorageService
         if (registers.Any(r => r.IsOpen && r.Id != current))
             throw new InvalidDataException("La caja abierta no coincide con la caja actual.");
 
+        ValidateCashCounts(counts, registers);
+
         CashRegisters = registers;
         CashMovements = movements;
+        CashCounts = counts;
         CurrentCashRegisterId = current;
         _nextCashRegisterId = nextRegister;
         _nextCashMovementId = nextMovement;

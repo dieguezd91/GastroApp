@@ -10,4 +10,5 @@ public class DailySummary
     public decimal InitialCash { get; set; }
     public decimal FinalCash { get; set; }
     public decimal Difference { get; set; }
+    public int? CashRegisterId { get; set; } // null for summaries created before the cash count
 }

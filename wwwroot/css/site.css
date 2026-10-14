@@ -825,6 +825,38 @@ a:hover {
     color: var(--danger);
 }
 
+.difference.exact {
+    background: var(--gray-100);
+    color: var(--gray-700);
+}
+
+/* Cash count rows */
+.count-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 0.75rem;
+    align-items: end;
+    margin-bottom: 0.5rem;
+}
+
+.count-row-error {
+    grid-column: 1 / -1;
+    color: #991b1b;
+    font-size: 0.875rem;
+    margin-top: -0.5rem;
+}
+
+.count-subtotal {
+    padding: 0.625rem 0;
+    font-weight: 600;
+}
+
+@media (max-width: 640px) {
+    .count-row {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
 /* Alerts */
 .alert {
     padding: 1rem;

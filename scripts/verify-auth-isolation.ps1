@@ -172,7 +172,15 @@ pageType.GetMethod("CancelSelectedSale", flags)!.Invoke(summaryPage, null);
 Check(sale.Status == SaleStatus.Cancelled && sale.CancelledByUserId == a.CurrentUser!.Id && sale.CancelledByUsername == a.CurrentUser.Username && sale.CancellationReason == "fixture", "cancellation uses validated circuit actor");
 Check(cash.GetExpectedCash(sale.CashRegisterId!.Value) == 100m + sale.Total && sales.GetTodayCount() == 0, "cancellation preserves drawer and excludes daily sale");
 try { sales.Cancel(sale.Id, "again", a.CurrentUser); Check(false, "repeat cancellation rejected"); } catch (InvalidOperationException) { Check(true, "repeat cancellation rejected"); }
-var summary = cash.Close(100m + sale.Total);
+DailySummary CloseWith(CashRegisterService service, decimal amount, User actor)
+{
+    var review = service.GetCountReview();
+    return service.Close(new CashCountRequest { Review = review,
+        Lines = amount > 0m ? new[] { new CashCountLineInput(amount, 1) } : Array.Empty<CashCountLineInput>(),
+        Reason = amount != review.ExpectedAmount ? "fixture" : null, Confirmed = true, ZeroCountConfirmed = amount == 0m },
+        new User { Id = actor.Id, Username = actor.Username, PasswordHash = actor.PasswordHash, Role = actor.Role });
+}
+var summary = CloseWith(cash, 100m + sale.Total, a.CurrentUser!);
 Check(!cash.IsOpen() && summary.Difference == 0m, "cash close reconciliation");
 try { sales.Add(Checkout()); Check(false, "closed-cash checkout rejected"); } catch (InvalidOperationException) { Check(true, "closed-cash checkout rejected"); }
 }

@@ -44,6 +44,14 @@ storage.Users = [new User { Id = 10, Username = "fixture-admin", PasswordHash = 
     new User { Id = 12, Username = "fixture-employee", PasswordHash = hash, Role = UserRole.Employee }];
 var admin = storage.Users[0];
 User Copy(User user) => new() { Id = user.Id, Username = user.Username, PasswordHash = user.PasswordHash, Role = user.Role };
+DailySummary CloseWith(CashRegisterService service, decimal amount, User actor)
+{
+    var review = service.GetCountReview();
+    return service.Close(new CashCountRequest { Review = review,
+        Lines = amount > 0m ? new[] { new CashCountLineInput(amount, 1) } : Array.Empty<CashCountLineInput>(),
+        Reason = amount != review.ExpectedAmount ? "fixture" : null, Confirmed = true, ZeroCountConfirmed = amount == 0m },
+        new User { Id = actor.Id, Username = actor.Username, PasswordHash = actor.PasswordHash, Role = actor.Role });
+}
 void Add(CashMovementType type, decimal amount, string? reason, User? actor) => AddTo(cash, type, amount, reason, actor);
 void AddTo(CashRegisterService target, CashMovementType type, decimal amount, string? reason, User? actor)
 {
@@ -112,7 +120,7 @@ Check(projection.Count == 3 && projection.All(m => !storage.CashMovements.Contai
 projection[0].Amount = 999m; projection[0].Reason = "modified";
 Check(JsonSerializer.Serialize(income) == history && Movements()[0].Amount == 20.125m, "mutating snapshot never changes ledger");
 Check(projection is not ICollection<CashMovement> collection || collection.IsReadOnly, "projection collection is read-only");
-var closed = cash.Close(0m);
+var closed = CloseWith(cash, 0m, admin);
 Check(closed.Difference == 0m && Movements().Count == 3, "closed current session can still be read");
 Invalid(CashMovementType.Income, 1m, "test", "closed session");
 cash.Open(1m);
@@ -153,7 +161,7 @@ Check(storage.CashMovements.Count == saleCount + 1 && storage.Sales.All(s => s.C
 sales.Cancel(mixed.Id, "fixture", admin);
 Check(cash.GetExpectedCash(current.Id) == 20m && storage.CashMovements.Count == saleCount + 1 && mixed.Status == SaleStatus.Cancelled, "cancellation never reverses money");
 Add(CashMovementType.Expense, 3m, "gasto", admin);
-var summary = cash.Close(16m);
+var summary = CloseWith(cash, 16m, admin);
 Check(summary.Difference == -1m && current.ExpectedAmount == 17m, "close difference includes manual and automatic movements");
 // Reload preserves nullable legacy fields, attribution and ID recovery.
 var persisted = JsonSerializer.Serialize(storage.CashMovements);
@@ -164,7 +172,7 @@ reloadedCash.Open(0m);
 AddTo(reloadedCash, CashMovementType.Income, 1m, "reload", reload.Users[0]);
 Check(reload.CashMovements.Last().Id == storage.CashMovements.Max(m => m.Id) + 1 && reload.CashMovements.Last().UserId == 10, "save/reload next ID and actor");
 var json = JsonNode.Parse(File.ReadAllText("data.json"))!.AsObject();
-json.Remove("CashRegisters"); json.Remove("CurrentCashRegisterId"); json.Remove("NextCashRegisterId"); json.Remove("NextCashMovementId"); json.Remove("CashMovements");
+json.Remove("CashRegisters"); json.Remove("CurrentCashRegisterId"); json.Remove("NextCashRegisterId"); json.Remove("NextCashMovementId"); json.Remove("CashMovements"); json.Remove("CashCounts");
 json["CurrentCashRegister"] = JsonSerializer.SerializeToNode(new CashRegister { Id = 0, InitialAmount = 4m, IsOpen = true, OpenDate = DateTime.Now });
 File.WriteAllText("data.json", json.ToJsonString());
 var legacy = new DataStorageService();
@@ -206,7 +214,7 @@ if (action != null)
     Check(legacy.CashMovements.Count == count && pageType.GetField("cashError", flags)!.GetValue(blankReasonPage) is string reasonError && reasonError.Length > 0,
         "UI blank reason reports service validation without mutation");
     var closedPage = Page(a, nav);
-    legacyCash.Close(legacyCash.GetExpectedCash(legacy.CurrentCashRegister!.Id));
+    CloseWith(legacyCash, legacyCash.GetExpectedCash(legacy.CurrentCashRegister!.Id), legacy.Users[0]);
     Click(closedPage);
     Check(legacy.CashMovements.Count == count && pageType.GetField("cashError", flags)!.GetValue(closedPage) is string sessionError && sessionError.Length > 0,
         "UI click after session closes reports error without mutation");

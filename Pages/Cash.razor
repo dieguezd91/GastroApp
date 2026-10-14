@@ -20,6 +20,16 @@
         <p>Caja #@cashRegister.Id — @(cashRegister.IsOpen ? "Abierta" : "Cerrada") · Apertura: @cashRegister.OpenDate.ToString("dd/MM/yyyy HH:mm")</p>
     }
 
+    @if (!string.IsNullOrEmpty(closeMessage))
+    {
+        <p role="status">@closeMessage <a href="/summary">Ver resumen del día</a></p>
+    }
+    @if (!string.IsNullOrEmpty(countError) && cashRegister?.IsOpen != true)
+    {
+        @* A confirmation rejected because another circuit closed the session must stay visible. *@
+        <p role="alert">@countError</p>
+    }
+
     @if (cashRegister == null || !cashRegister.IsOpen)
     {
         <div class="form-card">
@@ -83,26 +93,151 @@
             }
         </div>
 
+        var fresh = TryGetFreshReview();
+        var stale = countReview == null || fresh == null || fresh != countReview;
+        var (preview, previewError) = BuildPreview();
+        var activeRows = countRows.Where(r => !IsBlank(r)).ToList();
         <div class="form-card">
-            <h3>Cerrar Caja</h3>
-            <p>Contá el efectivo que tenés y registralo acá</p>
+            <h3>Arqueo y cierre de caja</h3>
+            <p>Contá el efectivo por denominación. Las filas vacías se ignoran y el cierre es definitivo.</p>
+            <p>Esperado en caja (según tu última revisión): <strong>@(countReview == null ? "—" : $"${countReview.ExpectedAmount}")</strong></p>
 
-            <div class="form-group">
-                <label>Monto Final (efectivo en caja)</label>
-                <input type="number" @bind="finalAmount" class="form-control" placeholder="0" step="0.01" />
-            </div>
-
-            @if (finalAmount > 0)
+            @if (stale)
             {
-                var difference = finalAmount - CashService.GetExpectedCash(cashRegister.Id);
-                <div class="difference @(difference >= 0 ? "positive" : "negative")">
-                    Diferencia: @(difference >= 0 ? "+" : "")$@difference
+                <div class="alert alert-warning" role="alert">
+                    <p>@StaleText(fresh)</p>
+                    <button class="btn btn-secondary" @onclick="RefreshCountReview">Actualizar saldo esperado</button>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(countNotice))
+            {
+                <div class="alert alert-warning" role="alert">@countNotice</div>
+            }
+
+            @for (var i = 0; i < countRows.Count; i++)
+            {
+                var row = countRows[i];
+                var number = i + 1;
+                var rowError = ParseRow(row, out _);
+                var activeIndex = activeRows.IndexOf(row);
+                <div class="count-row" @key="row">
+                    <div class="form-group">
+                        <label for="count-denomination-@number">Denominación</label>
+                        <input id="count-denomination-@number" type="text" inputmode="decimal" class="form-control" placeholder="0"
+                               @bind="row.Denomination" @bind:after="ResetConfirmation" />
+                    </div>
+                    <div class="form-group">
+                        <label for="count-quantity-@number">Cantidad</label>
+                        <input id="count-quantity-@number" type="text" inputmode="numeric" class="form-control" placeholder="0"
+                               @bind="row.Quantity" @bind:after="ResetConfirmation" />
+                    </div>
+                    <div class="form-group">
+                        <label>Subtotal</label>
+                        <div class="count-subtotal">@(preview != null && activeIndex >= 0 ? $"${preview.Lines[activeIndex].Subtotal}" : "—")</div>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary btn-small" type="button" @onclick="() => RemoveCountRow(row)">Quitar</button>
+                    </div>
+                    @if (rowError != null)
+                    {
+                        <div class="count-row-error" role="alert">Fila @number: @rowError</div>
+                    }
+                </div>
+            }
+            <button class="btn btn-secondary" type="button" @onclick="AddCountRow">Agregar denominación</button>
+            <small>Denominación mayor que cero, sin separador de miles. Separador decimal: @CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator</small>
+
+            @if (previewError != null)
+            {
+                <p role="alert">@previewError</p>
+            }
+            <div class="cash-info">
+                <div class="info-card">
+                    <h4>Total contado</h4>
+                    <p class="amount">@(preview == null ? "—" : $"${preview.CountedAmount}")</p>
+                </div>
+                <div class="info-card">
+                    <h4>Esperado en caja</h4>
+                    <p class="amount">@(countReview == null ? "—" : $"${countReview.ExpectedAmount}")</p>
+                </div>
+            </div>
+            @if (preview != null)
+            {
+                <div class="difference @DifferenceClass(preview.Difference)">
+                    Diferencia: @DifferenceLabel(preview.Difference) (@(preview.Difference > 0m ? "+" : "")$@preview.Difference)
                 </div>
             }
 
-            <button class="btn btn-danger btn-large" @onclick="CloseCash">
-                🔒 Cerrar Caja
-            </button>
+            <div class="form-group">
+                <label for="count-reason">Motivo de la diferencia (@(preview != null && preview.Difference != 0m ? "obligatorio" : "opcional si el cierre es exacto"))</label>
+                <textarea id="count-reason" class="form-control" rows="2" @bind="countReason" @bind:after="ResetConfirmation"></textarea>
+            </div>
+
+            @if (!string.IsNullOrEmpty(countError))
+            {
+                <p role="alert">@countError</p>
+            }
+            @if (!confirmingClose)
+            {
+                <button class="btn btn-danger btn-large" @onclick="ReviewClose" disabled="@stale">Revisar cierre</button>
+            }
+            else if (preview != null && !stale)
+            {
+                <div class="form-card" role="region" aria-label="Confirmación de cierre">
+                    <h4>Confirmá el cierre</h4>
+                    <p>Total contado: $@preview.CountedAmount</p>
+                    <p>Esperado en caja: $@preview.ExpectedAmount</p>
+                    <p>Diferencia: @DifferenceLabel(preview.Difference) ($@preview.Difference)</p>
+                    <p>Motivo: @(string.IsNullOrWhiteSpace(countReason) ? "Sin motivo (cierre exacto)" : countReason.Trim())</p>
+                    @if (preview.CountedAmount == 0m)
+                    {
+                        <div class="form-group">
+                            <label><input type="checkbox" id="count-zero-confirmed" @bind="zeroConfirmed" /> Confirmo que el efectivo contado es cero</label>
+                        </div>
+                    }
+                    <div class="form-actions">
+                        <button class="btn btn-danger" @onclick="CloseCash" disabled="@(preview.CountedAmount == 0m && !zeroConfirmed)">Confirmar cierre definitivo</button>
+                        <button class="btn btn-secondary" @onclick="ResetConfirmation">Volver a editar</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    @if (cashRegister != null && !cashRegister.IsOpen)
+    {
+        var count = CashService.GetCount(cashRegister.Id);
+        <div class="form-card">
+            @if (count == null)
+            {
+                <h3>Cierre sin arqueo</h3>
+                <p>Esta caja se cerró sin arqueo detallado.</p>
+                <p>Esperado: $@cashRegister.ExpectedAmount</p>
+                <p>Monto final: $@cashRegister.FinalAmount</p>
+                <p>Diferencia: $@cashRegister.Difference</p>
+            }
+            else
+            {
+                <h3>Arqueo registrado</h3>
+                <p>Responsable: @count.Username (ID @count.UserId)</p>
+                <p>Fecha: @count.CountedAt.ToString("dd/MM/yyyy HH:mm")</p>
+                <p>Esperado: $@count.ExpectedAmount</p>
+                <p>Contado: $@count.CountedAmount</p>
+                <div class="difference @DifferenceClass(count.Difference)">
+                    Diferencia: @DifferenceLabel(count.Difference) (@(count.Difference > 0m ? "+" : "")$@count.Difference)
+                </div>
+                <p>Motivo: @(string.IsNullOrWhiteSpace(count.Reason) ? "Sin motivo (cierre exacto)" : count.Reason)</p>
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead><tr><th>Denominación</th><th>Cantidad</th><th>Subtotal</th></tr></thead>
+                        <tbody>
+                            @foreach (var line in count.Lines)
+                            {
+                                <tr><td>$@line.Denomination</td><td>@line.Quantity</td><td>$@line.Subtotal</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         </div>
     }
     <div class="form-card">
@@ -172,8 +307,21 @@
 @code {
     private CashRegister? cashRegister;
     private decimal initialAmount;
-    private decimal finalAmount;
+    private sealed class CountRow
+    {
+        public string Denomination { get; set; } = string.Empty;
+        public string Quantity { get; set; } = string.Empty;
+    }
+
+    private readonly List<CountRow> countRows = new() { new CountRow() };
+    private CashCountReview? countReview; // Snapshot the counter reviewed; refreshed only explicitly.
+    private string? countReason;
+    private bool confirmingClose;
+    private bool zeroConfirmed;
+    private string? countNotice;
+    private string? closeMessage;
     private string? cashError;
+    private string? countError; // Count-flow errors render inside the arqueo card, next to its buttons.
     private CashMovementType movementType = CashMovementType.Income;
     private string movementAmount = string.Empty;
     private string? movementReason;
@@ -245,6 +393,7 @@
         if (!EnsureAdmin()) return;
 
         cashRegister = CashService.GetCurrent();
+        if (cashRegister?.IsOpen == true) countReview = TryGetFreshReview();
         await Task.CompletedTask;
     }
 
@@ -272,19 +421,212 @@
             CashService.Open(initialAmount);
             cashRegister = CashService.GetCurrent();
             initialAmount = 0;
+            closeMessage = null;
+            ResetCountForm();
+            countReview = TryGetFreshReview();
         }
         catch (InvalidOperationException ex) { cashError = ex.Message; }
     }
 
+    private const NumberStyles DecimalStyles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
+        | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
+    private const NumberStyles IntegerStyles = NumberStyles.AllowLeadingSign
+        | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
+
+    private static bool IsBlank(CountRow row) =>
+        string.IsNullOrWhiteSpace(row.Denomination) && string.IsNullOrWhiteSpace(row.Quantity);
+
+    // Raw-text parsing only; value rules (positive denomination, quantity, duplicates) live in the service.
+    private static string? ParseRow(CountRow row, out CashCountLineInput? input)
+    {
+        input = null;
+        if (IsBlank(row)) return null;
+        if (string.IsNullOrWhiteSpace(row.Denomination)) return "Indicá la denominación.";
+        if (string.IsNullOrWhiteSpace(row.Quantity)) return "Indicá la cantidad.";
+        if (!decimal.TryParse(row.Denomination, DecimalStyles, CultureInfo.CurrentCulture, out var denomination))
+            return "La denominación no es un número decimal válido, sin separador de miles.";
+        if (!int.TryParse(row.Quantity, IntegerStyles, CultureInfo.CurrentCulture, out var quantity))
+            return "La cantidad debe ser un número entero.";
+        input = new CashCountLineInput(denomination, quantity);
+        return null;
+    }
+
+    private bool TryBuildLines(out List<CashCountLineInput> lines, out string? error)
+    {
+        lines = new List<CashCountLineInput>();
+        error = null;
+        for (var i = 0; i < countRows.Count; i++)
+        {
+            var rowError = ParseRow(countRows[i], out var input);
+            if (rowError != null)
+            {
+                error = $"Fila {i + 1}: {rowError}";
+                return false;
+            }
+            if (input != null) lines.Add(input);
+        }
+        return true;
+    }
+
+    private (CashCountPreview? Preview, string? Error) BuildPreview()
+    {
+        if (countReview == null) return (null, null);
+        if (!TryBuildLines(out var lines, out _)) return (null, "Corregí las filas marcadas antes de continuar.");
+        try { return (CashService.PreviewCount(lines, countReview.ExpectedAmount), null); }
+        catch (InvalidOperationException ex) { return (null, ex.Message); }
+    }
+
+    private CashCountReview? TryGetFreshReview()
+    {
+        try { return CashService.GetCountReview(); }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    private string StaleText(CashCountReview? fresh) => countReview == null || fresh == null
+        ? "No se pudo verificar el saldo esperado. Actualizá el saldo esperado para continuar."
+        : StaleMessage(countReview, fresh);
+
+    private static string StaleMessage(CashCountReview before, CashCountReview now) =>
+        $"El saldo esperado cambió mientras contabas (antes ${before.ExpectedAmount}, ahora ${now.ExpectedAmount}). Revisá el arqueo nuevamente.";
+
+    private static string DifferenceLabel(decimal difference) =>
+        difference < 0m ? "Faltante" : difference > 0m ? "Sobrante" : "Exacto";
+
+    private static string DifferenceClass(decimal difference) =>
+        difference < 0m ? "negative" : difference > 0m ? "positive" : "exact";
+
+    private void ResetConfirmation()
+    {
+        confirmingClose = false;
+        zeroConfirmed = false;
+    }
+
+    private void ResetCountForm()
+    {
+        countRows.Clear();
+        countRows.Add(new CountRow());
+        countReason = null;
+        countNotice = null;
+        countError = null;
+        ResetConfirmation();
+    }
+
+    private void AddCountRow()
+    {
+        countRows.Add(new CountRow());
+        ResetConfirmation();
+    }
+
+    private void RemoveCountRow(CountRow row)
+    {
+        countRows.Remove(row);
+        if (countRows.Count == 0) countRows.Add(new CountRow());
+        ResetConfirmation();
+    }
+
+    private void RefreshCountReview()
+    {
+        if (!EnsureAdmin()) return;
+        countError = null;
+        countNotice = null;
+        ResetConfirmation();
+        countReview = TryGetFreshReview();
+        if (countReview == null) countError = "No hay caja abierta";
+    }
+
+    // Step one: validate everything the user can fix, then show the confirmation panel.
+    private void ReviewClose()
+    {
+        if (!EnsureAdmin()) return;
+        countError = null;
+        countNotice = null;
+        ResetConfirmation();
+        var actor = AuthService.CurrentUser;
+        if (actor == null || actor.Role != UserRole.Admin)
+        {
+            EnsureAdmin();
+            return;
+        }
+        cashRegister = CashService.GetCurrent();
+        if (cashRegister?.IsOpen != true)
+        {
+            countError = "No hay caja abierta";
+            return;
+        }
+        var fresh = TryGetFreshReview();
+        if (countReview == null || fresh == null || fresh != countReview)
+        {
+            countNotice = StaleText(fresh);
+            return;
+        }
+        if (!TryBuildLines(out var lines, out var rowError))
+        {
+            countError = rowError;
+            return;
+        }
+        try
+        {
+            var preview = CashService.PreviewCount(lines, countReview.ExpectedAmount);
+            if (preview.Difference != 0m && string.IsNullOrWhiteSpace(countReason))
+            {
+                countError = "Debe indicar un motivo para la diferencia.";
+                return;
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            countError = ex.Message;
+            return;
+        }
+        confirmingClose = true;
+    }
+
+    // Step two: the service revalidates actor, session, review, lines, reason and confirmations.
     private void CloseCash()
     {
         if (!EnsureAdmin()) return;
-        cashError = null;
+        countError = null;
+        // Resolve again at click time; a singleton service must never retain circuit auth.
+        var actor = AuthService.CurrentUser;
+        if (actor == null || actor.Role != UserRole.Admin)
+        {
+            EnsureAdmin();
+            return;
+        }
+        var reviewed = countReview;
+        if (!confirmingClose || reviewed == null)
+        {
+            countError = "Revisá el cierre antes de confirmarlo.";
+            return;
+        }
+        if (!TryBuildLines(out var lines, out var rowError))
+        {
+            countError = rowError;
+            ResetConfirmation();
+            return;
+        }
         try
         {
-            CashService.Close(finalAmount);
-            Navigation.NavigateTo("/summary");
+            CashService.Close(new CashCountRequest
+            {
+                Review = reviewed, Lines = lines, Reason = countReason,
+                Confirmed = true, ZeroCountConfirmed = zeroConfirmed
+            }, actor);
+            cashRegister = CashService.GetCurrent();
+            countReview = null;
+            ResetCountForm();
+            closeMessage = "Caja cerrada. Arqueo registrado.";
         }
-        catch (InvalidOperationException ex) { cashError = ex.Message; }
+        catch (CashCountReviewOutdatedException ex)
+        {
+            ResetConfirmation();
+            countNotice = StaleMessage(reviewed, ex.Current);
+            countReview = ex.Current;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            countError = ex.Message;
+            cashRegister = CashService.GetCurrent();
+        }
     }
 }
