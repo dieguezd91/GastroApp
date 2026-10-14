@@ -1,6 +1,7 @@
 @page "/cash"
 @using GastroApp.Models
 @using GastroApp.Services
+@using System.Globalization
 @inject CashRegisterService CashService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
@@ -9,6 +10,15 @@
 
 <div class="page-container">
     <h1>💵 Caja Diaria</h1>
+    @{
+        // Resolve once per render, so a replaced current pointer cannot leave a stale header.
+        cashRegister = CashService.GetCurrent();
+        var paymentSummary = CashService.GetCurrentPaymentSummary();
+    }
+    @if (cashRegister != null)
+    {
+        <p>Caja #@cashRegister.Id — @(cashRegister.IsOpen ? "Abierta" : "Cerrada") · Apertura: @cashRegister.OpenDate.ToString("dd/MM/yyyy HH:mm")</p>
+    }
 
     @if (cashRegister == null || !cashRegister.IsOpen)
     {
@@ -47,6 +57,33 @@
         </div>
 
         <div class="form-card">
+            <h3>Movimiento de efectivo</h3>
+            <p>Registrá un ingreso, gasto o retiro de la caja abierta. Los movimientos no se pueden editar ni eliminar.</p>
+            <div class="form-group">
+                <label for="movement-type">Tipo</label>
+                <select id="movement-type" @bind="movementType" class="form-control">
+                    <option value="@CashMovementType.Income">Ingreso</option>
+                    <option value="@CashMovementType.Expense">Gasto</option>
+                    <option value="@CashMovementType.Withdrawal">Retiro</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="movement-amount">Monto</label>
+                <input id="movement-amount" type="text" inputmode="decimal" @bind="movementAmount" class="form-control" placeholder="0" />
+                <small>Mayor que cero, sin separador de miles. Separador decimal: @CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator</small>
+            </div>
+            <div class="form-group">
+                <label for="movement-reason">Motivo (obligatorio)</label>
+                <input id="movement-reason" type="text" @bind="movementReason" class="form-control" />
+            </div>
+            <button class="btn btn-success" @onclick="RecordMovement">Registrar movimiento</button>
+            @if (!string.IsNullOrEmpty(movementMessage))
+            {
+                <p role="status">@movementMessage</p>
+            }
+        </div>
+
+        <div class="form-card">
             <h3>Cerrar Caja</h3>
             <p>Contá el efectivo que tenés y registralo acá</p>
 
@@ -68,6 +105,64 @@
             </button>
         </div>
     }
+    <div class="form-card">
+        <h3>Cobros registrados por medio de pago</h3>
+        <p>Importes aplicados a las ventas de esta caja, incluidas las canceladas: no se revierten los cobros.
+            No son las ventas completadas del día ni el efectivo disponible en caja.
+            No incluyen monto inicial, movimientos manuales, efectivo entregado ni vuelto.</p>
+        <p role="status">@PaymentStateLabel(paymentSummary.State)</p>
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead><tr><th>Medio de pago</th><th>Importe registrado</th></tr></thead>
+                <tbody>
+                    @foreach (var row in paymentSummary.Rows)
+                    {
+                        <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@(row.Amount.HasValue ? $"${row.Amount.Value}" : "No disponible")</td></tr>
+                    }
+                </tbody>
+                <tfoot><tr><th>Total de cobros registrados</th><td>@(paymentSummary.RegisteredTotal.HasValue ? $"${paymentSummary.RegisteredTotal.Value}" : "No disponible")</td></tr></tfoot>
+            </table>
+        </div>
+        @foreach (var warning in paymentSummary.Warnings)
+        {
+            <p role="alert">@warning.Message Registros afectados: @warning.Count.</p>
+        }
+    </div>
+    @if (cashRegister != null)
+    {
+        var movements = CashService.GetCurrentMovements();
+        <div class="form-card">
+            <h3>Movimientos de esta caja</h3>
+            @if (movements.Count == 0)
+            {
+                <p>No hay movimientos registrados.</p>
+            }
+            else
+            {
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Responsable</th><th>Motivo</th><th>Venta</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var movement in movements)
+                            {
+                                <tr @key="movement.Id">
+                                    <td>@movement.Id</td>
+                                    <td>@movement.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>@MovementLabel(movement.Type)</td>
+                                    <td>@(movement.Type == CashMovementType.Expense || movement.Type == CashMovementType.Withdrawal ? "−" : "+")$@movement.Amount</td>
+                                    <td>@(string.IsNullOrWhiteSpace(movement.Username) ? "Sin responsable registrado" : movement.Username) @(movement.UserId.HasValue ? $"(ID {movement.UserId})" : "")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(movement.Reason) ? "Sin motivo registrado" : movement.Reason)</td>
+                                    <td>@(movement.SaleId?.ToString() ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
     @if (!string.IsNullOrEmpty(cashError))
     {
         <p role="alert">@cashError</p>
@@ -79,6 +174,71 @@
     private decimal initialAmount;
     private decimal finalAmount;
     private string? cashError;
+    private CashMovementType movementType = CashMovementType.Income;
+    private string movementAmount = string.Empty;
+    private string? movementReason;
+    private string? movementMessage;
+
+    private static string PaymentStateLabel(CashPaymentSummaryState state) => state switch
+    {
+        CashPaymentSummaryState.NoSession => "Sin sesión de caja seleccionada; no hay cobros atribuibles.",
+        CashPaymentSummaryState.Complete => "Resumen completo para esta sesión.",
+        CashPaymentSummaryState.Partial => "Resumen parcial: revisá las advertencias. Solo se incluyen ventas con pagos válidos y vinculadas a esta caja.",
+        _ => "Resumen no disponible; no se muestran importes por desbordamiento decimal."
+    };
+
+    private static string PaymentLabel(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Efectivo",
+        PaymentMethod.DebitCard => "Tarjeta de débito",
+        PaymentMethod.CreditCard => "Tarjeta de crédito",
+        PaymentMethod.Transfer => "Transferencia",
+        PaymentMethod.MercadoPago => "Mercado Pago",
+        _ => "Otro"
+    };
+
+    private static string MovementLabel(CashMovementType type) => type switch
+    {
+        CashMovementType.Sale => "Venta",
+        CashMovementType.Income => "Ingreso",
+        CashMovementType.Expense => "Gasto",
+        CashMovementType.Withdrawal => "Retiro",
+        _ => "Tipo desconocido"
+    };
+
+    private void RecordMovement()
+    {
+        if (!EnsureAdmin()) return;
+        cashError = null;
+        movementMessage = null;
+        // Resolve again at click time; a singleton service must never retain circuit auth.
+        var actor = AuthService.CurrentUser;
+        if (actor == null || actor.Role != UserRole.Admin)
+        {
+            EnsureAdmin();
+            return;
+        }
+        if (!decimal.TryParse(movementAmount, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
+            | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite, CultureInfo.CurrentCulture, out var amount)
+            || amount <= 0m)
+        {
+            cashError = "Ingresá un monto decimal válido mayor que cero, sin separador de miles.";
+            return;
+        }
+        try
+        {
+            CashService.AddManualMovement(movementType, amount, movementReason, actor);
+            cashRegister = CashService.GetCurrent();
+            movementMessage = $"{MovementLabel(movementType)} de ${amount} registrado en caja.";
+            movementAmount = string.Empty;
+            movementReason = null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            cashError = ex.Message;
+            cashRegister = CashService.GetCurrent();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

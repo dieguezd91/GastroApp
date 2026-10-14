@@ -23,7 +23,7 @@ The default seeded development account is:
 admin / admin
 ```
 
-Management pages explicitly redirect unauthenticated users to `/login` and non-admin users to `/unauthorized`.
+`AuthService` is scoped per Blazor Server circuit; login/logout are isolated while business data remains shared. Identity resolves the live user by ID and login-time username/password hash; renamed, deleted or password-changed users lose authentication, and role changes apply on the next check. Management pages explicitly redirect unauthenticated users to `/login` and non-admin users to `/unauthorized`, rechecking permissions at action time. See [Authentication.md](Docs/Architecture/Authentication.md).
 
 The point of sale requires authentication but is not restricted to the Admin role.
 
@@ -112,7 +112,7 @@ Checkout rejects empty carts, invalid line or sale discounts, invalid payments, 
 
 When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. Each sale also persists its payment collection with method, applied decimal amount, and nullable cash received amount; change is derived, not a separate tender applied to the sale. Historical JSON missing payments loads with an empty collection, and old cash payments missing received amount retain null and show zero change without inventing tender; new checkout validation does not run during loading. There are no fees, refunds, or external payment processing; daily sales aggregates remain separate from session cash. Applied cash (not tender or change) creates a movement only after successful stock completion, and closed summaries and cash movements are not reversed. The notes, discount and payment semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
 
-Admins can cancel a selected completed sale from today's Summary with a required reason. Checkout captures only successfully deducted stock quantities, ingredient IDs and units in a reliable snapshot; a new no-ingredient sale has a reliable empty snapshot while legacy sales without a snapshot cannot be restored. Cancellation verifies the current stored Admin, validates all snapshot entries and stock additions before restoring exact stock once, and persists status and user/time/reason audit without changing payments, items, discounts or notes. Cancelled records remain available for audit but are excluded from today's total, count and top product. There are no refunds or retroactive closed DailySummary/cash corrections; singleton authentication remains a prototype isolation limitation.
+Admins can cancel a selected completed sale from today's Summary with a required reason. Checkout captures only successfully deducted stock quantities, ingredient IDs and units in a reliable snapshot; a new no-ingredient sale has a reliable empty snapshot while legacy sales without a snapshot cannot be restored. Cancellation verifies the current stored Admin, validates all snapshot entries and stock additions before restoring exact stock once, and persists status and user/time/reason audit without changing payments, items, discounts or notes. Cancelled records remain available for audit but are excluded from today's total, count and top product. There are no refunds or retroactive closed DailySummary/cash corrections; authentication is isolated per circuit, while shared business state and nontransactional writes remain prototype limitations.
 
 ## Cash Register
 
@@ -128,9 +128,15 @@ Admin functionality:
 - view register state;
 - close the register with a final counted amount;
 - view the session's cash inflow and expected drawer balance;
+- review **Cobros registrados por medio de pago** for the current open or closed session: six methods (including zero) and registered total, distinct from completed sales and drawer cash;
+- record Income (**Ingreso**), Expense (**Gasto**) or Withdrawal (**Retiro**) with a positive decimal amount and mandatory trimmed reason;
+- review all current-session movements, including automatic sales, with date/type/amount, responsible snapshots, reason and sale reference where present;
+- receive Spanish validation feedback and in-memory registration confirmation with immediate balance/list update, without reloading;
 - calculate the final difference.
 
-Sessions have stable IDs, persist at open/close, and reject a second open register. Each checkout requires an open register and links the sale to that session, including zero-total and noncash sales. Only applied cash creates an automatic movement after stock completion. Expected drawer cash is opening amount plus Sale and Income movements minus Expense and Withdrawal movements for that session; no manual movement entry is available yet. Closing the register creates a daily summary entry. See [CashRegisters.md](Docs/Architecture/CashRegisters.md).
+Sessions have stable IDs, persist at open/close, and reject a second open register. Each checkout requires an open register and links the sale to that session, including zero-total and noncash sales. Only applied cash creates an automatic movement after stock completion. Expected drawer cash is opening amount plus Sale and Income movements minus Expense and Withdrawal movements for that session. Manual entries require the current open session and a freshly validated circuit Admin actor, revalidated against stored ID/username/password identity and live Admin role. Expense/Withdrawal cannot exceed available cash. Expected-balance overflow, gross Income inflow overflow and exhausted movement IDs are rejected before mutation or ID allocation. The server owns ID/time/session/audit fields and appends once; no editing or deleting existing entries is offered. Listing uses detached read-only collection snapshots and explicit legacy audit fallbacks. Closing the register creates a daily summary entry. See [CashRegisters.md](Docs/Architecture/CashRegisters.md).
+
+Registered receipts are a derived, detached read-only cash-service snapshot of payment **Amount** for the exact canonical current session ID, with full decimal precision. Cancelled sales retain their receipts; dates, tender/change, opening funds and manual movements are excluded. Historical unlinked sales produce an explicitly global warning without invented attribution. Invalid selected-session items/discounts or allocations exclude the whole sale with grouped reason/count warnings; valid zero-total sales need no allocations. Missing historical tender is acceptable. Typed completeness states distinguish no session, complete, partial and unavailable; any monetary overflow suppresses every numeric total rather than displaying partial or fabricated zero totals. The Spanish UI refreshes session metadata and receipts on existing renders/navigation/local cash callbacks, without polling or new broadcasts. No derived totals are persisted. See [CashRegisters.md](Docs/Architecture/CashRegisters.md#registered-receipts-by-payment-method).
 
 ## Daily Summary
 
@@ -316,7 +322,7 @@ Product and category CRUD call `SaveToFile()`. Persistence remains prototype-lev
 
 ## Service Wiring
 
-Application services are registered as singletons in `Program.cs`.
+Business/data services are registered as singletons in `Program.cs`; `AuthService` alone is scoped per Blazor Server circuit. No singleton captures it.
 
 Current services include:
 
@@ -348,7 +354,7 @@ This is current implementation state and exists to avoid constructor dependency 
 
 The repository currently has the following relevant limitations:
 
-- authentication state is stored in a singleton `AuthService` and is therefore not isolated per Blazor circuit;
+- authentication is in-memory per circuit and does not survive a replacement circuit or full reload;
 - shared application state is singleton-based;
 - JSON persistence is not transactional;
 - save behavior is inconsistent across some service mutations;

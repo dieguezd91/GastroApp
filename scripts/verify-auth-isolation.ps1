@@ -83,7 +83,7 @@ users.Add(new User { Username = "test-admin", PasswordHash = "new-pass", Role = 
 Check(!a.IsAuthenticated, "same username with new id cannot revive identity");
 a.Login("test-admin", "new-pass");
 var adminPages = new Dictionary<string, string[]> {
-    ["Cash"] = ["OpenCash", "CloseCash"],
+    ["Cash"] = ["OpenCash", "CloseCash", "RecordMovement"],
     ["Products"] = ["ShowAddForm", "EditProduct", "SaveProduct", "DeleteProduct"],
     ["ProductCategories"] = ["ShowAddForm", "EditCategory", "SaveCategory", "DeleteCategory"],
     ["Suppliers"] = ["ShowAddForm", "EditSupplier", "SaveSupplier", "DeleteSupplier"],
@@ -126,6 +126,12 @@ foreach (var page in adminPages)
     foreach (var method in page.Value) DeniedAction(page.Key, method, a, "/login");
 DeniedAction("Sales", "CompleteSale", a, "/login");
 storage.Users.Add(currentAdmin);
+a.Login("test-admin", "changed-pass");
+currentAdmin.Username = "renamed-admin";
+foreach (var page in adminPages)
+    foreach (var method in page.Value) DeniedAction(page.Key, method, a, "/login");
+DeniedAction("Sales", "CompleteSale", a, "/login");
+currentAdmin.Username = "test-admin";
 foreach (var page in adminPages.Keys.Concat(new[] { "Login", "Index", "Sales" }))
     Check(!Regex.IsMatch(Read("Pages/" + page + ".razor"), @"NavigateTo\([^;]*,\s*true\)"), page + " circuit-preserving navigation");
 foreach (var component in new[] { "MainLayout", "NavMenu" })

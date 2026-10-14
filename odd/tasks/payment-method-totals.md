@@ -1,0 +1,22 @@
+# Registered receipts by payment method
+
+## Objective and constraints
+Six methods including zero and total registered receipts for canonical current open/last closed session; SalePayment.Amount by CashRegisterId only. Keep cancelled receipts, exclude manual/fund/tender/change, no rounding/derived persistence. Preserve auth ec4c9ea, local manual work, user net8 csproj. No checkout/cancel/manual behavior changes, dependencies, live data edits, commits or push.
+
+## Tasks
+- [x] PAY-1: Typed service summary, Spanish UI, English docs and deterministic harness. Delegated gentle-ai-worker (multi-file trigger).
+- [x] PAY-2: Independent build/harness/regressions and actual Chrome session/authorization/restart/layout. Delegated gentle-ai-verify (independent/external trigger).
+
+## Implementation and decisions
+Models/CashPaymentSummary.cs, Services/CashRegisterService.cs, Pages/Cash.razor, Docs/Architecture/CashRegisters.md, IMPLEMENTED_FEATURES.md, scripts/verify-payment-summary.ps1. PAY delta +442/-0 (217 source/docs,225 harness). Detached immutable rows/warnings/completeness. Whole invalid selected sale excluded with explicit Partial warning/count; global historical unlinked/null warning without invented attribution; valid zero sale empty payments accepted. Tender absent/invalid is not a summary input; allocations validated against existing final sale total. Any arithmetic overflow produces Unavailable and all numeric totals null. Current pointer/header refreshed on existing render, no polling/broadcast. No mutations/persistence from query.
+
+## Executed evidence
+Writer observed RED missing-query assertion1 failure, GREEN89 then101 summary checks. Independent build zero warnings/errors; summary101/cash87/auth255 checks all passed; git diff --check passed (existing LF/CRLF advisory). Data/csproj Git hashes unchanged 0f8def10c364036b406c8d225f8e5fa059b26954 / 190890656d669c27c178fc53dfc526a9a184e818. Existing local changes preserved.
+Actual Chrome CDP Admin/Employee/anonymous separate contexts, OS-temp cwd: all6 labels/zero rows/total0; manual income20 changes expected100to120 not receipts; mixed checkout applied cash50/tender100/debit100 -> receipts150/drawer170; cancellation completed metrics0/count0 while receipts150/drawer170; close and current closed summary retained; actual server restart and login preserved exact fixture bytes. Same-date other-session999 excluded, missing payment and old-date global unlinked warning showed partial150, valid zero record accepted. Overflow separate fixture all7 numbers No disponible, no numeric receipts. Admin allowed Employee/anonymous denied. Responsive390 document width390 no overflow, screenshot inspected, ledger local scroll. Processes exited. No dependency installs/live data writes/commit/push.
+Evidence OS-temp gastro-pay-browser-sNVs6L (verify.cjs/logs/snapshots/narrow.png), gastro-pay-overflow-QFpBx6, gastro-payments-4b009727a1cb40e5bb36d94a0368103a, gastro-cash-c37468a860a44b9b81a409e2e32ae86e, gastro-auth-c02c1a5ba5fa414696f013db1882afe5. Initial scratch setup syntax failure corrected before fixture execution.
+
+## Review and remaining limits
+Independent source review found no blocking defect. Harness render assertion uses service/source checks rather than rendered frames; actual browser observations supply exercised UI evidence. Each render scans stored sales, no load benchmark. No browser checkout of every noncash method or zero sale/live credential change; applicable deterministic cases passed. No concurrency/reconnect/broadcast guarantee tested. Native ASSESS failed closed unassessable on initial untracked declaration; independent verification ran. INSPECT selected source/harness untracked, stopped managed_assets_outdated; no lineage/approval, tooling sync not performed in scope. Existing shared-state and logged JSON write-failure limits unchanged.
+
+## Delivery and next step
+The user subsequently authorized a commit. Manual movements and payment-method totals share edited surfaces and are committed together with their harnesses/docs as one coherent cash work unit; the pre-existing GastroApp.csproj change is excluded. No push authorized. Resolve commit identity with git log --format=%H --grep='feat(cash): add manual movements and payment summaries' -1. Earlier no-commit statements describe the implementation phase. Human review and optional managed-tooling sync/native review remain pending. Advanced cash counting, reconciliation/refunds/history remain outside scope.
