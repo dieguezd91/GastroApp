@@ -138,6 +138,23 @@ Sessions have stable IDs, persist at open/close, and reject a second open regist
 
 Registered receipts are a derived, detached read-only cash-service snapshot of payment **Amount** for the exact canonical current session ID, with full decimal precision. Cancelled sales retain their receipts; dates, tender/change, opening funds and manual movements are excluded. Historical unlinked sales produce an explicitly global warning without invented attribution. Invalid selected-session items/discounts or allocations exclude the whole sale with grouped reason/count warnings; valid zero-total sales need no allocations. Missing historical tender is acceptable. Typed completeness states distinguish no session, complete, partial and unavailable; any monetary overflow suppresses every numeric total rather than displaying partial or fabricated zero totals. The Spanish UI refreshes session metadata and receipts on existing renders/navigation/local cash callbacks, without polling or new broadcasts. No derived totals are persisted. See [CashRegisters.md](Docs/Architecture/CashRegisters.md#registered-receipts-by-payment-method).
 
+### Cash register history
+
+Routes:
+
+```text
+/cash/history
+/cash/history/{registerId}
+```
+
+Admin-only, read-only **Historial de cajas**, linked from the side menu and from `/cash`:
+
+- list every session (ID, opening/closing date, **Abierta**/**Cerrada**, initial amount, expected cash, counted amount when closed, **Exacto**/**Sobrante**/**Faltante** difference) newest first, filtered by inclusive opening-date range and status, 10 per page;
+- open a session by its stable ID to review its general data, every linked movement (automatic sales distinguished from manual income, expense and withdrawal), registered receipts by payment method with the same completeness states and warnings as `/cash`, the stored cash count (responsible, date, denominations, totals, difference, reason) and the `DailySummary` linked by `CashRegisterId`;
+- return to the current register without changing it.
+
+Closed sessions show the amounts stored at close; open sessions show expected cash computed from their movements. Sessions closed without a count, legacy summaries without `CashRegisterId` and unknown IDs are reported explicitly; nothing is reconstructed, attributed by date or invented. Queries revalidate the live Admin actor, never save and never change the current register. Editing, reopening, export and reconciliation are not offered. See [CashRegisters.md](Docs/Architecture/CashRegisters.md#session-history).
+
 ## Daily Summary
 
 Route:

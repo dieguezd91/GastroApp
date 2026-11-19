@@ -6,6 +6,7 @@ public class CashRegisterService
 {
     private readonly DataStorageService _storage;
     private readonly SaleService _saleService;
+    private const int MaxHistoryPageSize = 50;
 
     public CashRegisterService(DataStorageService storage, SaleService saleService)
     {
@@ -24,19 +25,23 @@ public class CashRegisterService
     public IReadOnlyList<CashMovement> GetCurrentMovements()
     {
         var registerId = _storage.CurrentCashRegisterId;
-        return _storage.CashMovements.Where(m => m.CashRegisterId == registerId)
+        return registerId.HasValue ? GetMovements(registerId.Value) : new List<CashMovement>().AsReadOnly();
+    }
+
+    public IReadOnlyList<CashMovement> GetMovements(int registerId) =>
+        _storage.CashMovements.Where(m => m.CashRegisterId == registerId)
             .Select(m => new CashMovement
             {
                 Id = m.Id, CashRegisterId = m.CashRegisterId, Date = m.Date,
                 Type = m.Type, Amount = m.Amount, SaleId = m.SaleId,
                 UserId = m.UserId, Username = m.Username, Reason = m.Reason
             }).ToList().AsReadOnly();
-    }
 
     // Session identity only: dates, sale status, tender and the movement ledger are not inputs.
-    public CashPaymentSummary GetCurrentPaymentSummary()
+    public CashPaymentSummary GetCurrentPaymentSummary() => GetPaymentSummary(GetCurrent()?.Id);
+
+    public CashPaymentSummary GetPaymentSummary(int? registerId)
     {
-        var registerId = GetCurrent()?.Id;
         var amounts = Enum.GetValues<PaymentMethod>().ToDictionary(method => method, _ => 0m);
         var warningCounts = new Dictionary<CashPaymentWarningReason, int>();
         decimal total = 0m;
@@ -164,6 +169,74 @@ public class CashRegisterService
             || actor.Role != UserRole.Admin)
             throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
         return user;
+    }
+
+    // Read-only history: nothing below saves, selects a register or touches counters.
+    public CashHistoryPage GetHistory(CashHistoryFilter filter, User? actor)
+    {
+        RequireLiveAdmin(actor);
+        if (filter == null)
+            throw new InvalidOperationException("Debe indicar el filtro del historial.");
+        if (filter.OpenedFrom.HasValue && filter.OpenedTo.HasValue
+            && filter.OpenedFrom.Value.Date > filter.OpenedTo.Value.Date)
+            throw new InvalidOperationException("La fecha inicial no puede ser posterior a la fecha final.");
+
+        var registers = _storage.CashRegisters
+            .Where(r => r != null
+                && (filter.Status == CashHistoryStatusFilter.All
+                    || r.IsOpen == (filter.Status == CashHistoryStatusFilter.Open))
+                && (!filter.OpenedFrom.HasValue || r.OpenDate.Date >= filter.OpenedFrom.Value.Date)
+                && (!filter.OpenedTo.HasValue || r.OpenDate.Date <= filter.OpenedTo.Value.Date))
+            .OrderByDescending(r => r.OpenDate).ThenByDescending(r => r.Id)
+            .ToList();
+
+        var pageSize = Math.Clamp(filter.PageSize, 1, MaxHistoryPageSize);
+        var totalPages = (registers.Count + pageSize - 1) / pageSize;
+        var page = Math.Clamp(filter.Page, 1, Math.Max(totalPages, 1));
+        var entries = registers.Skip((page - 1) * pageSize).Take(pageSize).Select(BuildHistoryEntry);
+        return new CashHistoryPage(entries, registers.Count, page, pageSize, totalPages);
+    }
+
+    // Stable register ID only; a missing register is a normal "not found", not an error.
+    public CashHistoryDetail? GetHistoryDetail(int registerId, User? actor)
+    {
+        RequireLiveAdmin(actor);
+        var register = registerId <= 0 ? null
+            : _storage.CashRegisters.FirstOrDefault(r => r != null && r.Id == registerId);
+        if (register == null) return null;
+
+        // Summaries are matched by register ID, never by date: legacy ones (null ID) stay unattributed.
+        var linked = _storage.Summaries.Where(s => s != null && s.CashRegisterId == registerId)
+            .Select(s => new DailySummary
+            {
+                Date = s.Date, TotalSales = s.TotalSales, SalesCount = s.SalesCount, TopProduct = s.TopProduct,
+                TopProductQuantity = s.TopProductQuantity, InitialCash = s.InitialCash, FinalCash = s.FinalCash,
+                Difference = s.Difference, CashRegisterId = s.CashRegisterId
+            });
+        return new CashHistoryDetail(BuildHistoryEntry(register), GetMovements(registerId),
+            GetPaymentSummary(registerId), GetCount(registerId), linked);
+    }
+
+    // Closed sessions show what was stored at close; open ones compute expected cash from their movements.
+    private CashHistoryEntry BuildHistoryEntry(CashRegister register)
+    {
+        decimal? expected, counted = null, difference = null;
+        var unavailable = false;
+        if (register.IsOpen)
+        {
+            try { expected = _storage.GetExpectedCash(register.Id); }
+            catch (OverflowException) { expected = null; unavailable = true; }
+        }
+        else
+        {
+            expected = register.ExpectedAmount;
+            counted = register.FinalAmount;
+            try { difference = register.Difference; }
+            catch (OverflowException) { unavailable = true; }
+        }
+        var hasCount = _storage.CashCounts.Any(c => c != null && c.CashRegisterId == register.Id);
+        return new CashHistoryEntry(register.Id, register.OpenDate, register.CloseDate, register.IsOpen,
+            register.InitialAmount, expected, counted, difference, hasCount, unavailable);
     }
 
     public void Open(decimal initialAmount) => _storage.OpenCashRegister(initialAmount);

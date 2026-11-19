@@ -1,0 +1,23 @@
+# Block 2 — Cash register history
+
+## Objective and constraints
+Admin-only, read-only browsing of every persisted cash register session (`/cash/history`) with movements, registered receipts by payment method, cash count and linked daily summary. Queries by stable register ID only; never mutate data, IDs, counters or `CurrentCashRegisterId`. Closed sessions show amounts stored at close; open sessions show expected cash computed from their movements. No reconstruction of missing counts, no date-based summary attribution, cancelled-sale receipts stay registered. No DB, new dependencies, repositories, `data.json`/`GastroApp.csproj` edits, editing/reopening, exports or advanced statistics. No commit or push (user instruction).
+
+## Design
+- Service (`CashRegisterService`): generalize `GetMovements(registerId)` and `GetPaymentSummary(registerId)`; `GetCurrentMovements()` / `GetCurrentPaymentSummary()` delegate to them unchanged. New read models in `Models/CashRegisterHistory.cs`: `CashHistoryFilter`, `CashHistoryPage`, `CashHistoryEntry`, `CashHistoryDetail` (getter-only, detached copies). `GetHistory(filter, actor)` and `GetHistoryDetail(registerId, actor)` revalidate the live Admin actor via `RequireLiveAdmin`. Ordering OpenDate desc then Id desc; inclusive opening-date range; status All/Open/Closed; page size clamped 1..50, page clamped to range. Overflow → null amounts flagged unavailable.
+- UI: `Pages/CashHistory.razor` at `/cash/history` and `/cash/history/{RegisterId:int}`; filters, paginated list, detail sections (general, movements, receipts, count, linked summary); `EnsureAdmin` on init, parameter changes and every callback. Links from NavMenu and `/cash`.
+- Verification: `scripts/verify-cash-history.ps1` (OS-temp fixture, live hash guard, renderer-less callbacks).
+
+## Tasks
+- [x] HIST-1: Read models + service queries + generalization; harness `scripts/verify-cash-history.ps1` (RED first).
+- [x] HIST-2: `/cash/history` page, NavMenu and `/cash` links; callback checks in harness.
+- [x] HIST-3: English docs `Docs/Architecture/CashRegisters.md`, `IMPLEMENTED_FEATURES.md`.
+- [x] HIST-4: Independent verification: build, `git diff --check`, all five harnesses, real browser (multi-register navigation, mobile, two circuits) on a temp fixture.
+
+## Evidence
+- Environment: only .NET 8/9/10 runtimes and the committed csproj targets net7.0. The new harness sets `LangVersion=12.0` and `RollForward=LatestMajor` in its scratch project only; existing harnesses were run with `LangVersion=12.0` and `DOTNET_ROLL_FORWARD=LatestMajor` environment variables. `verify-payment-summary.ps1` hardcodes the old net8 csproj hash and aborts before any check (pre-existing; script left untouched).
+- HIST-1 (gentle-ai-worker): RED = harness compile failure (CS0246/CS1061 on missing history types/methods). GREEN: cash-history 146/0, cash-movements 87/0, cash-count 242/0, auth-isolation 255/0; build 0 errors; diff --check clean; live hashes unchanged.
+- HIST-2 (parent page + worker harness): `Pages/CashHistory.razor`, NavMenu link (Caja NavLink now `Match=All`), `/cash` link, `.history-*` CSS. Renderer-less callbacks (anonymous/employee/admin, mid-session demotion and password change, two circuits, filters, paging, unknown ID, no-mutation) and source assertions: cash-history 206/0; build 0 errors.
+- HIST-3 (parent): `Session history` section in `Docs/Architecture/CashRegisters.md` (queries, read models, page, limits, harness) and `Cash register history` in `IMPLEMENTED_FEATURES.md`.
+- HIST-4 (gentle-ai-verify): build 0 errors (2 NETSDK1138 warnings); diff --check clean; cash-history 206/0, cash-movements 87/0, cash-count 242/0, auth-isolation 255/0; payment-summary original aborts on obsolete baseline hash, in-memory corrected copy 101/0. Browser (Chrome/CDP, fixture `%TEMP%/gastro-history-browser-NyeQUm`, 26 synthetic sessions): menu and `/cash` links, ordering, filters, 3 pages, detail of six registers incl. legacy without count and unlinked summary, unknown ID, return to open #25 unchanged, employee in-circuit denial, anonymous to /login, two simultaneous contexts, 390x844 no overflow, restart persistence, fixture bytes unchanged. Fresh full-document navigation loses login (documented circuit-scoped auth, not a regression). Verifier found mobile pagination button protruding from the card; parent added `.history-pagination` (flex-wrap); recheck in `%TEMP%/gastro-history-pagination-xaWdbx` 13/0 and harness 206/0. Live hashes data.json 0f8def10..., csproj 66d51e2d... unchanged.
+- Native review: inspect (all four untracked paths selected) stopped at `managed_assets_outdated`; `gentle-ai sync` not run. No commit/push per user instruction.

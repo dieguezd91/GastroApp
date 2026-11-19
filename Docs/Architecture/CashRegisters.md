@@ -65,6 +65,33 @@ Receipt validation lives in the cash service, reusing discount rules and model m
 
 The Admin `/cash` section is titled **Cobros registrados por medio de pago**. It displays all rows and the total, explicit completeness feedback, and warning messages/counts. Opening metadata identifies the current open or closed session. Each render resolves the current canonical pointer and recalculates the summary, so navigation, rerender and existing local cash callbacks use fresh values without changing manual-entry or close behavior. No polling or new cross-circuit broadcasts are added; another circuit's changes become visible at the next existing render/navigation, not through a new real-time guarantee.
 
+## Session history
+
+`/cash/history` (**Historial de cajas**) is an Admin-only, read-only view of every stored session, linked from the side menu and from `/cash`. `/cash/history/{registerId}` selects one session by its stable ID; the route integer is the only selector, never a date or a list position.
+
+### Service queries
+
+`GetMovements(registerId)` and `GetPaymentSummary(int? registerId)` hold the rules previously inlined in the current-session methods; `GetCurrentMovements()` and `GetCurrentPaymentSummary()` now delegate to them with the canonical current ID and keep their contracts (empty list / `NoSession` without a session). `GetCount(registerId)` is reused unchanged.
+
+`GetHistory(CashHistoryFilter, actor)` and `GetHistoryDetail(registerId, actor)` first revalidate the live Admin actor with the same helper as manual movements and close (`UnauthorizedAccessException` otherwise). They return getter-only read models from `Models/CashRegisterHistory.cs` with detached read-only collections:
+
+| Model | Contents |
+|---|---|
+| `CashHistoryFilter` | Optional inclusive opening-date range (compared by calendar day), `All`/`Open`/`Closed`, page, page size. A start after the end is rejected (“La fecha inicial no puede ser posterior a la fecha final.”). |
+| `CashHistoryPage` | Entries ordered by `OpenDate` descending then ID descending; total count and pages (0 when empty). Page size is clamped to 1–50 and the page to the valid range. |
+| `CashHistoryEntry` | ID, dates, status, initial amount, `ExpectedAmount`, `CountedAmount`, `Difference`, `HasCount`, `AmountsUnavailable`. |
+| `CashHistoryDetail` | Entry, movements, payment summary, count copy (or `null`) and copies of the `DailySummary` records whose `CashRegisterId` equals the ID. |
+
+A closed entry uses the values stored at close: `ExpectedAmount`, `FinalAmount` as counted amount and the stored `Difference`; nothing is recalculated from current sales, so a sale cancelled after the close leaves those amounts unchanged. An open entry computes expected cash from its movements now and has no counted amount or difference. Overflow in either calculation yields `null` and `AmountsUnavailable`, shown as “No disponible” instead of a number. A missing ID (including ≤ 0) returns `null`. Neither query saves, allocates IDs, changes counters or `CurrentCashRegisterId`, or mutates stored objects.
+
+### Page
+
+Filters apply only on **Aplicar filtros** and reset to page 1; **Anterior**/**Siguiente** page through 10 rows. **Ver detalle** navigates to the session route; the component rechecks the circuit Admin on initialization, every route change and every callback, and passes a freshly resolved actor to the service. The detail shows general data, the ledger (automatic **Venta (automático)** versus **Ingreso/Gasto/Retiro manual**, with legacy fallbacks for missing responsible or reason), registered receipts with the `/cash` state and warning texts, the count or “Esta caja se cerró sin arqueo detallado.”, and the linked summary or a notice that none is linked. Legacy summaries without `CashRegisterId` are never attributed by date. Unknown IDs show “No existe una caja con el ID …”. The data is a snapshot taken on load; another circuit's changes appear on the next navigation or filter action.
+
+### Limits
+
+Filtering and paging run in memory over the shared collection; this is adequate for the prototype JSON store but not an indexed query. Receipt warnings for unlinked historical sales remain global, as on `/cash`. A session with more than one linked summary (not produced by the current close) lists all of them. No editing, deletion, reopening, export, bank reconciliation or statistics are provided.
+
 ## Manual movement boundary
 
 `CashRegisterService.AddManualMovement(type, amount, reason, actor)` owns manual entries. It accepts only Income, Expense and Withdrawal, a positive decimal amount, a required trimmed reason and the current canonical open session. Expense and Withdrawal cannot exceed that session's available expected cash; spending exactly the available balance is allowed. There is no new rounding rule.
@@ -83,7 +110,7 @@ JSON persists `CashRegisters`, `CashMovements`, `CashCounts`, `CurrentCashRegist
 
 ## Limits
 
-This is single-process, prototype-level JSON persistence. `SaveToFile` logs write failures rather than guaranteeing disk durability; ingredient deductions may perform intermediate saves before the final sale/snapshot/movement save. Failed deduction leaves earlier writes and an unreliable sale snapshot, but no cash movement. Mutable shared collections have no locking or transaction rollback; callers must not infer durable atomic checkout from a normal return. Manual entry uses the same logged-save-failure mechanism: UI confirmation acknowledges in-memory registration, not guaranteed disk durability. Concurrent validation and writes are not atomic. The stale-review check is optimistic and in-process, not a lock: validation and the close mutation are not atomic against concurrent writers, and nothing is pushed across circuits; another circuit sees the stale alert on its next render or when it confirms. Refunds, ledger editing/deletion, session-history browsing and advanced reconciliation remain out of scope.
+This is single-process, prototype-level JSON persistence. `SaveToFile` logs write failures rather than guaranteeing disk durability; ingredient deductions may perform intermediate saves before the final sale/snapshot/movement save. Failed deduction leaves earlier writes and an unreliable sale snapshot, but no cash movement. Mutable shared collections have no locking or transaction rollback; callers must not infer durable atomic checkout from a normal return. Manual entry uses the same logged-save-failure mechanism: UI confirmation acknowledges in-memory registration, not guaranteed disk durability. Concurrent validation and writes are not atomic. The stale-review check is optimistic and in-process, not a lock: validation and the close mutation are not atomic against concurrent writers, and nothing is pushed across circuits; another circuit sees the stale alert on its next render or when it confirms. Refunds, ledger editing/deletion, history editing and advanced reconciliation remain out of scope.
 
 ## Verification
 
@@ -94,6 +121,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-payment-s
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cash-movements.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cash-count.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-auth-isolation.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cash-history.ps1
 dotnet build
 ```
 
@@ -102,3 +130,5 @@ The dependency-free payment harness checks six individual methods, zero/mixed/di
 The dependency-free cash harness references the application in a retained OS-temp fixture; storage construction and JSON reads/writes run only in that scratch working directory. It checks signs, exact cash caps, actor/session/input rejection, both overflow paths, counter exhaustion, rejection without mutation, detached projections, audit and ID reloads, legacy JSON, direct component callbacks and sale/cancellation/close regressions. Both live project/data hashes are checked before and after. Direct callbacks and source assertions do not prove browser rendering: independently verify the form, responsive ledger, success/error display and two-circuit behavior in an isolated browser fixture.
 
 The cash-count harness uses the same retained OS-temp fixture and live-hash guard. It checks line rules and overflow, exact/surplus/shortage closes, reason and confirmation rules, actor/session rejection without mutation, stale detection (including +X/−X), two-admin attribution, save/reload, legacy and corrupted `CashCounts` JSON, record consistency, payment/sale regressions and renderer-less `/cash` callbacks. Direct callbacks do not prove browser layout.
+
+The cash-history harness uses the same fixture and hash guard. It checks empty/one/many sessions, ordering ties, filters, paging clamps, per-register movements and receipts (individual, mixed, cancelled), exact/surplus/shortage counts, legacy sessions without counts, linked versus unlinked summaries, open versus closed values, unknown IDs, actor rejection including live demotion, overflow, nonmutation, save/reload, and renderer-less `CashHistory` callbacks across anonymous, Employee, Admin and two circuits. Its scratch project sets `LangVersion=12.0` and `RollForward=LatestMajor` so it runs on machines without a .NET 7 runtime.

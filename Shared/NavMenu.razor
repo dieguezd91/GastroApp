@@ -44,8 +44,13 @@
                 @if (AuthService.IsInRole(UserRole.Admin))
                 {
                     <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="cash">
+                        <NavLink class="nav-link" href="cash" Match="NavLinkMatch.All">
                             <span class="oi oi-dollar" aria-hidden="true"></span> Caja
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="cash/history">
+                            <span class="oi oi-list" aria-hidden="true"></span> Historial de cajas
                         </NavLink>
                     </div>
                     <div class="nav-item px-3">
