@@ -1,0 +1,527 @@
+@page "/sales/history"
+@page "/sales/history/{SaleId:int}"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject SaleHistoryService HistoryService
+@inject SaleService SaleService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Historial de ventas</PageTitle>
+
+<div class="page-container">
+    <h1>🧾 Historial de ventas</h1>
+    <p>Consulta de ventas registradas. Las ventas nunca se eliminan: solo pueden anularse desde su detalle, con motivo y confirmación.</p>
+
+    @if (SaleId.HasValue)
+    {
+        <div class="form-card history-detail" role="region" aria-label="Detalle de venta">
+            @if (detail == null)
+            {
+                <h3>Venta #@SaleId</h3>
+                <p role="alert">@(detailMessage ?? "No se pudo cargar la venta.")</p>
+            }
+            else
+            {
+                var entry = detail.Entry;
+                <h3>Venta #@entry.Id — @StatusLabel(entry.Status)</h3>
+
+                <h4>Información general</h4>
+                <div class="cash-info">
+                    <div class="info-card">
+                        <h4>Fecha</h4>
+                        <p>@entry.Date.ToString("dd/MM/yyyy HH:mm")</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Operador</h4>
+                        <p>@OperatorLabel(entry)</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Caja</h4>
+                        <p>
+                            @if (entry.CashRegisterId.HasValue)
+                            {
+                                <a href="/cash/history/@entry.CashRegisterId">Caja #@entry.CashRegisterId</a>
+                            }
+                            else
+                            {
+                                @:Sin caja asociada
+                            }
+                        </p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Estado</h4>
+                        <p>@StatusLabel(entry.Status)</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Total</h4>
+                        <p class="amount">@Money(detail.Total)</p>
+                    </div>
+                </div>
+                @if (entry.AmountsUnavailable)
+                {
+                    <p role="alert">Algunos importes no están disponibles porque superan el límite de cálculo; no se muestran cifras aproximadas.</p>
+                }
+
+                <h4>Productos</h4>
+                @if (detail.Lines.Count == 0)
+                {
+                    <p>La venta no tiene productos registrados.</p>
+                }
+                else
+                {
+                    <div style="overflow-x: auto;">
+                        <table class="table">
+                            <thead>
+                                <tr><th>Producto</th><th>Precio</th><th>Cantidad</th><th>Observaciones</th><th>Descuento de línea</th><th>Subtotal</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in detail.Lines)
+                                {
+                                    <tr>
+                                        <td>@line.ProductName</td>
+                                        <td>$@line.Price</td>
+                                        <td>@line.Quantity</td>
+                                        <td>@(string.IsNullOrWhiteSpace(line.Notes) ? "—" : line.Notes)</td>
+                                        <td>@DiscountLabel(line.DiscountType, line.DiscountValue, line.DiscountAmount)</td>
+                                        <td>@Money(line.Subtotal)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                <p>Subtotal: @Money(detail.Subtotal)</p>
+                <p>Descuento de la venta: @DiscountLabel(detail.SaleDiscountType, detail.SaleDiscountValue, detail.DiscountAmount)</p>
+                <p><strong>Total: @Money(detail.Total)</strong></p>
+
+                <h4>Pagos</h4>
+                @if (detail.Payments.Count == 0)
+                {
+                    <p>La venta no tiene pagos registrados.</p>
+                }
+                else
+                {
+                    <div style="overflow-x: auto;">
+                        <table class="table">
+                            <thead><tr><th>Medio de pago</th><th>Importe aplicado</th><th>Recibido</th><th>Vuelto</th></tr></thead>
+                            <tbody>
+                                @foreach (var payment in detail.Payments)
+                                {
+                                    <tr>
+                                        <td>@PaymentLabel(payment.Method)</td>
+                                        <td>$@payment.Amount</td>
+                                        <td>@(payment.ReceivedAmount.HasValue ? $"${payment.ReceivedAmount.Value}" : "—")</td>
+                                        <td>@(payment.Change > 0m ? $"${payment.Change}" : "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                <h4>Eventos</h4>
+                <ul>
+                    @foreach (var evt in detail.Events)
+                    {
+                        <li>
+                            <strong>@EventLabel(evt.Kind)</strong>
+                            — @(evt.At.HasValue ? evt.At.Value.ToString("dd/MM/yyyy HH:mm") : "Sin fecha registrada")
+                            — @(string.IsNullOrWhiteSpace(evt.Username) ? "Sin registro" : evt.Username)
+                            @if (evt.Kind == SaleHistoryEventKind.Cancelled)
+                            {
+                                <span>— Motivo: @(string.IsNullOrWhiteSpace(evt.Reason) ? "Sin motivo registrado" : evt.Reason)</span>
+                            }
+                        </li>
+                    }
+                </ul>
+
+                <h4>Anulación</h4>
+                @if (!string.IsNullOrEmpty(cancelSuccess))
+                {
+                    <p role="status">@cancelSuccess</p>
+                }
+                @if (entry.Status == SaleStatus.Completed)
+                {
+                    @if (!cancelOpen)
+                    {
+                        <button class="btn btn-danger" @onclick="StartCancel">Anular venta</button>
+                    }
+                    else
+                    {
+                        <div class="form-group">
+                            <label for="cancel-reason">Motivo de la anulación (obligatorio)</label>
+                            <textarea id="cancel-reason" class="form-control" @bind="cancelReason" @bind:event="oninput"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="cancel-confirm">
+                                <input id="cancel-confirm" type="checkbox" @bind="cancelConfirmed" />
+                                Confirmo que quiero anular esta venta
+                            </label>
+                        </div>
+                        <div class="form-actions">
+                            <button class="btn btn-danger" @onclick="ConfirmCancel">Confirmar anulación</button>
+                            <button class="btn btn-secondary" @onclick="AbortCancel">No anular</button>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <p>La venta ya no está cobrada, por lo que no puede anularse de nuevo.</p>
+                }
+                @if (!string.IsNullOrEmpty(cancelError))
+                {
+                    <p role="alert">@cancelError</p>
+                }
+            }
+            <div class="form-actions">
+                <button class="btn btn-secondary" @onclick="CloseDetail">Volver al listado</button>
+            </div>
+        </div>
+    }
+
+    <div class="form-card">
+        <h3>Ventas registradas</h3>
+        <div class="history-filters">
+            <div class="form-group">
+                <label for="history-from">Desde</label>
+                <input id="history-from" type="date" class="form-control" @bind="filterFrom" />
+            </div>
+            <div class="form-group">
+                <label for="history-to">Hasta</label>
+                <input id="history-to" type="date" class="form-control" @bind="filterTo" />
+            </div>
+            <div class="form-group">
+                <label for="history-number">N.º de venta</label>
+                <input id="history-number" type="number" min="1" class="form-control" @bind="filterSaleNumber" />
+            </div>
+            <div class="form-group">
+                <label for="history-operator">Operador</label>
+                <select id="history-operator" class="form-control" @bind="filterOperator">
+                    <option value="">Todos</option>
+                    <option value="@NoOperatorOption">Sin registro</option>
+                    @foreach (var op in operators)
+                    {
+                        <option value="@op.UserId">@op.Username</option>
+                    }
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="history-payment">Medio de pago</label>
+                <select id="history-payment" class="form-control" @bind="filterPayment">
+                    <option value="">Todos</option>
+                    @foreach (var method in Enum.GetValues<PaymentMethod>())
+                    {
+                        <option value="@method">@PaymentLabel(method)</option>
+                    }
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="history-register">Caja (ID)</label>
+                <input id="history-register" type="number" min="1" class="form-control" @bind="filterRegister" />
+            </div>
+            <div class="form-group">
+                <label for="history-status">Estado</label>
+                <select id="history-status" class="form-control" @bind="filterStatus">
+                    <option value="@SaleHistoryStatusFilter.All">Todas</option>
+                    <option value="@SaleHistoryStatusFilter.Completed">Cobradas</option>
+                    <option value="@SaleHistoryStatusFilter.Cancelled">Anuladas</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="history-text">Producto</label>
+                <input id="history-text" type="text" class="form-control" placeholder="Nombre del producto" @bind="filterText" />
+            </div>
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="ApplyFilters">Aplicar filtros</button>
+            <button class="btn btn-secondary" @onclick="ClearFilters">Limpiar</button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(historyError))
+        {
+            <p role="alert">@historyError</p>
+        }
+        else if (historyPage == null)
+        {
+            <p>Cargando historial…</p>
+        }
+        else if (historyPage.TotalCount == 0)
+        {
+            <p>No hay ventas que coincidan con los filtros.</p>
+        }
+        else
+        {
+            <div style="overflow-x: auto;">
+                <table class="table">
+                    <thead>
+                        <tr><th>N.º</th><th>Fecha</th><th>Operador</th><th>Caja</th><th>Productos</th><th>Medios de pago</th><th>Estado</th><th>Total</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in historyPage.Entries)
+                        {
+                            <tr @key="entry.Id" class="@(entry.Id == SaleId ? "history-selected" : null)">
+                                <td>@entry.Id</td>
+                                <td>@entry.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                                <td>@OperatorLabel(entry)</td>
+                                <td>@(entry.CashRegisterId.HasValue ? $"#{entry.CashRegisterId}" : "—")</td>
+                                <td>@(entry.ProductNames.Count == 0 ? "—" : string.Join(", ", entry.ProductNames))</td>
+                                <td>@(entry.PaymentMethods.Count == 0 ? "—" : string.Join(", ", entry.PaymentMethods.Select(PaymentLabel)))</td>
+                                <td>@StatusLabel(entry.Status)</td>
+                                <td>@Money(entry.Total)</td>
+                                <td><button class="btn btn-secondary btn-small" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-actions history-pagination">
+                <button class="btn btn-secondary" @onclick="PreviousPage" disabled="@(historyPage.Page <= 1)">Anterior</button>
+                <span>Página @historyPage.Page de @historyPage.TotalPages · @historyPage.TotalCount ventas</span>
+                <button class="btn btn-secondary" @onclick="NextPage" disabled="@(historyPage.Page >= historyPage.TotalPages)">Siguiente</button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? SaleId { get; set; }
+
+    private const int PageSize = 10;
+    private const string NoOperatorOption = "none";
+    private DateTime? filterFrom;
+    private DateTime? filterTo;
+    private int? filterSaleNumber;
+    private string filterOperator = string.Empty;
+    private string filterPayment = string.Empty;
+    private int? filterRegister;
+    private SaleHistoryStatusFilter filterStatus = SaleHistoryStatusFilter.All;
+    private string? filterText;
+    // Applied filter: edits to the inputs only take effect on "Aplicar filtros".
+    private SaleHistoryFilter appliedFilter = new(PageSize: PageSize);
+    private SaleHistoryPage? historyPage;
+    private string? historyError;
+    private IReadOnlyList<SaleHistoryOperator> operators = Array.Empty<SaleHistoryOperator>();
+    private SaleHistoryDetail? detail;
+    private string? detailMessage;
+    private int? shownSaleId;
+    private bool cancelOpen;
+    private string? cancelReason;
+    private bool cancelConfirmed;
+    private string? cancelError;
+    private string? cancelSuccess;
+
+    // Runs on first load and on every route change, so each selection rechecks live permissions.
+    protected override void OnParametersSet()
+    {
+        if (!EnsureAdmin()) return;
+        if (shownSaleId != SaleId)
+        {
+            shownSaleId = SaleId;
+            ResetCancelForm();
+            cancelSuccess = null;
+        }
+        if (historyPage == null && historyError == null) LoadHistory();
+        LoadDetail();
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
+    }
+
+    // The singleton service revalidates the freshly resolved circuit actor on every query.
+    private void LoadHistory()
+    {
+        historyError = null;
+        try
+        {
+            var actor = AuthService.CurrentUser;
+            historyPage = HistoryService.GetHistory(appliedFilter, actor);
+            operators = HistoryService.GetOperators(actor);
+        }
+        catch (UnauthorizedAccessException) { historyPage = null; EnsureAdmin(); }
+        catch (InvalidOperationException ex) { historyPage = null; historyError = ex.Message; }
+    }
+
+    private void LoadDetail()
+    {
+        detail = null;
+        detailMessage = null;
+        if (!SaleId.HasValue) return;
+        try
+        {
+            detail = HistoryService.GetDetail(SaleId.Value, AuthService.CurrentUser);
+            if (detail == null) detailMessage = $"No existe una venta con el ID {SaleId}.";
+        }
+        catch (UnauthorizedAccessException) { EnsureAdmin(); }
+    }
+
+    private SaleHistoryFilter BuildFilter(int page)
+    {
+        int? operatorId = int.TryParse(filterOperator, out var parsedOperator) ? parsedOperator : null;
+        PaymentMethod? method = Enum.TryParse<PaymentMethod>(filterPayment, out var parsedMethod) ? parsedMethod : null;
+        return new SaleHistoryFilter(filterFrom, filterTo, filterSaleNumber, operatorId,
+            filterOperator == NoOperatorOption, method, filterRegister, filterStatus, filterText, page, PageSize);
+    }
+
+    private void ApplyFilters()
+    {
+        if (!EnsureAdmin()) return;
+        if (filterFrom.HasValue && filterTo.HasValue && filterFrom.Value.Date > filterTo.Value.Date)
+        {
+            historyPage = null;
+            historyError = "La fecha inicial no puede ser posterior a la fecha final.";
+            return;
+        }
+        appliedFilter = BuildFilter(1);
+        LoadHistory();
+    }
+
+    private void ClearFilters()
+    {
+        if (!EnsureAdmin()) return;
+        filterFrom = null;
+        filterTo = null;
+        filterSaleNumber = null;
+        filterOperator = string.Empty;
+        filterPayment = string.Empty;
+        filterRegister = null;
+        filterStatus = SaleHistoryStatusFilter.All;
+        filterText = null;
+        appliedFilter = new SaleHistoryFilter(PageSize: PageSize);
+        LoadHistory();
+    }
+
+    private void ChangePage(int delta)
+    {
+        if (!EnsureAdmin() || historyPage == null) return;
+        appliedFilter = appliedFilter with { Page = historyPage.Page + delta };
+        LoadHistory();
+    }
+
+    private void PreviousPage() => ChangePage(-1);
+    private void NextPage() => ChangePage(1);
+
+    private void ShowDetail(int saleId)
+    {
+        if (!EnsureAdmin()) return;
+        Navigation.NavigateTo($"/sales/history/{saleId}");
+    }
+
+    private void CloseDetail()
+    {
+        if (!EnsureAdmin()) return;
+        Navigation.NavigateTo("/sales/history");
+    }
+
+    private void StartCancel()
+    {
+        if (!EnsureAdmin()) return;
+        if (detail?.Entry.Status != SaleStatus.Completed) return;
+        ResetCancelForm();
+        cancelSuccess = null;
+        cancelOpen = true;
+    }
+
+    private void AbortCancel()
+    {
+        if (!EnsureAdmin()) return;
+        ResetCancelForm();
+    }
+
+    private void ResetCancelForm()
+    {
+        cancelOpen = false;
+        cancelReason = null;
+        cancelConfirmed = false;
+        cancelError = null;
+    }
+
+    // The only mutation of this page: SaleService.Cancel, after explicit confirmation and a reason.
+    private void ConfirmCancel()
+    {
+        if (!EnsureAdmin()) return;
+        cancelError = null;
+        cancelSuccess = null;
+        if (!SaleId.HasValue || detail == null) return;
+        if (!cancelConfirmed)
+        {
+            cancelError = "Debe confirmar la anulación.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(cancelReason))
+        {
+            cancelError = "Debe indicar un motivo de cancelación.";
+            return;
+        }
+        try
+        {
+            var actor = AuthService.CurrentUser;
+            // Strict live-admin revalidation (identity, credentials hash and role) before the command.
+            HistoryService.GetDetail(SaleId.Value, actor);
+            SaleService.Cancel(SaleId.Value, cancelReason, actor);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            if (EnsureAdmin()) cancelError = ex.Message;
+            return;
+        }
+        catch (InvalidOperationException ex)
+        {
+            cancelError = ex.Message;
+            return;
+        }
+        ResetCancelForm();
+        cancelSuccess = "Venta anulada; stock restaurado.";
+        LoadDetail();
+        LoadHistory();
+    }
+
+    private static string Money(decimal? amount) => amount.HasValue ? $"${amount.Value}" : "No disponible";
+
+    private static string StatusLabel(SaleStatus status) => status switch
+    {
+        SaleStatus.Completed => "Cobrada",
+        SaleStatus.Cancelled => "Anulada",
+        _ => "Estado desconocido"
+    };
+
+    private static string OperatorLabel(SaleHistoryEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.OperatorUsername) ? entry.OperatorUsername
+        : entry.OperatorUserId.HasValue ? $"Usuario ID {entry.OperatorUserId}" : "Sin registro";
+
+    private static string EventLabel(SaleHistoryEventKind kind) => kind switch
+    {
+        SaleHistoryEventKind.Created => "Venta registrada",
+        SaleHistoryEventKind.Cancelled => "Venta anulada",
+        _ => "Evento"
+    };
+
+    private static string DiscountLabel(DiscountType type, decimal value, decimal? amount) => type switch
+    {
+        DiscountType.Percentage => $"{value}% ({Money(amount)})",
+        DiscountType.Fixed => $"${value} fijo ({Money(amount)})",
+        _ => "Sin descuento"
+    };
+
+    private static string PaymentLabel(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Efectivo",
+        PaymentMethod.DebitCard => "Tarjeta de débito",
+        PaymentMethod.CreditCard => "Tarjeta de crédito",
+        PaymentMethod.Transfer => "Transferencia",
+        PaymentMethod.MercadoPago => "Mercado Pago",
+        _ => "Otro"
+    };
+}

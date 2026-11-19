@@ -14,6 +14,7 @@ builder.Services.AddSingleton<ProductService>();
 builder.Services.AddSingleton<ProductCategoryService>();
 builder.Services.AddSingleton<SaleService>();
 builder.Services.AddSingleton<CashRegisterService>();
+builder.Services.AddSingleton<SaleHistoryService>();
 builder.Services.AddSingleton<UserService>();
 // Authentication belongs to the Blazor circuit, not the shared business state.
 builder.Services.AddScoped<AuthService>();

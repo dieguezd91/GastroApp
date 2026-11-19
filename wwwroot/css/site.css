@@ -857,7 +857,7 @@ a:hover {
     }
 }
 
-/* Cash register history */
+/* Cash register and sales history (shared .history-* classes) */
 .history-filters {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
