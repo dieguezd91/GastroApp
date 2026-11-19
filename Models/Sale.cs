@@ -34,6 +34,9 @@ public class Sale
     // Historical sales without a register link remain unlinked.
     public int? CashRegisterId { get; set; }
     public DateTime Date { get; set; } = DateTime.Now;
+    // Operator who registered the sale; historical sales keep null ("Sin registro").
+    public int? CreatedByUserId { get; set; }
+    public string? CreatedByUsername { get; set; }
     public List<SaleItem> Items { get; set; } = new();
     // Las ventas históricas sin Payments conservan una colección vacía.
     public List<SalePayment> Payments { get; set; } = new();
@@ -62,6 +65,8 @@ public class SaleItem
     public decimal Price { get; set; }
     public int Quantity { get; set; }
     public string? Notes { get; set; }
+    // Ingredients consumed by this line at checkout (stock units). Null on legacy lines, which cannot be restocked.
+    public List<SaleStockConsumption>? StockConsumption { get; set; }
 
     public DiscountType DiscountType { get; set; } = DiscountType.None;
     public decimal DiscountValue { get; set; } = 0m;

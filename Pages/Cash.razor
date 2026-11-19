@@ -287,7 +287,7 @@
                                     <td>@movement.Id</td>
                                     <td>@movement.Date.ToString("dd/MM/yyyy HH:mm")</td>
                                     <td>@MovementLabel(movement.Type)</td>
-                                    <td>@(movement.Type == CashMovementType.Expense || movement.Type == CashMovementType.Withdrawal ? "−" : "+")$@movement.Amount</td>
+                                    <td>@(movement.Type == CashMovementType.Expense || movement.Type == CashMovementType.Withdrawal || movement.Type == CashMovementType.Refund ? "−" : "+")$@movement.Amount</td>
                                     <td>@(string.IsNullOrWhiteSpace(movement.Username) ? "Sin responsable registrado" : movement.Username) @(movement.UserId.HasValue ? $"(ID {movement.UserId})" : "")</td>
                                     <td>@(string.IsNullOrWhiteSpace(movement.Reason) ? "Sin motivo registrado" : movement.Reason)</td>
                                     <td>@(movement.SaleId?.ToString() ?? "—")</td>
@@ -352,6 +352,7 @@
         CashMovementType.Income => "Ingreso",
         CashMovementType.Expense => "Gasto",
         CashMovementType.Withdrawal => "Retiro",
+        CashMovementType.Refund => "Devolución",
         _ => "Tipo desconocido"
     };
 

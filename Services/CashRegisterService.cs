@@ -43,6 +43,8 @@ public class CashRegisterService
     public CashPaymentSummary GetPaymentSummary(int? registerId)
     {
         var amounts = Enum.GetValues<PaymentMethod>().ToDictionary(method => method, _ => 0m);
+        var refunded = Enum.GetValues<PaymentMethod>().ToDictionary(method => method, _ => 0m);
+        decimal refundedTotal = 0m;
         var warningCounts = new Dictionary<CashPaymentWarningReason, int>();
         decimal total = 0m;
         bool unavailable = false;
@@ -74,13 +76,35 @@ public class CashRegisterService
             }
         }
 
+        // Refunds are summed by the register that booked them; a sale's receipts are never reduced.
+        if (registerId.HasValue && !unavailable)
+        {
+            try
+            {
+                foreach (var refund in _storage.SaleRefunds.Where(r => r != null && r.CashRegisterId == registerId))
+                    foreach (var payment in refund.Payments)
+                    {
+                        if (!refunded.ContainsKey(payment.PaymentMethod)) continue;
+                        refunded[payment.PaymentMethod] = checked(refunded[payment.PaymentMethod] + payment.Amount);
+                        refundedTotal = checked(refundedTotal + payment.Amount);
+                    }
+            }
+            catch (OverflowException)
+            {
+                unavailable = true;
+                Warn(CashPaymentWarningReason.ArithmeticOverflow);
+            }
+        }
+
         var state = unavailable ? CashPaymentSummaryState.Unavailable
             : !registerId.HasValue ? CashPaymentSummaryState.NoSession
             : warningCounts.Count > 0 ? CashPaymentSummaryState.Partial : CashPaymentSummaryState.Complete;
         return new CashPaymentSummary(registerId, state,
-            amounts.Select(pair => new CashPaymentRow(pair.Key, unavailable ? null : pair.Value)),
+            amounts.Select(pair => new CashPaymentRow(pair.Key, unavailable ? null : pair.Value,
+                unavailable ? null : refunded[pair.Key])),
             unavailable ? null : total,
-            warningCounts.Select(pair => new CashPaymentWarning(pair.Key, pair.Value)));
+            warningCounts.Select(pair => new CashPaymentWarning(pair.Key, pair.Value)),
+            unavailable ? null : refundedTotal);
     }
 
     // Historical receipt validation deliberately differs from checkout: no tender or catalog checks.
@@ -160,16 +184,7 @@ public class CashRegisterService
 
     // Trusted in-process boundary: the component supplies a fresh scoped actor.
     // Revalidate identity and live role without capturing scoped AuthService here.
-    private User RequireLiveAdmin(User? actor)
-    {
-        var user = actor == null ? null : _storage.Users.FirstOrDefault(u => u.Id == actor.Id);
-        if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username)
-            || string.IsNullOrWhiteSpace(user.PasswordHash) || user.Username != actor!.Username
-            || user.PasswordHash != actor.PasswordHash || user.Role != UserRole.Admin
-            || actor.Role != UserRole.Admin)
-            throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
-        return user;
-    }
+    private User RequireLiveAdmin(User? actor) => _storage.RequireLiveAdmin(actor);
 
     // Read-only history: nothing below saves, selects a register or touches counters.
     public CashHistoryPage GetHistory(CashHistoryFilter filter, User? actor)

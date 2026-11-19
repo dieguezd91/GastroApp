@@ -637,7 +637,12 @@
         // Venta validada; Add vuelve a validar antes de cualquier mutación.
         try
         {
-            SaleService.Add(checkoutSale);
+            SaleService.Add(checkoutSale, AuthService.CurrentUser);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Navigation.NavigateTo("/login");
+            return;
         }
         catch (InvalidOperationException ex)
         {

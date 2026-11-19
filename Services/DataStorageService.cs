@@ -8,6 +8,8 @@ public class DataStorageService
     public List<Product> Products { get; set; } = new();
     public List<ProductCategory> ProductCategories { get; set; } = new();
     public List<Sale> Sales { get; set; } = new();
+    // Append-only refund ledger; sales themselves are never deleted or rewritten by a refund.
+    public List<SaleRefund> SaleRefunds { get; private set; } = new();
     public List<CashRegister> CashRegisters { get; private set; } = new();
     public List<CashMovement> CashMovements { get; private set; } = new();
     public List<CashCount> CashCounts { get; private set; } = new();
@@ -25,6 +27,7 @@ public class DataStorageService
     private int _nextProductId = 1;
     private int _nextProductCategoryId = 1;
     private int _nextSaleId = 1;
+    private int _nextSaleRefundId = 1;
     private int _nextCashRegisterId = 1;
     private int _nextCashMovementId = 1;
     private int _nextUserId = 1;
@@ -38,6 +41,7 @@ public class DataStorageService
     public int GetNextProductId() => _nextProductId++;
     public int GetNextProductCategoryId() => _nextProductCategoryId++;
     public int GetNextSaleId() => Allocate(ref _nextSaleId, "ventas");
+    public int GetNextSaleRefundId() => Allocate(ref _nextSaleRefundId, "devoluciones");
 
     // Fail before checkout or opening mutates state; int.MaxValue cannot be followed by a valid counter.
     private static int Allocate(ref int next, string name)
@@ -49,6 +53,7 @@ public class DataStorageService
 
     public void EnsureSaleCapacity() => EnsureCapacity(_nextSaleId, "ventas");
     public void EnsureCashMovementCapacity() => EnsureCapacity(_nextCashMovementId, "movimientos de caja");
+    public void EnsureSaleRefundCapacity() => EnsureCapacity(_nextSaleRefundId, "devoluciones");
     private static void EnsureCapacity(int next, string name)
     {
         if (next <= 0 || next == int.MaxValue)
@@ -77,6 +82,7 @@ public class DataStorageService
             && (m.Type == CashMovementType.Sale || m.Type == CashMovementType.Income))
         .Sum(m => m.Amount);
 
+    // Sale and Income add cash; Expense, Withdrawal and Refund take it out.
     public decimal GetExpectedCash(int registerId)
     {
         var register = CashRegisters.FirstOrDefault(r => r.Id == registerId)
@@ -86,6 +92,18 @@ public class DataStorageService
                 (m.Type == CashMovementType.Sale || m.Type == CashMovementType.Income
                     ? m.Amount : -m.Amount)));
     }
+    // Trusted in-process boundary: revalidates identity and live Admin role against stored users.
+    public User RequireLiveAdmin(User? actor)
+    {
+        var user = actor == null ? null : Users.FirstOrDefault(u => u.Id == actor.Id);
+        if (user == null || user.Id <= 0 || string.IsNullOrWhiteSpace(user.Username)
+            || string.IsNullOrWhiteSpace(user.PasswordHash) || user.Username != actor!.Username
+            || user.PasswordHash != actor.PasswordHash || user.Role != UserRole.Admin
+            || actor.Role != UserRole.Admin)
+            throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
+        return user;
+    }
+
     public int GetNextUserId() => _nextUserId++;
     public int GetNextIngredientId() => _nextIngredientId++;
     public int GetNextSupplierId() => _nextSupplierId++;
@@ -183,6 +201,7 @@ public class DataStorageService
                 Products,
                 ProductCategories,
                 Sales,
+                SaleRefunds,
                 CashRegisters,
                 CashMovements,
                 CashCounts,
@@ -196,6 +215,7 @@ public class DataStorageService
                 NextProductId = _nextProductId,
                 NextProductCategoryId = _nextProductCategoryId,
                 NextSaleId = _nextSaleId,
+                NextSaleRefundId = _nextSaleRefundId,
                 NextCashRegisterId = _nextCashRegisterId,
                 NextCashMovementId = _nextCashMovementId,
                 NextUserId = _nextUserId,
@@ -320,6 +340,81 @@ public class DataStorageService
         _nextCashMovementId = nextMovement;
     }
 
+    // A missing list is a legacy file; an explicit null or inconsistent refund is corruption.
+    private void LoadRefundState(JsonElement root)
+    {
+        var refunds = root.TryGetProperty("SaleRefunds", out var refundsElement)
+            ? JsonSerializer.Deserialize<List<SaleRefund>>(refundsElement.GetRawText())
+                ?? throw new InvalidDataException("SaleRefunds no puede ser null.")
+            : new List<SaleRefund>();
+        if (refunds.Any(r => r == null))
+            throw new InvalidDataException("SaleRefunds contiene una devolucion null.");
+        var next = RecoverNext(root, "NextSaleRefundId", refunds.Select(r => r.Id));
+        ValidateRefunds(refunds);
+        SaleRefunds = refunds;
+        _nextSaleRefundId = next;
+    }
+
+    private void ValidateRefunds(List<SaleRefund> refunds)
+    {
+        var units = new Dictionary<(int SaleId, int Index), int>();
+        var totals = new Dictionary<int, decimal>();
+        foreach (var refund in refunds)
+        {
+            var sale = Sales.FirstOrDefault(s => s != null && s.Id == refund.SaleId)
+                ?? throw new InvalidDataException("Devolucion de una venta inexistente.");
+            if (sale.Status != SaleStatus.Completed)
+                throw new InvalidDataException("Una venta con devoluciones no puede estar anulada.");
+            if (refund.UserId <= 0 || string.IsNullOrWhiteSpace(refund.Username) || string.IsNullOrWhiteSpace(refund.Reason))
+                throw new InvalidDataException("Devolucion sin responsable o motivo.");
+            if (refund.CashRegisterId.HasValue && !CashRegisters.Any(r => r.Id == refund.CashRegisterId.Value))
+                throw new InvalidDataException("Devolucion de una caja inexistente.");
+            if (refund.Lines == null || refund.Lines.Count == 0 || refund.Payments == null || refund.Total < 0m)
+                throw new InvalidDataException("Devolucion sin lineas o con total invalido.");
+
+            var seenLines = new HashSet<int>();
+            decimal lineTotal = 0m;
+            foreach (var line in refund.Lines)
+            {
+                if (line == null || sale.Items == null || line.SaleItemIndex < 0 || line.SaleItemIndex >= sale.Items.Count
+                    || sale.Items[line.SaleItemIndex] == null || line.Quantity <= 0 || line.Amount < 0m
+                    || !Enum.IsDefined(typeof(RefundDisposition), line.Disposition) || !seenLines.Add(line.SaleItemIndex))
+                    throw new InvalidDataException("Linea de devolucion invalida.");
+                var key = (sale.Id, line.SaleItemIndex);
+                var refunded = checked(units.GetValueOrDefault(key) + line.Quantity);
+                if (refunded > sale.Items[line.SaleItemIndex].Quantity)
+                    throw new InvalidDataException("La devolucion supera las unidades vendidas.");
+                units[key] = refunded;
+                lineTotal = checked(lineTotal + line.Amount);
+            }
+
+            var seenMethods = new HashSet<PaymentMethod>();
+            decimal paymentTotal = 0m;
+            foreach (var payment in refund.Payments)
+            {
+                if (payment == null || !Enum.IsDefined(typeof(PaymentMethod), payment.PaymentMethod)
+                    || payment.Amount <= 0m || !seenMethods.Add(payment.PaymentMethod))
+                    throw new InvalidDataException("Pago de devolucion invalido.");
+                paymentTotal = checked(paymentTotal + payment.Amount);
+            }
+            if (lineTotal != refund.Total || paymentTotal != refund.Total)
+                throw new InvalidDataException("Los importes de la devolucion no coinciden con su total.");
+            var cumulative = checked(totals.GetValueOrDefault(sale.Id) + refund.Total);
+            if (cumulative > sale.Total)
+                throw new InvalidDataException("Las devoluciones superan el total de la venta.");
+            totals[sale.Id] = cumulative;
+        }
+    }
+
+    private void LoadRefundStateGuarded(JsonElement root)
+    {
+        try { LoadRefundState(root); }
+        catch (Exception ex) when (ex is JsonException or FormatException or OverflowException or InvalidOperationException)
+        {
+            throw new InvalidDataException("Contenido de devoluciones invalido.", ex);
+        }
+    }
+
     public void LoadFromFile()
     {
         try
@@ -360,6 +455,8 @@ public class DataStorageService
             {
                 throw new InvalidDataException("Identidad o contenido de caja inválido.", ex);
             }
+
+            LoadRefundStateGuarded(root);
 
             if (root.TryGetProperty("Summaries", out var summariesElement))
             {

@@ -11,8 +11,13 @@ public enum CashPaymentWarningReason
 public sealed class CashPaymentRow
 {
     public PaymentMethod Method { get; }
+    // Registered receipts of the register; refunds never change this figure.
     public decimal? Amount { get; }
-    internal CashPaymentRow(PaymentMethod method, decimal? amount) { Method = method; Amount = amount; }
+    // Refunds booked to this register for this method, and the resulting net.
+    public decimal? RefundedAmount { get; }
+    public decimal? NetAmount => Amount.HasValue && RefundedAmount.HasValue ? Amount.Value - RefundedAmount.Value : null;
+    internal CashPaymentRow(PaymentMethod method, decimal? amount, decimal? refundedAmount = null)
+    { Method = method; Amount = amount; RefundedAmount = refundedAmount; }
 }
 
 public sealed class CashPaymentWarning
@@ -41,12 +46,16 @@ public sealed class CashPaymentSummary
     public CashPaymentSummaryState State { get; }
     public IReadOnlyList<CashPaymentRow> Rows { get; }
     public decimal? RegisteredTotal { get; }
+    // Refunds booked to this register (by the register where they were recorded, not the sale's).
+    public decimal? RefundedTotal { get; }
+    public decimal? NetTotal => RegisteredTotal.HasValue && RefundedTotal.HasValue ? RegisteredTotal.Value - RefundedTotal.Value : null;
     public IReadOnlyList<CashPaymentWarning> Warnings { get; }
 
     internal CashPaymentSummary(int? registerId, CashPaymentSummaryState state,
-        IEnumerable<CashPaymentRow> rows, decimal? total, IEnumerable<CashPaymentWarning> warnings)
+        IEnumerable<CashPaymentRow> rows, decimal? total, IEnumerable<CashPaymentWarning> warnings,
+        decimal? refundedTotal = null)
     {
-        CashRegisterId = registerId; State = state; RegisteredTotal = total;
+        CashRegisterId = registerId; State = state; RegisteredTotal = total; RefundedTotal = refundedTotal;
         Rows = rows.ToList().AsReadOnly();
         Warnings = warnings.ToList().AsReadOnly();
     }
