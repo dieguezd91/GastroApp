@@ -110,9 +110,33 @@ Search and category filters affect only the displayed catalog, never the cart. T
 
 Checkout rejects empty carts, invalid line or sale discounts, invalid payments, missing or inactive products, and nonpositive quantities before validating stock for products that have a recipe with the same name. Positive totals require one or more positive payments with distinct defined methods whose sum exactly equals the final total; cash requires received tender at least its allocated amount, while noncash requires null tender. Zero totals require no payments. The POS parses decimal inputs with the current culture and no grouping, retains accepted allocations on invalid raw edits but blocks checkout until corrected, and creates fresh payments from accepted state at checkout. Cart and discount changes revalidate allocations against the current total; zero totals clear them. Sale discounts apply after line discounts; percentage arithmetic uses decimal without a new currency-rounding policy. Quantity changes or removals that invalidate a fixed discount are rejected until the discount is adjusted.
 
-When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. Each sale also persists its payment collection with method, applied decimal amount, and nullable cash received amount; change is derived, not a separate tender applied to the sale. Historical JSON missing payments loads with an empty collection, and old cash payments missing received amount retain null and show zero change without inventing tender; new checkout validation does not run during loading. There are no fees, refunds, or external payment processing; daily sales aggregates remain separate from session cash. Applied cash (not tender or change) creates a movement only after successful stock completion, and closed summaries and cash movements are not reversed. The notes, discount and payment semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
+When validation succeeds, line observations are trimmed (blank becomes `null`), the sale is recorded, recipe ingredient stock is deducted, and the final state is explicitly saved, including sales without recipes. Discount type/value persist with lines and sales; legacy JSON defaults to no discount. Each sale also persists its payment collection with method, applied decimal amount, and nullable cash received amount; change is derived, not a separate tender applied to the sale. Historical JSON missing payments loads with an empty collection, and old cash payments missing received amount retain null and show zero change without inventing tender; new checkout validation does not run during loading. There are no fees or external payment processing (refunds are a separate Admin operation, see Sales history and refunds); daily sales aggregates remain separate from session cash. Applied cash (not tender or change) creates a movement only after successful stock completion, and closed summaries and cash movements are not reversed. The notes, discount and payment semantics, checkout ordering, JSON compatibility, and persistence limits are documented in [Sales.md](Docs/Architecture/Sales.md).
 
 Admins can cancel a selected completed sale from today's Summary with a required reason. Checkout captures only successfully deducted stock quantities, ingredient IDs and units in a reliable snapshot; a new no-ingredient sale has a reliable empty snapshot while legacy sales without a snapshot cannot be restored. Cancellation verifies the current stored Admin, validates all snapshot entries and stock additions before restoring exact stock once, and persists status and user/time/reason audit without changing payments, items, discounts or notes. Cancelled records remain available for audit but are excluded from today's total, count and top product. There are no refunds or retroactive closed DailySummary/cash corrections; authentication is isolated per circuit, while shared business state and nontransactional writes remain prototype limitations.
+
+### Sales history and refunds
+
+Every new sale records its operator (user ID and username); legacy sales show **Sin registro**.
+
+Routes:
+
+```text
+/sales/history
+/sales/history/{saleId}
+```
+
+Admin-only **Historial de ventas**, linked from the side menu:
+
+- list sales newest first, 10 per page, filtered by inclusive date range, sale number, operator (or **Sin registro**), payment method, cash register, status and product text;
+- states derived from the sale and its refunds: **Cobrada**, **Anulada**, **Parcialmente devuelta** and **Devuelta**, with the refunded total; the status filter offers **Cobradas** (never refunded), **Anuladas**, **Parcialmente devueltas** and **Devueltas**;
+- open a sale by its stable ID to review lines, discounts, payments, operator, register and its events in chronological order (registration, cancellation, each refund with date, user, reason, amount and refund ID).
+
+From the detail an Admin can:
+
+- **Devolver** total or partially, by line and quantity. The amount is computed (line and sale discounts prorated, with the exact remainder on the last refund), the Admin assigns it per payment method up to what each method collected, and chooses per line **Vuelve a stock** (only with a consumption snapshot from checkout) or **Merma**. A reason and an explicit confirmation are required. The cash part is booked as a `Devolución` outflow of the current open register, linked to the sale, even when the sale belongs to a closed register, which is never rewritten; without an open register a cash refund is rejected. A refund above what was collected or above the remaining units is rejected.
+- **Anular** a Collected sale with a required reason and confirmation (restores its stock snapshot). A sale with refunds cannot be cancelled and a cancelled sale cannot be refunded or cancelled again.
+
+Sales are never deleted; refunds are append-only records (`SaleRefunds`). Employees cannot reach the page or either command, and queries revalidate the live Admin actor. Reporting figures (collected, refunded, net) are available per register through the payment summary. See [Sales.md](Docs/Architecture/Sales.md#seller-refunds-and-sales-history) and [CashRegisters.md](Docs/Architecture/CashRegisters.md#refunds).
 
 ## Cash Register
 

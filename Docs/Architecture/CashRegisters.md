@@ -4,9 +4,9 @@ A register is a persisted session, not today's sales total. `DataStorageService.
 
 ## Drawer calculation
 
-For a given register ID, expected cash is `InitialAmount + Sale + Income - Expense - Withdrawal`, using only movements with that register ID. `GetCashInflow` sums Sale and Income movements for that register. A movement has a positive amount and a stable ID/type (`Sale=0`, `Income=1`, `Expense=2`, `Withdrawal=3`), timestamp, register ID and optional sale/user/username/reason. Successful cash checkouts create automatic Sale movements; administrators can also append Income, Expense and Withdrawal from `/cash`. Cash applied to the sale, not received tender or change, is counted. Noncash and zero-total checkouts still link to the open register but do not add a movement.
+For a given register ID, expected cash is `InitialAmount + Sale + Income - Expense - Withdrawal - Refund`, using only movements with that register ID. `GetCashInflow` sums Sale and Income movements for that register. A movement has a positive amount and a stable ID/type (`Sale=0`, `Income=1`, `Expense=2`, `Withdrawal=3`, `Refund=4`), timestamp, register ID and optional sale/user/username/reason. Successful cash checkouts create automatic Sale movements; administrators can also append Income, Expense and Withdrawal from `/cash`. Cash applied to the sale, not received tender or change, is counted. Noncash and zero-total checkouts still link to the open register but do not add a movement.
 
-Open rejects a negative amount and a second open session; close rejects invalid counts. Both request an immediate JSON save. Close requires a detailed cash count (see [Cash count (arqueo) and close](#cash-count-arqueo-and-close)); it stores the expected amount and the counted total as the final amount on the same session, stores the count itself, and appends a `DailySummary` whose completed-today sales total/count/top product are **not** drawer inputs. Summary shows the stored closed-session difference separately from current completed sales. Cancelling a sale changes today's completed metrics and restores its exact stock snapshot, but never removes or reverses the original money movement or recomputes a past closed summary. Refunds and reconciliation are out of scope.
+Open rejects a negative amount and a second open session; close rejects invalid counts. Both request an immediate JSON save. Close requires a detailed cash count (see [Cash count (arqueo) and close](#cash-count-arqueo-and-close)); it stores the expected amount and the counted total as the final amount on the same session, stores the count itself, and appends a `DailySummary` whose completed-today sales total/count/top product are **not** drawer inputs. Summary shows the stored closed-session difference separately from current completed sales. Cancelling a sale changes today's completed metrics and restores its exact stock snapshot, but never removes or reverses the original money movement or recomputes a past closed summary. Returning money is a separate operation, see [Refunds](#refunds); advanced reconciliation is out of scope.
 
 ## Cash count (arqueo) and close
 
@@ -92,6 +92,15 @@ Filters apply only on **Aplicar filtros** and reset to page 1; **Anterior**/**Si
 
 Filtering and paging run in memory over the shared collection; this is adequate for the prototype JSON store but not an indexed query. Receipt warnings for unlinked historical sales remain global, as on `/cash`. A session with more than one linked summary (not produced by the current close) lists all of them. No editing, deletion, reopening, export, bank reconciliation or statistics are provided.
 
+## Refunds
+
+A sale refund (rules in [Sales.md](Sales.md#seller-refunds-and-sales-history)) returns money by payment method. Only its **cash** part touches the drawer: `SaleService.Refund` appends one automatic `CashMovementType.Refund` outflow (positive amount, linked to the original `SaleId`, with the refunding Admin and the reason) to the **current open register** and counts it as a subtraction in expected cash. `Refund` movements are never entered manually (`AddManualMovement` still accepts only Income, Expense and Withdrawal).
+
+- **Closed registers stay untouched.** A refund of a sale that belongs to an already closed register is booked in the register that is open now. The earlier close, its count, its stored expected/final amounts and its `DailySummary` are not rewritten; the sale keeps its original `CashRegisterId`, so the correction is an identifiable, separate operation linked to the sale.
+- **No open register, no cash refund.** The command is rejected before any mutation (`Debe haber una caja abierta para devolver efectivo.`). It is also rejected when the cash amount exceeds the available expected cash of the open register, or when the balance or the movement counter would overflow.
+- **Noncash refunds** (card, transfer, Mercado Pago, other) create no movement; the refund record stores the open register ID (or none) as the register that booked it.
+- **Payment summary.** `CashPaymentRow.RefundedAmount`/`NetAmount` and `CashPaymentSummary.RefundedTotal`/`NetTotal` expose, per method, the refunds booked to the register (by the register that recorded them, not by the sale's register) and the resulting net. Registered receipts (`Amount`, `RegisteredTotal`) never change: they are what was collected. Overflow makes the refunded and net figures unavailable (`null`) rather than approximate. The Spanish cash pages do not render these two figures yet; they list the `Devolución` movement as an outflow (−) in `/cash` and `/cash/history`.
+
 ## Manual movement boundary
 
 `CashRegisterService.AddManualMovement(type, amount, reason, actor)` owns manual entries. It accepts only Income, Expense and Withdrawal, a positive decimal amount, a required trimmed reason and the current canonical open session. Expense and Withdrawal cannot exceed that session's available expected cash; spending exactly the available balance is allowed. There is no new rounding rule.
@@ -110,7 +119,7 @@ JSON persists `CashRegisters`, `CashMovements`, `CashCounts`, `CurrentCashRegist
 
 ## Limits
 
-This is single-process, prototype-level JSON persistence. `SaveToFile` logs write failures rather than guaranteeing disk durability; ingredient deductions may perform intermediate saves before the final sale/snapshot/movement save. Failed deduction leaves earlier writes and an unreliable sale snapshot, but no cash movement. Mutable shared collections have no locking or transaction rollback; callers must not infer durable atomic checkout from a normal return. Manual entry uses the same logged-save-failure mechanism: UI confirmation acknowledges in-memory registration, not guaranteed disk durability. Concurrent validation and writes are not atomic. The stale-review check is optimistic and in-process, not a lock: validation and the close mutation are not atomic against concurrent writers, and nothing is pushed across circuits; another circuit sees the stale alert on its next render or when it confirms. Refunds, ledger editing/deletion, history editing and advanced reconciliation remain out of scope.
+This is single-process, prototype-level JSON persistence. `SaveToFile` logs write failures rather than guaranteeing disk durability; ingredient deductions may perform intermediate saves before the final sale/snapshot/movement save. Failed deduction leaves earlier writes and an unreliable sale snapshot, but no cash movement. Mutable shared collections have no locking or transaction rollback; callers must not infer durable atomic checkout from a normal return. Manual entry uses the same logged-save-failure mechanism: UI confirmation acknowledges in-memory registration, not guaranteed disk durability. Concurrent validation and writes are not atomic. The stale-review check is optimistic and in-process, not a lock: validation and the close mutation are not atomic against concurrent writers, and nothing is pushed across circuits; another circuit sees the stale alert on its next render or when it confirms. Refund movements follow the same limits. Ledger editing/deletion, history editing and advanced reconciliation remain out of scope.
 
 ## Verification
 
@@ -122,6 +131,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cash-move
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cash-count.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-auth-isolation.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cash-history.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-sales-refunds.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-sales-history.ps1
 dotnet build
 ```
 

@@ -61,6 +61,38 @@ Mixed allocations record applied amounts but add no fees, tips, refunds, or exte
 
 `GetToday()`, today's total/count and top-product calculations include only Completed sales; the Summary selector and displayed metrics follow the same filter. Closed `DailySummary` records and past cash reconciliation are **not** retroactively updated. Cash payments are not refunded or reversed. Authentication identity is isolated per circuit and cancellation audit attribution uses its freshly validated actor. Business state remains singleton/shared; permission checks and writes are not atomic across concurrent changes.
 
+## Seller, refunds and sales history
+
+### Seller recording
+
+`SaleService.Add()` records the operator of every new sale as `Sale.CreatedByUserId` and `CreatedByUsername`, taken from the live authenticated actor (both Admin and Employee may sell). Legacy sales have both fields `null`; the history shows them as **Sin registro** and never infers an operator.
+
+### Refunds and cancellation are separate operations
+
+Cancellation voids the whole sale and restores its stock snapshot; a refund returns money for some or all of the goods and leaves the sale `Completed`. They are recorded separately and never combine: a sale with any recorded refund cannot be cancelled (`La venta tiene devoluciones registradas; no puede anularse.`) and a cancelled sale admits no refund (`La venta anulada no admite devoluciones.`). Sales are never deleted or rewritten by a refund; the refund is an append-only `SaleRefund` record in `DataStorageService.SaleRefunds`.
+
+### Refund rules (`SaleService.Refund`)
+
+`GetRefundability(saleId)`, `PreviewRefund(saleId, lines)` and `Refund(saleId, reason, lines, payments, actor)` own the rules; the page only collects inputs.
+
+- **Admin only.** The actor is revalidated against the live stored user (identity, credentials hash, Admin role).
+- **By line and quantity.** Each requested line names a sale item index and a quantity between 1 and the units still unrefunded. A line cannot be repeated in one refund; at least one line and a nonblank reason (trimmed) are required. A refund above what was collected or above the remaining units is rejected before anything changes.
+- **Computed amount.** The caller never provides line amounts. A line amount is `line subtotal * quantity / sold quantity`, prorated by the sale discount (`Total / Subtotal`), rounded to cents (away from zero). A refund that covers every remaining unit takes the exact remaining refundable amount, so cumulative refunds always equal the sale total and no rounding cent is lost or invented; the difference is absorbed by the largest line.
+- **Per-method caps.** The caller assigns an amount per payment method. Each amount is positive, a method appears once, and no method exceeds what was collected with it minus what was already refunded through it. The assigned amounts must add up exactly to the refund total.
+- **Restock or waste, per line (S7).** Each line is marked `Restock` (valid physical return: ingredients go back to stock) or `Waste` (merma: money is returned and stock is untouched). Restock uses the per-line consumption snapshot recorded at checkout (`SaleItem.StockConsumption`), proportionally to the refunded quantity. Legacy lines, or sales whose snapshot is unreliable, have no such snapshot, so only `Waste` is accepted (`... sólo puede devolverse como merma`). All restock quantities are validated before any ingredient changes.
+- **Cash goes through the current open register.** The cash part of a refund creates one `CashMovementType.Refund` outflow linked to the original sale in the **current open register**, even when the sale belongs to an already closed register; the earlier close, count and summary stay untouched. With no open register a cash refund is rejected (`Debe haber una caja abierta para devolver efectivo.`), as is an amount above the available drawer cash. Noncash refunds create no movement and, without an open register, are recorded with no register. See [CashRegisters.md](CashRegisters.md#refunds).
+- **Atomic validation.** Every rejection happens before the single mutation block (ingredients, refund record, cash movement, one save).
+
+### Derived states
+
+`SaleService.GetDisplayStatus(sale, refunds)` derives, without persisting, **Cobrada** (`Collected`), **Anulada** (`Cancelled`), **Parcialmente devuelta** (`PartiallyRefunded`) and **Devuelta** (`Refunded`, every unit refunded). `GetDisplayStatusLabel` provides the Spanish labels shared by the list and the detail.
+
+### Sales history page
+
+The Admin-only `/sales/history` and `/sales/history/{id}` page (**Historial de ventas**) reads through `SaleHistoryService`, which returns detached snapshots and never saves. Entries carry the derived `DisplayStatus` and the refunded total; the status filter offers **Cobradas** (display status Collected only), **Anuladas**, **Parcialmente devueltas** and **Devueltas**. The detail lists lines, discounts, payments and the events in chronological order: sale registration, cancellation and every refund (date, user, reason, amount, refund ID).
+
+The detail has a **Devoluciones** section with past refunds (date, user, reason, lines with quantity × product and **Vuelve a stock**/**Merma**, methods and amounts, total) and, while units remain, the refund form: quantity (0 to remaining) and destination per line (restock disabled with *Sin registro de consumo: solo merma* when there is no snapshot), **Calcular importe** (a non-mutating `PreviewRefund`), an amount per method showing collected, refunded and remaining, a mandatory reason and an explicit confirmation. A note states that cash is reimbursed as an outflow of the current open register. The **Anulación** section is offered only for a Collected sale; otherwise the page explains why it is unavailable. Every callback rechecks the Admin role, and the commands (`Refund`, `Cancel`) are preceded by a strict live `GetDetail`. Service errors are shown in Spanish next to the form; success reloads the detail and the list.
+
 ## JSON compatibility and limits
 
 `DataStorageService` serializes the `Sales` collection and its items with `System.Text.Json` into `data.json` relative to the process working directory. Notes are included with each sale line and restored on load. Older JSON that omits `Notes` loads with `null`; no migration is required. Normalization happens on new checkout, not as a rewrite of historical sales during loading.
@@ -68,6 +100,8 @@ Mixed allocations record applied amounts but add no fees, tips, refunds, or exte
 Line and sale discount type/value are saved and restored with their owning objects. With the existing serializer options, enum types are numeric and values are JSON decimals. Legacy JSON omitting discount fields loads with model defaults `None`/`0`, preserving undiscounted totals; no migration or root data-file rewrite is needed. Read-only gross/subtotal/discount/total properties are serialized as derived amounts, but deserialization recomputes them from price, quantity, and discount fields instead of trusting stored totals.
 
 Payments are serialized inside each sale and restored by the existing `System.Text.Json` sale deserialization. Methods use numeric enum values and amounts/received amounts retain decimal precision; read-only `Change` is recomputed from the payment fields on reload, not accepted as stored input. Historical JSON that omits `Payments` loads with the model's empty collection and keeps its existing totals; no inferred payment, migration, or root data-file rewrite is required. Older payments omitting `ReceivedAmount` keep it null rather than inferring tender from `Amount`, and therefore show zero change even for historical cash. Loading does not apply new checkout validation to historical sales, even when their positive totals have no payment or cash tender. Passing such a sale to `Add()` as a new checkout requires a valid payment.
+
+`SaleRefunds` is persisted at the JSON root with its own `NextSaleRefundId` counter; each refund stores its lines (index, quantity, disposition, computed amount), method amounts, reason, user snapshot and the register that booked it. A legacy file without the list loads an empty ledger; an explicit `null`, a null entry or an inconsistent refund (unknown sale, quantity above the sold units, line or method totals that differ from the refund total, cumulative refunds above the sale total) fails loading clearly. Legacy sales without operator or per-line consumption load unchanged.
 
 Older JSON without `Status` defaults to Completed (`0`), with null audit fields, an empty snapshot and `IsStockConsumptionReliable = false`. Reliable empty snapshots from new no-ingredient checkouts are distinct from legacy sales and can be cancelled without stock changes. New status, audit, stock consumption and reliability fields persist with the sale. Explicit null or malformed snapshots, missing ingredients, changed units and restoration overflow block cancellation before mutations.
 

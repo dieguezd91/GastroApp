@@ -354,7 +354,7 @@
     private static string SignedMoney(decimal amount) => $"{(amount > 0m ? "+" : "")}${amount}";
 
     private static bool IsOutflow(CashMovementType type) =>
-        type == CashMovementType.Expense || type == CashMovementType.Withdrawal;
+        type == CashMovementType.Expense || type == CashMovementType.Withdrawal || type == CashMovementType.Refund;
 
     private static string DifferenceLabel(decimal difference) =>
         difference < 0m ? "Faltante" : difference > 0m ? "Sobrante" : "Exacto";
@@ -369,6 +369,7 @@
         CashMovementType.Income => "Ingreso manual",
         CashMovementType.Expense => "Gasto manual",
         CashMovementType.Withdrawal => "Retiro manual",
+        CashMovementType.Refund => "Devolución",
         _ => "Tipo desconocido"
     };
 

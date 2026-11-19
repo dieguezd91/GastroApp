@@ -1,6 +1,7 @@
 namespace GastroApp.Models;
 
-public enum SaleHistoryStatusFilter { All, Completed, Cancelled }
+// Completed = display status Collected (cobradas sin devoluciones); refunded sales have their own filters.
+public enum SaleHistoryStatusFilter { All, Completed, Cancelled, PartiallyRefunded, Refunded }
 
 // Dates compare by calendar day (time of day ignored), inclusive at both ends.
 // OperatorUserId selects one user; WithoutOperator selects legacy sales without one ("Sin registro").
@@ -27,18 +28,23 @@ public sealed class SaleHistoryEntry
     public int? OperatorUserId { get; }
     public string? OperatorUsername { get; }
     public SaleStatus Status { get; }
+    // Derived: Collected / Cancelled / PartiallyRefunded / Refunded (S4). Status stays the stored sale state.
+    public SaleDisplayStatus DisplayStatus { get; }
     public decimal? Total { get; }
+    // Sum of recorded refunds; null when unavailable (decimal overflow).
+    public decimal? RefundedTotal { get; }
     public long ItemCount { get; }
     public IReadOnlyList<string> ProductNames { get; }
     public IReadOnlyList<PaymentMethod> PaymentMethods { get; }
     public bool AmountsUnavailable { get; }
 
     internal SaleHistoryEntry(int id, DateTime date, int? cashRegisterId, int? operatorUserId, string? operatorUsername,
-        SaleStatus status, decimal? total, long itemCount, IEnumerable<string> productNames,
-        IEnumerable<PaymentMethod> paymentMethods, bool amountsUnavailable)
+        SaleStatus status, SaleDisplayStatus displayStatus, decimal? total, decimal? refundedTotal, long itemCount,
+        IEnumerable<string> productNames, IEnumerable<PaymentMethod> paymentMethods, bool amountsUnavailable)
     {
         Id = id; Date = date; CashRegisterId = cashRegisterId; OperatorUserId = operatorUserId;
-        OperatorUsername = operatorUsername; Status = status; Total = total; ItemCount = itemCount;
+        OperatorUsername = operatorUsername; Status = status; DisplayStatus = displayStatus; Total = total;
+        RefundedTotal = refundedTotal; ItemCount = itemCount;
         ProductNames = productNames.ToList().AsReadOnly();
         PaymentMethods = paymentMethods.ToList().AsReadOnly();
         AmountsUnavailable = amountsUnavailable;
@@ -95,10 +101,11 @@ public sealed class SaleHistoryPayment
     }
 }
 
-// Refund events are added here later; consumers must not assume a fixed set of kinds.
-public enum SaleHistoryEventKind { Created, Cancelled }
+// Consumers must not assume a fixed set of kinds.
+public enum SaleHistoryEventKind { Created, Cancelled, Refunded }
 
 // At/user/reason are null when a legacy record never stored them.
+// Amount and RefundId are only set on Refunded events.
 public sealed class SaleHistoryEvent
 {
     public SaleHistoryEventKind Kind { get; }
@@ -106,10 +113,14 @@ public sealed class SaleHistoryEvent
     public int? UserId { get; }
     public string? Username { get; }
     public string? Reason { get; }
+    public decimal? Amount { get; }
+    public int? RefundId { get; }
 
-    internal SaleHistoryEvent(SaleHistoryEventKind kind, DateTime? at, int? userId, string? username, string? reason)
+    internal SaleHistoryEvent(SaleHistoryEventKind kind, DateTime? at, int? userId, string? username, string? reason,
+        decimal? amount = null, int? refundId = null)
     {
         Kind = kind; At = at; UserId = userId; Username = username; Reason = reason;
+        Amount = amount; RefundId = refundId;
     }
 }
 

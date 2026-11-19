@@ -11,7 +11,7 @@
 
 <div class="page-container">
     <h1>🧾 Historial de ventas</h1>
-    <p>Consulta de ventas registradas. Las ventas nunca se eliminan: solo pueden anularse desde su detalle, con motivo y confirmación.</p>
+    <p>Consulta de ventas registradas. Las ventas nunca se eliminan: desde su detalle pueden anularse (venta cobrada sin devoluciones) o devolverse total o parcialmente, siempre con motivo y confirmación.</p>
 
     @if (SaleId.HasValue)
     {
@@ -24,7 +24,7 @@
             else
             {
                 var entry = detail.Entry;
-                <h3>Venta #@entry.Id — @StatusLabel(entry.Status)</h3>
+                <h3>Venta #@entry.Id — @StatusLabel(entry.DisplayStatus)</h3>
 
                 <h4>Información general</h4>
                 <div class="cash-info">
@@ -51,11 +51,15 @@
                     </div>
                     <div class="info-card">
                         <h4>Estado</h4>
-                        <p>@StatusLabel(entry.Status)</p>
+                        <p>@StatusLabel(entry.DisplayStatus)</p>
                     </div>
                     <div class="info-card">
                         <h4>Total</h4>
                         <p class="amount">@Money(detail.Total)</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Devuelto</h4>
+                        <p class="amount">@Money(entry.RefundedTotal)</p>
                     </div>
                 </div>
                 @if (entry.AmountsUnavailable)
@@ -128,7 +132,11 @@
                             <strong>@EventLabel(evt.Kind)</strong>
                             — @(evt.At.HasValue ? evt.At.Value.ToString("dd/MM/yyyy HH:mm") : "Sin fecha registrada")
                             — @(string.IsNullOrWhiteSpace(evt.Username) ? "Sin registro" : evt.Username)
-                            @if (evt.Kind == SaleHistoryEventKind.Cancelled)
+                            @if (evt.Kind == SaleHistoryEventKind.Refunded)
+                            {
+                                <span>— Devolución #@evt.RefundId por @Money(evt.Amount)</span>
+                            }
+                            @if (evt.Kind != SaleHistoryEventKind.Created)
                             {
                                 <span>— Motivo: @(string.IsNullOrWhiteSpace(evt.Reason) ? "Sin motivo registrado" : evt.Reason)</span>
                             }
@@ -136,12 +144,149 @@
                     }
                 </ul>
 
+                <h4>Devoluciones</h4>
+                @if (!string.IsNullOrEmpty(refundSuccess))
+                {
+                    <p role="status">@refundSuccess</p>
+                }
+                @if (refunds.Count == 0)
+                {
+                    <p>La venta no tiene devoluciones registradas.</p>
+                }
+                else
+                {
+                    <div style="overflow-x: auto;">
+                        <table class="table">
+                            <thead><tr><th>Fecha</th><th>Usuario</th><th>Motivo</th><th>Líneas</th><th>Medios e importes</th><th>Total</th></tr></thead>
+                            <tbody>
+                                @foreach (var refund in refunds)
+                                {
+                                    <tr @key="refund.Id">
+                                        <td>@refund.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                                        <td>@(string.IsNullOrWhiteSpace(refund.Username) ? "Sin registro" : refund.Username)</td>
+                                        <td>@(string.IsNullOrWhiteSpace(refund.Reason) ? "Sin motivo registrado" : refund.Reason)</td>
+                                        <td>
+                                            @foreach (var line in refund.Lines)
+                                            {
+                                                <div>@line.Quantity × @RefundLineName(line.SaleItemIndex) — @DispositionLabel(line.Disposition) ($@line.Amount)</div>
+                                            }
+                                        </td>
+                                        <td>
+                                            @foreach (var payment in refund.Payments)
+                                            {
+                                                <div>@PaymentLabel(payment.PaymentMethod): $@payment.Amount</div>
+                                            }
+                                        </td>
+                                        <td>$@refund.Total</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                @if (refundability != null && refundability.CanRefund)
+                {
+                    <h5>Registrar devolución</h5>
+                    <p>Indique cuántas unidades se devuelven de cada línea y qué pasa con la mercadería. El importe se calcula con los descuentos prorrateados.</p>
+                    <div style="overflow-x: auto;">
+                        <table class="table">
+                            <thead><tr><th>Producto</th><th>Vendidas</th><th>Ya devueltas</th><th>Cantidad a devolver</th><th>Destino</th></tr></thead>
+                            <tbody>
+                                @foreach (var line in refundability.Lines)
+                                {
+                                    var index = line.SaleItemIndex;
+                                    <tr @key="index">
+                                        <td>@line.ProductName</td>
+                                        <td>@line.SoldQuantity</td>
+                                        <td>@line.RefundedQuantity</td>
+                                        <td>
+                                            @if (line.RemainingQuantity > 0)
+                                            {
+                                                <input type="number" min="0" max="@line.RemainingQuantity" class="form-control" aria-label="Cantidad a devolver de @line.ProductName"
+                                                       @bind="refundQuantities[index]" @bind:after="InvalidatePreview" />
+                                            }
+                                            else
+                                            {
+                                                @:Sin unidades pendientes
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (line.RemainingQuantity > 0)
+                                            {
+                                                <select class="form-control" aria-label="Destino de @line.ProductName" @bind="refundDispositions[index]" @bind:after="InvalidatePreview">
+                                                    <option value="@RefundDisposition.Restock" disabled="@(!line.CanRestock)">@DispositionLabel(RefundDisposition.Restock)</option>
+                                                    <option value="@RefundDisposition.Waste">@DispositionLabel(RefundDisposition.Waste)</option>
+                                                </select>
+                                                @if (!line.CanRestock)
+                                                {
+                                                    <small>Sin registro de consumo: solo merma</small>
+                                                }
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn btn-secondary" @onclick="CalculateRefund">Calcular importe</button>
+                    </div>
+                    @if (refundPreviewTotal.HasValue)
+                    {
+                        <p role="status"><strong>Importe a devolver: $@refundPreviewTotal.Value</strong></p>
+                        @if (refundPreviewLines != null)
+                        {
+                            <ul>
+                                @foreach (var line in refundPreviewLines)
+                                {
+                                    <li>@line.Quantity × @RefundLineName(line.SaleItemIndex): $@line.Amount</li>
+                                }
+                            </ul>
+                        }
+                    }
+
+                    <h5>Medios e importes reintegrados</h5>
+                    <p>El efectivo se reintegra como egreso de la caja abierta actual. La suma debe ser igual al importe a devolver.</p>
+                    <div class="form-group">
+                        @foreach (var method in refundability.Methods.Where(m => m.RemainingAmount > 0m))
+                        {
+                            var methodKey = method.PaymentMethod;
+                            <div>
+                                <label for="refund-amount-@((int)methodKey)">@PaymentLabel(methodKey) — cobrado $@method.PaidAmount, devuelto $@method.RefundedAmount, disponible $@method.RemainingAmount</label>
+                                <input id="refund-amount-@((int)methodKey)" type="number" min="0" step="0.01" class="form-control" @bind="refundAmounts[methodKey]" />
+                            </div>
+                        }
+                    </div>
+                    <p>Asignado: $@RefundAssigned()@(refundPreviewTotal.HasValue ? $" de ${refundPreviewTotal.Value}" : "")</p>
+                    <div class="form-group">
+                        <label for="refund-reason">Motivo de la devolución (obligatorio)</label>
+                        <textarea id="refund-reason" class="form-control" @bind="refundReason" @bind:event="oninput"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="refund-confirm">
+                            <input id="refund-confirm" type="checkbox" @bind="refundConfirmed" />
+                            Confirmo que quiero registrar esta devolución
+                        </label>
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn btn-danger" @onclick="ConfirmRefund">Confirmar devolución</button>
+                    </div>
+                }
+                else if (refundability != null)
+                {
+                    <p>@(entry.DisplayStatus == SaleDisplayStatus.Cancelled ? "La venta anulada no admite devoluciones." : "No quedan unidades pendientes de devolución.")</p>
+                }
+                @if (!string.IsNullOrEmpty(refundError))
+                {
+                    <p role="alert">@refundError</p>
+                }
+
                 <h4>Anulación</h4>
                 @if (!string.IsNullOrEmpty(cancelSuccess))
                 {
                     <p role="status">@cancelSuccess</p>
                 }
-                @if (entry.Status == SaleStatus.Completed)
+                @if (entry.DisplayStatus == SaleDisplayStatus.Collected)
                 {
                     @if (!cancelOpen)
                     {
@@ -165,9 +310,13 @@
                         </div>
                     }
                 }
-                else
+                else if (entry.DisplayStatus == SaleDisplayStatus.Cancelled)
                 {
                     <p>La venta ya no está cobrada, por lo que no puede anularse de nuevo.</p>
+                }
+                else
+                {
+                    <p>La venta tiene devoluciones registradas y no puede anularse: anular y devolver dinero son operaciones distintas, y el dinero ya devuelto no se revierte.</p>
                 }
                 @if (!string.IsNullOrEmpty(cancelError))
                 {
@@ -226,6 +375,8 @@
                     <option value="@SaleHistoryStatusFilter.All">Todas</option>
                     <option value="@SaleHistoryStatusFilter.Completed">Cobradas</option>
                     <option value="@SaleHistoryStatusFilter.Cancelled">Anuladas</option>
+                    <option value="@SaleHistoryStatusFilter.PartiallyRefunded">Parcialmente devueltas</option>
+                    <option value="@SaleHistoryStatusFilter.Refunded">Devueltas</option>
                 </select>
             </div>
             <div class="form-group">
@@ -255,7 +406,7 @@
             <div style="overflow-x: auto;">
                 <table class="table">
                     <thead>
-                        <tr><th>N.º</th><th>Fecha</th><th>Operador</th><th>Caja</th><th>Productos</th><th>Medios de pago</th><th>Estado</th><th>Total</th><th></th></tr>
+                        <tr><th>N.º</th><th>Fecha</th><th>Operador</th><th>Caja</th><th>Productos</th><th>Medios de pago</th><th>Estado</th><th>Total</th><th>Devuelto</th><th></th></tr>
                     </thead>
                     <tbody>
                         @foreach (var entry in historyPage.Entries)
@@ -267,8 +418,9 @@
                                 <td>@(entry.CashRegisterId.HasValue ? $"#{entry.CashRegisterId}" : "—")</td>
                                 <td>@(entry.ProductNames.Count == 0 ? "—" : string.Join(", ", entry.ProductNames))</td>
                                 <td>@(entry.PaymentMethods.Count == 0 ? "—" : string.Join(", ", entry.PaymentMethods.Select(PaymentLabel)))</td>
-                                <td>@StatusLabel(entry.Status)</td>
+                                <td>@StatusLabel(entry.DisplayStatus)</td>
                                 <td>@Money(entry.Total)</td>
+                                <td>@(entry.RefundedTotal == 0m ? "—" : Money(entry.RefundedTotal))</td>
                                 <td><button class="btn btn-secondary btn-small" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
                             </tr>
                         }
@@ -310,6 +462,18 @@
     private bool cancelConfirmed;
     private string? cancelError;
     private string? cancelSuccess;
+    // Refund form: per-line quantity/destination and per-method amounts, keyed by line index / payment method.
+    private SaleRefundability? refundability;
+    private IReadOnlyList<SaleRefund> refunds = Array.Empty<SaleRefund>();
+    private readonly Dictionary<int, int> refundQuantities = new();
+    private readonly Dictionary<int, RefundDisposition> refundDispositions = new();
+    private readonly Dictionary<PaymentMethod, decimal?> refundAmounts = new();
+    private decimal? refundPreviewTotal;
+    private IReadOnlyList<SaleRefundLine>? refundPreviewLines;
+    private string? refundReason;
+    private bool refundConfirmed;
+    private string? refundError;
+    private string? refundSuccess;
 
     // Runs on first load and on every route change, so each selection rechecks live permissions.
     protected override void OnParametersSet()
@@ -320,6 +484,8 @@
             shownSaleId = SaleId;
             ResetCancelForm();
             cancelSuccess = null;
+            ResetRefundForm();
+            refundSuccess = null;
         }
         if (historyPage == null && historyError == null) LoadHistory();
         LoadDetail();
@@ -358,6 +524,8 @@
     {
         detail = null;
         detailMessage = null;
+        refundability = null;
+        refunds = Array.Empty<SaleRefund>();
         if (!SaleId.HasValue) return;
         try
         {
@@ -365,6 +533,21 @@
             if (detail == null) detailMessage = $"No existe una venta con el ID {SaleId}.";
         }
         catch (UnauthorizedAccessException) { EnsureAdmin(); }
+        if (detail != null) LoadRefundData(detail.Entry.Id);
+    }
+
+    // Reached only after the strict history query accepted the live admin.
+    private void LoadRefundData(int saleId)
+    {
+        refundability = SaleService.GetRefundability(saleId);
+        refunds = SaleService.GetRefunds(saleId);
+        foreach (var line in refundability?.Lines ?? Array.Empty<SaleRefundLineStatus>())
+        {
+            refundQuantities.TryAdd(line.SaleItemIndex, 0);
+            refundDispositions.TryAdd(line.SaleItemIndex, RefundDisposition.Waste);
+        }
+        foreach (var method in refundability?.Methods ?? Array.Empty<SaleRefundMethodStatus>())
+            refundAmounts.TryAdd(method.PaymentMethod, null);
     }
 
     private SaleHistoryFilter BuildFilter(int page)
@@ -428,7 +611,7 @@
     private void StartCancel()
     {
         if (!EnsureAdmin()) return;
-        if (detail?.Entry.Status != SaleStatus.Completed) return;
+        if (detail?.Entry.DisplayStatus != SaleDisplayStatus.Collected) return;
         ResetCancelForm();
         cancelSuccess = null;
         cancelOpen = true;
@@ -488,14 +671,119 @@
         LoadHistory();
     }
 
+    private void ResetRefundForm()
+    {
+        refundQuantities.Clear();
+        refundDispositions.Clear();
+        refundAmounts.Clear();
+        refundPreviewTotal = null;
+        refundPreviewLines = null;
+        refundReason = null;
+        refundConfirmed = false;
+        refundError = null;
+    }
+
+    // The amount shown is only valid for the quantities it was computed from.
+    private void InvalidatePreview()
+    {
+        refundPreviewTotal = null;
+        refundPreviewLines = null;
+    }
+
+    private decimal RefundAssigned() => refundAmounts.Values.Sum(a => a ?? 0m);
+
+    private List<SaleRefundLine> BuildRefundLines() => refundQuantities
+        .Where(q => q.Value != 0)
+        .OrderBy(q => q.Key)
+        .Select(q => new SaleRefundLine
+        {
+            SaleItemIndex = q.Key, Quantity = q.Value,
+            Disposition = refundDispositions.GetValueOrDefault(q.Key, RefundDisposition.Waste)
+        }).ToList();
+
+    private List<SaleRefundPayment> BuildRefundPayments() => refundAmounts
+        .Where(a => a.Value.HasValue && a.Value.Value != 0m)
+        .OrderBy(a => a.Key)
+        .Select(a => new SaleRefundPayment { PaymentMethod = a.Key, Amount = a.Value!.Value }).ToList();
+
+    // Non-mutating: computes the amount SaleService.Refund would use for the chosen lines.
+    private void CalculateRefund()
+    {
+        if (!EnsureAdmin()) return;
+        refundError = null;
+        refundSuccess = null;
+        InvalidatePreview();
+        if (!SaleId.HasValue || detail == null) return;
+        try
+        {
+            HistoryService.GetDetail(SaleId.Value, AuthService.CurrentUser);
+            var preview = SaleService.PreviewRefund(SaleId.Value, BuildRefundLines());
+            refundPreviewTotal = preview.Total;
+            refundPreviewLines = preview.Lines;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            if (EnsureAdmin()) refundError = ex.Message;
+        }
+        catch (InvalidOperationException ex)
+        {
+            refundError = ex.Message;
+        }
+    }
+
+    // Second mutation of this page besides cancellation: SaleService.Refund, after explicit confirmation.
+    // Reason, quantities, amounts and per-method caps are validated by the service, which owns those rules.
+    private void ConfirmRefund()
+    {
+        if (!EnsureAdmin()) return;
+        refundError = null;
+        refundSuccess = null;
+        if (!SaleId.HasValue || detail == null) return;
+        if (!refundConfirmed)
+        {
+            refundError = "Debe confirmar la devolución.";
+            return;
+        }
+        SaleRefund refund;
+        try
+        {
+            var actor = AuthService.CurrentUser;
+            // Strict live-admin revalidation (identity, credentials hash and role) before the command.
+            HistoryService.GetDetail(SaleId.Value, actor);
+            refund = SaleService.Refund(SaleId.Value, refundReason, BuildRefundLines(), BuildRefundPayments(), actor);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            if (EnsureAdmin()) refundError = ex.Message;
+            return;
+        }
+        catch (InvalidOperationException ex)
+        {
+            refundError = ex.Message;
+            return;
+        }
+        ResetRefundForm();
+        refundSuccess = $"Devolución #{refund.Id} registrada por ${refund.Total}.";
+        LoadDetail();
+        LoadHistory();
+    }
+
+    private string RefundLineName(int index)
+    {
+        var line = refundability?.Lines.FirstOrDefault(l => l.SaleItemIndex == index);
+        return string.IsNullOrWhiteSpace(line?.ProductName) ? $"Línea {index + 1}" : line.ProductName;
+    }
+
+    private static string DispositionLabel(RefundDisposition disposition) => disposition switch
+    {
+        RefundDisposition.Restock => "Vuelve a stock",
+        RefundDisposition.Waste => "Merma",
+        _ => "Destino desconocido"
+    };
+
     private static string Money(decimal? amount) => amount.HasValue ? $"${amount.Value}" : "No disponible";
 
-    private static string StatusLabel(SaleStatus status) => status switch
-    {
-        SaleStatus.Completed => "Cobrada",
-        SaleStatus.Cancelled => "Anulada",
-        _ => "Estado desconocido"
-    };
+    private static string StatusLabel(SaleDisplayStatus status) => SaleService.GetDisplayStatusLabel(status);
 
     private static string OperatorLabel(SaleHistoryEntry entry) =>
         !string.IsNullOrWhiteSpace(entry.OperatorUsername) ? entry.OperatorUsername
@@ -505,6 +793,7 @@
     {
         SaleHistoryEventKind.Created => "Venta registrada",
         SaleHistoryEventKind.Cancelled => "Venta anulada",
+        SaleHistoryEventKind.Refunded => "Devolución",
         _ => "Evento"
     };
 

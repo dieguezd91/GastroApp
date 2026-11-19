@@ -3,7 +3,7 @@ using GastroApp.Models;
 namespace GastroApp.Services;
 
 // Read-only sales history: nothing here saves, allocates ids or changes a sale.
-// Cancellation stays in SaleService; this service only exposes detached snapshots.
+// Cancellation and refunds stay in SaleService; this service only exposes detached snapshots.
 public class SaleHistoryService
 {
     private const int MaxPageSize = 50;
@@ -35,8 +35,7 @@ public class SaleHistoryService
                 && (!filter.WithoutOperator || s.CreatedByUserId == null)
                 && (!filter.PaymentMethod.HasValue || Payments(s).Any(p => p.PaymentMethod == filter.PaymentMethod.Value))
                 && (!filter.CashRegisterId.HasValue || s.CashRegisterId == filter.CashRegisterId.Value)
-                && (filter.Status == SaleHistoryStatusFilter.All
-                    || s.Status == (filter.Status == SaleHistoryStatusFilter.Cancelled ? SaleStatus.Cancelled : SaleStatus.Completed))
+                && MatchesStatus(filter.Status, SaleService.GetDisplayStatus(s, Refunds(s.Id)))
                 && (string.IsNullOrEmpty(text) || Items(s).Any(i => i.ProductName != null
                     && i.ProductName.Contains(text, StringComparison.OrdinalIgnoreCase))))
             .OrderByDescending(s => s.Date).ThenByDescending(s => s.Id)
@@ -101,24 +100,46 @@ public class SaleHistoryService
         catch (OverflowException) { return null; }
     }
 
-    private static SaleHistoryEntry BuildEntry(Sale sale)
+    // "Completed" is the Collected display status: refunded sales are listed under their own filters.
+    private static bool MatchesStatus(SaleHistoryStatusFilter filter, SaleDisplayStatus status) => filter switch
+    {
+        SaleHistoryStatusFilter.All => true,
+        SaleHistoryStatusFilter.Completed => status == SaleDisplayStatus.Collected,
+        SaleHistoryStatusFilter.Cancelled => status == SaleDisplayStatus.Cancelled,
+        SaleHistoryStatusFilter.PartiallyRefunded => status == SaleDisplayStatus.PartiallyRefunded,
+        SaleHistoryStatusFilter.Refunded => status == SaleDisplayStatus.Refunded,
+        _ => false
+    };
+
+    // Refunds are append-only records in storage; legacy JSON may hold null elements.
+    private List<SaleRefund> Refunds(int saleId) => _storage.SaleRefunds
+        .Where(r => r != null && r.SaleId == saleId).OrderBy(r => r.Date).ThenBy(r => r.Id).ToList();
+
+    private SaleHistoryEntry BuildEntry(Sale sale)
     {
         var total = Amount(() => sale.Total);
+        var refunds = Refunds(sale.Id);
         return new SaleHistoryEntry(sale.Id, sale.Date, sale.CashRegisterId, sale.CreatedByUserId,
             string.IsNullOrWhiteSpace(sale.CreatedByUsername) ? null : sale.CreatedByUsername,
-            sale.Status, total, Items(sale).Sum(i => (long)i.Quantity),
+            sale.Status, SaleService.GetDisplayStatus(sale, refunds), total, Amount(() => refunds.Sum(r => r.Total)),
+            Items(sale).Sum(i => (long)i.Quantity),
             Items(sale).Select(i => i.ProductName ?? string.Empty),
             Payments(sale).Select(p => p.PaymentMethod).Distinct(), total == null);
     }
 
-    // Chronological events; refund events join this list later.
-    private static IEnumerable<SaleHistoryEvent> BuildEvents(Sale sale)
+    // Created first, then cancellation and refunds by date (undated legacy cancellation last).
+    private IEnumerable<SaleHistoryEvent> BuildEvents(Sale sale)
     {
         yield return new SaleHistoryEvent(SaleHistoryEventKind.Created, sale.Date, sale.CreatedByUserId,
             string.IsNullOrWhiteSpace(sale.CreatedByUsername) ? null : sale.CreatedByUsername, null);
+        var later = new List<SaleHistoryEvent>();
         if (sale.Status == SaleStatus.Cancelled)
-            yield return new SaleHistoryEvent(SaleHistoryEventKind.Cancelled, sale.CancelledAt, sale.CancelledByUserId,
+            later.Add(new SaleHistoryEvent(SaleHistoryEventKind.Cancelled, sale.CancelledAt, sale.CancelledByUserId,
                 string.IsNullOrWhiteSpace(sale.CancelledByUsername) ? null : sale.CancelledByUsername,
-                string.IsNullOrWhiteSpace(sale.CancellationReason) ? null : sale.CancellationReason);
+                string.IsNullOrWhiteSpace(sale.CancellationReason) ? null : sale.CancellationReason));
+        later.AddRange(Refunds(sale.Id).Select(r => new SaleHistoryEvent(SaleHistoryEventKind.Refunded, r.Date, r.UserId,
+            string.IsNullOrWhiteSpace(r.Username) ? null : r.Username,
+            string.IsNullOrWhiteSpace(r.Reason) ? null : r.Reason, r.Total, r.Id)));
+        foreach (var evt in later.OrderBy(e => e.At ?? DateTime.MaxValue)) yield return evt;
     }
 }

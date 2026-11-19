@@ -80,8 +80,10 @@ foreach (var type in new[] { typeof(SaleHistoryEntry), typeof(SaleHistoryPage), 
 var defaults = new SaleHistoryFilter();
 Check(defaults.DateFrom == null && defaults.DateTo == null && defaults.SaleId == null && defaults.OperatorUserId == null && !defaults.WithoutOperator && defaults.PaymentMethod == null
     && defaults.CashRegisterId == null && defaults.Status == SaleHistoryStatusFilter.All && defaults.ProductText == null && defaults.Page == 1 && defaults.PageSize == 10, "filter defaults");
-Check(Enum.GetNames<SaleHistoryStatusFilter>().SequenceEqual(new[] { "All", "Completed", "Cancelled" }), "status filter values");
-Check(Enum.GetNames<SaleHistoryEventKind>().SequenceEqual(new[] { "Created", "Cancelled" }), "event kinds (refunds are integrated later)");
+Check(Enum.GetNames<SaleHistoryStatusFilter>().SequenceEqual(new[] { "All", "Completed", "Cancelled", "PartiallyRefunded", "Refunded" }), "status filter values (Completed means display status Collected)");
+Check(Enum.GetNames<SaleHistoryEventKind>().SequenceEqual(new[] { "Created", "Cancelled", "Refunded" }), "event kinds include refunds");
+Check(typeof(SaleHistoryEntry).GetProperty("DisplayStatus")?.PropertyType == typeof(SaleDisplayStatus) && typeof(SaleHistoryEntry).GetProperty("RefundedTotal")?.PropertyType == typeof(decimal?)
+    && typeof(SaleHistoryEvent).GetProperty("Amount")?.PropertyType == typeof(decimal?) && typeof(SaleHistoryEvent).GetProperty("RefundId")?.PropertyType == typeof(int?), "entries carry display status and refunded total; events carry amount and refund id");
 Check(typeof(SaleHistoryService).GetConstructors().Single().GetParameters().Select(p => p.ParameterType).SequenceEqual(new[] { typeof(DataStorageService) }), "service is constructor-injected with DataStorageService only");
 
 // ---- No sales: empty history.
@@ -141,6 +143,8 @@ Check(e3.OperatorUserId == null && e3.OperatorUsername == null && e3.CashRegiste
 Check(e7.Status == SaleStatus.Cancelled && e14.Status == SaleStatus.Cancelled && e30.Total == 295m && e30.ProductNames.SequenceEqual(new[] { "Café", "Medialunas" })
     && e30.PaymentMethods.SequenceEqual(new[] { PaymentMethod.Cash, PaymentMethod.DebitCard }) && e30.ItemCount == 5, "cancelled status, discounted total, products and payment methods in entries");
 Check(Entry(5).CashRegisterId == null && Entry(5).Total == S(5).Total, "sale without register link is listed with null register");
+Check(e1.DisplayStatus == SaleDisplayStatus.Collected && e1.RefundedTotal == 0m && e7.DisplayStatus == SaleDisplayStatus.Cancelled && e14.DisplayStatus == SaleDisplayStatus.Cancelled && e7.RefundedTotal == 0m
+    && full.Entries.All(e => e.DisplayStatus == (e.Status == SaleStatus.Cancelled ? SaleDisplayStatus.Cancelled : SaleDisplayStatus.Collected)), "sales without refunds show Collected or Cancelled with a zero refunded total");
 Check(full.Entries is IList { IsReadOnly: true } && e30.ProductNames is IList { IsReadOnly: true } && e30.PaymentMethods is IList { IsReadOnly: true }, "entry collections are read-only");
 
 // ---- Pagination.
@@ -334,13 +338,14 @@ if (uiType != null)
     var uiAnon = NewAuth(null); var uiEmployee = NewAuth("fixture-employee");
     var guardedState = State();
     foreach (var (auth, who, destination) in new[] { (uiAnon, "anonymous", "/login"), (uiEmployee, "employee", "/unauthorized") })
-        foreach (var action in new[] { "OnParametersSet", "ShowDetail", "ApplyFilters", "ClearFilters", "NextPage", "PreviousPage", "CloseDetail", "StartCancel", "ConfirmCancel" })
+        foreach (var action in new[] { "OnParametersSet", "ShowDetail", "ApplyFilters", "ClearFilters", "NextPage", "PreviousPage", "CloseDetail", "StartCancel", "ConfirmCancel", "CalculateRefund", "ConfirmRefund" })
         {
             var (page, nav) = NewPage(auth);
             SetId(page, 1);
             if (action == "ConfirmCancel") { Set(page, "cancelReason", "intento"); Set(page, "cancelConfirmed", true); }
+            if (action == "ConfirmRefund") { Set(page, "refundReason", "intento"); Set(page, "refundConfirmed", true); }
             var ex = Call(page, action, action == "ShowDetail" ? new object[] { 1 } : Array.Empty<object>());
-            Check(ex == null && nav.Destination == destination && HP(page) == null && DT(page) == null && Msg(page, "detailMessage") == null && Msg(page, "cancelSuccess") == null,
+            Check(ex == null && nav.Destination == destination && HP(page) == null && DT(page) == null && Msg(page, "detailMessage") == null && Msg(page, "cancelSuccess") == null && Msg(page, "refundSuccess") == null,
                 who + " " + action + " navigates to " + destination + " and loads nothing");
         }
     Check(State() == guardedState, "anonymous and employee attempts (including cancellation) leave storage unchanged");
@@ -507,14 +512,129 @@ if (uiType != null)
     var pageSource = Src("Pages/SalesHistory.razor");
     Check(pageSource.Contains("@page \"/sales/history\"") && pageSource.Contains("@page \"/sales/history/{SaleId:int}\""), "SalesHistory page declares both routes");
     Check(Regex.Matches(pageSource, @"HistoryService\.(\w+)").Select(m => m.Groups[1].Value).Distinct().OrderBy(x => x).SequenceEqual(new[] { "GetDetail", "GetHistory", "GetOperators" }), "page only calls the read-only history queries of the history service");
-    Check(Regex.Matches(pageSource, @"\bSaleService\.(\w+)").Select(m => m.Groups[1].Value).Distinct().SequenceEqual(new[] { "Cancel" }) && !pageSource.Contains("SaveToFile") && !pageSource.Contains("StorageService"), "page only uses SaleService.Cancel as its single mutation and never touches storage");
+    Check(Regex.Matches(pageSource, @"\bSaleService\.(\w+)").Select(m => m.Groups[1].Value).Distinct().OrderBy(x => x).SequenceEqual(new[] { "Cancel", "GetDisplayStatusLabel", "GetRefundability", "GetRefunds", "PreviewRefund", "Refund" })
+        && !pageSource.Contains("SaveToFile") && !pageSource.Contains("StorageService"), "page only mutates through SaleService.Cancel and SaleService.Refund and never touches storage");
     foreach (var label in new[] { "Cobrada", "Anulada", "Sin registro", "Historial de ventas", "Confirmo", "/cash/history/" }) Check(pageSource.Contains(label), "page contains the Spanish text '" + label + "'");
     Check(!Regex.IsMatch(pageSource, @">\s*@[\w\.]*Status\s*<"), "page never prints the internal status code");
     Check(Regex.IsMatch(pageSource, @"(?s)@code\s*\{.*EnsureAdmin"), "page revalidates the admin on every callback");
+
+    // ---- Refunds in the history (S4, S6, S7, S9, S10, S12, S13).
+    if (!cash.IsOpen()) cash.Open(100m);
+    cash.AddManualMovement(CashMovementType.Income, 500m, "fondo para devoluciones", Copy(admin)); // enough cash in the drawer for the cash refunds below
+    Sale NewRefundSale()
+    {
+        var sale = new Sale
+        {
+            Id = storage.GetNextSaleId(), CashRegisterId = storage.CurrentCashRegisterId, Date = DateTime.Now, CreatedByUserId = 10, CreatedByUsername = "fixture-admin",
+            Items = [new SaleItem { ProductId = 1, ProductName = "Café", Price = 100m, Quantity = 2 }, new SaleItem { ProductId = 2, ProductName = "Medialunas", Price = 50m, Quantity = 2 }],
+            Payments = [Pay(PaymentMethod.Transfer, 200m), Pay(PaymentMethod.Cash, 100m, 100m)]
+        };
+        storage.Sales.Add(sale);
+        return sale;
+    }
+    SaleRefundLine RL(int index, int quantity, RefundDisposition disposition = RefundDisposition.Waste) => new() { SaleItemIndex = index, Quantity = quantity, Disposition = disposition };
+    SaleRefundPayment RP(PaymentMethod method, decimal amount) => new() { PaymentMethod = method, Amount = amount };
+    int[] ByStatus(SaleHistoryStatusFilter filter) => Ids(H(new SaleHistoryFilter(Status: filter, PageSize: 50)));
+    string RState() => State() + Json(storage.SaleRefunds);
+
+    var rs = NewRefundSale(); var rid = rs.Id;
+    Check(Entry(rid).DisplayStatus == SaleDisplayStatus.Collected && Entry(rid).RefundedTotal == 0m && ByStatus(SaleHistoryStatusFilter.Completed).Contains(rid)
+        && ByStatus(SaleHistoryStatusFilter.PartiallyRefunded).Length == 0 && ByStatus(SaleHistoryStatusFilter.Refunded).Length == 0, "an unrefunded sale is Collected and listed under the Completed filter");
+    var r1 = sales.Refund(rid, "primera", [RL(0, 1)], [RP(PaymentMethod.Transfer, 100m)], Copy(admin));
+    var partial = Entry(rid);
+    Check(partial.DisplayStatus == SaleDisplayStatus.PartiallyRefunded && partial.RefundedTotal == 100m && partial.Status == SaleStatus.Completed && partial.Total == 300m
+        && Detail(rid)!.Entry.DisplayStatus == SaleDisplayStatus.PartiallyRefunded && Detail(rid)!.Total == 300m, "a partial refund shows PartiallyRefunded and the refunded total without changing the sale total");
+    Check(ByStatus(SaleHistoryStatusFilter.PartiallyRefunded).SequenceEqual(new[] { rid }) && ByStatus(SaleHistoryStatusFilter.Refunded).Length == 0
+        && ByStatus(SaleHistoryStatusFilter.Completed).SequenceEqual(Exp(s => s.Status == SaleStatus.Completed && s.Id != rid)) && ByStatus(SaleHistoryStatusFilter.Cancelled).SequenceEqual(Exp(s => s.Status == SaleStatus.Cancelled)),
+        "status filters: Completed means Collected only, PartiallyRefunded lists the partial sale, Cancelled is unchanged");
+    var ev1 = Detail(rid)!.Events;
+    Check(ev1.Count == 2 && ev1[0].Kind == SaleHistoryEventKind.Created && ev1[1].Kind == SaleHistoryEventKind.Refunded && ev1[1].At == r1.Date && ev1[1].UserId == 10 && ev1[1].Username == "fixture-admin"
+        && ev1[1].Reason == "primera" && ev1[1].Amount == 100m && ev1[1].RefundId == r1.Id && ev1[0].Amount == null && ev1[0].RefundId == null, "refund event carries date, user, reason, amount and refund id");
+    var r2 = sales.Refund(rid, "segunda", [RL(0, 1), RL(1, 2)], [RP(PaymentMethod.Transfer, 100m), RP(PaymentMethod.Cash, 100m)], Copy(admin));
+    Check(Entry(rid).DisplayStatus == SaleDisplayStatus.Refunded && Entry(rid).RefundedTotal == 300m && ByStatus(SaleHistoryStatusFilter.Refunded).SequenceEqual(new[] { rid })
+        && ByStatus(SaleHistoryStatusFilter.PartiallyRefunded).Length == 0 && !ByStatus(SaleHistoryStatusFilter.Completed).Contains(rid), "refunding everything shows Refunded and moves the sale to the Refunded filter");
+    var ev2 = Detail(rid)!.Events;
+    Check(ev2.Select(e => e.Kind).SequenceEqual(new[] { SaleHistoryEventKind.Created, SaleHistoryEventKind.Refunded, SaleHistoryEventKind.Refunded }) && ev2[1].RefundId == r1.Id && ev2[2].RefundId == r2.Id && ev2[2].Amount == 200m && ev2[2].Reason == "segunda",
+        "refund events follow the creation in chronological order");
+    var stored1 = storage.SaleRefunds.Single(r => r.Id == r1.Id); var date1 = stored1.Date;
+    stored1.Date = r2.Date.AddMinutes(5);
+    Check(Detail(rid)!.Events.Select(e => e.RefundId).SequenceEqual(new int?[] { null, r2.Id, r1.Id }), "events are ordered by date, not by refund id");
+    stored1.Date = date1;
+    Check(Entry(7).DisplayStatus == SaleDisplayStatus.Cancelled && ByStatus(SaleHistoryStatusFilter.Completed).All(id => S(id).Status == SaleStatus.Completed), "cancelled sales keep the Cancelled display status; Completed never lists a cancelled one");
+
+    // The detail page: refund section and cancellation rules.
+    string Str(object? o) => (string?)o ?? "";
+    void SetQty(object pg, int index, int quantity, RefundDisposition disposition = RefundDisposition.Waste) { ((IDictionary)Get(pg, "refundQuantities")!)[index] = quantity; ((IDictionary)Get(pg, "refundDispositions")!)[index] = disposition; }
+    void SetAmount(object pg, PaymentMethod method, decimal? amount) => ((IDictionary)Get(pg, "refundAmounts")!)[method] = amount;
+    var rs2 = NewRefundSale(); var rid2 = rs2.Id;
+    var (rp, rnav) = NewPage(NewAuth("fixture-admin"));
+    SetId(rp, rid2); Call(rp, "OnParametersSet");
+    var staleRefundPage = NewPage(NewAuth("fixture-admin")); SetId(staleRefundPage.Page, rid2); Call(staleRefundPage.Page, "OnParametersSet");
+    var rb = (SaleRefundability?)Get(rp, "refundability");
+    Check(DT(rp)?.Entry.DisplayStatus == SaleDisplayStatus.Collected && rb != null && rb.CanRefund && rb.Lines.Count == 2 && rb.Lines.All(l => !l.CanRestock) && rb.Methods.Count == 2
+        && ((IList)Get(rp, "refunds")!).Count == 0 && Msg(rp, "refundError") == null && rnav.Destination == null, "detail loads refundability, no past refunds and an empty form");
+    var untouched = RState();
+    SetQty(rp, 0, 1); SetAmount(rp, PaymentMethod.Transfer, 100m); Set(rp, "refundReason", "Cliente insatisfecho"); Set(rp, "refundConfirmed", false);
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == "Debe confirmar la devolución." && Msg(rp, "refundSuccess") == null && RState() == untouched, "refund without confirmation is rejected and nothing changes");
+    Set(rp, "refundConfirmed", true); Set(rp, "refundReason", "   ");
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == "Debe indicar un motivo de devolución." && RState() == untouched, "refund without a reason is rejected with the service message and nothing changes");
+    Set(rp, "refundReason", "Cliente insatisfecho"); SetQty(rp, 0, 0);
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == "Debe indicar al menos una línea a devolver." && RState() == untouched, "refund without lines is rejected and nothing changes");
+    SetQty(rp, 0, 3);
+    Check(Call(rp, "CalculateRefund") == null && Msg(rp, "refundError") == "La cantidad supera las unidades pendientes de devolución de Café." && Get(rp, "refundPreviewTotal") == null && RState() == untouched, "a quantity above the remaining units is rejected by the preview");
+    SetQty(rp, 0, 1);
+    Check(Call(rp, "CalculateRefund") == null && Msg(rp, "refundError") == null && (decimal?)Get(rp, "refundPreviewTotal") == 100m && RState() == untouched, "'Calcular importe' shows the computed amount without mutating anything");
+    SetQty(rp, 0, 1, RefundDisposition.Restock);
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == "La línea Café no tiene registro de consumo de stock; sólo puede devolverse como merma." && RState() == untouched, "restocking a line without consumption record is rejected and nothing changes");
+    SetQty(rp, 0, 1); SetAmount(rp, PaymentMethod.Transfer, 150m);
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == "La suma de los importes devueltos debe ser exactamente igual al total de la devolución." && RState() == untouched, "per-method amounts that do not add up to the total are rejected");
+    SetAmount(rp, PaymentMethod.Transfer, 100m);
+    var movementsBefore = storage.CashMovements.Count;
+    Set(rp, "refundReason", "  Cliente insatisfecho  ");
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == null && rnav.Destination == null, "confirmed refund with a reason succeeds");
+    var stored = storage.SaleRefunds.Where(r => r.SaleId == rid2).ToList();
+    Check(stored.Count == 1 && stored[0].Reason == "Cliente insatisfecho" && stored[0].Username == "fixture-admin" && stored[0].Total == 100m && stored[0].Lines.Single().Disposition == RefundDisposition.Waste
+        && storage.CashMovements.Count == movementsBefore && Msg(rp, "refundSuccess") == $"Devolución #{stored[0].Id} registrada por $100.", "refund is recorded with trimmed reason, responsible and amount; a transfer refund creates no cash movement");
+    Check(DT(rp)?.Entry.DisplayStatus == SaleDisplayStatus.PartiallyRefunded && DT(rp)!.Events.Count == 2 && HP(rp)!.Entries.Single(e => e.Id == rid2).DisplayStatus == SaleDisplayStatus.PartiallyRefunded
+        && ((SaleRefundability)Get(rp, "refundability")!).RefundedTotal == 100m && ((IList)Get(rp, "refunds")!).Count == 1, "detail and list reload with the new refund");
+    Check(!Flag(rp, "refundConfirmed") && Get(rp, "refundReason") == null && Get(rp, "refundPreviewTotal") == null && ((IDictionary)Get(rp, "refundQuantities")!).Values.Cast<int>().All(q => q == 0)
+        && ((IDictionary)Get(rp, "refundAmounts")!).Values.Cast<decimal?>().All(a => a == null), "the refund form resets after a successful refund");
+    // A refunded sale is not cancelled (S9).
+    Check(Call(rp, "StartCancel") == null && !Flag(rp, "cancelOpen"), "a partially refunded sale offers no cancellation");
+    var beforeCancelAttempt = RState();
+    Set(rp, "cancelReason", "intento"); Set(rp, "cancelConfirmed", true);
+    Check(Call(rp, "ConfirmCancel") == null && Msg(rp, "cancelError") == "La venta tiene devoluciones registradas; no puede anularse." && rs2.Status == SaleStatus.Completed && RState() == beforeCancelAttempt, "cancelling a refunded sale is rejected by the service and shown in Spanish");
+    // Cash refund of everything that remains into the current open register.
+    SetQty(rp, 0, 1); SetQty(rp, 1, 2); SetAmount(rp, PaymentMethod.Transfer, 100m); SetAmount(rp, PaymentMethod.Cash, 100m);
+    Check(Call(rp, "CalculateRefund") == null && (decimal?)Get(rp, "refundPreviewTotal") == 200m, "preview of the remaining units equals the remaining refundable amount");
+    Set(rp, "refundReason", "Resto"); Set(rp, "refundConfirmed", true);
+    Check(Call(rp, "ConfirmRefund") == null && Msg(rp, "refundError") == null && DT(rp)?.Entry.DisplayStatus == SaleDisplayStatus.Refunded && !((SaleRefundability)Get(rp, "refundability")!).CanRefund && ((IList)Get(rp, "refunds")!).Count == 2, "refunding the rest marks the sale Refunded with no refund left to offer");
+    var outflow = storage.CashMovements.Last();
+    Check(storage.CashMovements.Count == movementsBefore + 1 && outflow.Type == CashMovementType.Refund && outflow.Amount == 100m && outflow.SaleId == rid2 && outflow.CashRegisterId == storage.CurrentCashRegisterId && outflow.Reason == "Resto", "the cash part of the refund is an outflow in the current open register linked to the sale");
+    Check(Call(rp, "StartCancel") == null && !Flag(rp, "cancelOpen"), "a fully refunded sale offers no cancellation");
+    var afterAll = RState();
+    var sp2 = staleRefundPage.Page;
+    SetQty(sp2, 0, 1); SetAmount(sp2, PaymentMethod.Transfer, 100m); Set(sp2, "refundReason", "tarde"); Set(sp2, "refundConfirmed", true);
+    Check(Call(sp2, "ConfirmRefund") == null && Msg(sp2, "refundError") == "La cantidad supera las unidades pendientes de devolución de Café." && Msg(sp2, "refundSuccess") == null && RState() == afterAll, "a page opened before another circuit refunded the units cannot refund them again");
+    // Demoted admin on an open refund form.
+    var rs3 = NewRefundSale();
+    var (dr, drnav) = NewPage(NewAuth("second-admin"));
+    SetId(dr, rs3.Id); Call(dr, "OnParametersSet");
+    SetQty(dr, 0, 1); SetAmount(dr, PaymentMethod.Transfer, 100m); Set(dr, "refundReason", "ya no soy admin"); Set(dr, "refundConfirmed", true);
+    var refundsBeforeDemotion = Json(storage.SaleRefunds) + Json(storage.CashMovements);
+    admin2.Role = UserRole.Employee;
+    try { Check(Call(dr, "ConfirmRefund") == null && drnav.Destination == "/unauthorized" && Msg(dr, "refundSuccess") == null && Json(storage.SaleRefunds) + Json(storage.CashMovements) == refundsBeforeDemotion, "demoted admin cannot refund from a page opened while admin"); }
+    finally { admin2.Role = UserRole.Admin; }
+    // Source assertions for the refund UI.
+    var refundSource = Src("Pages/SalesHistory.razor");
+    foreach (var label in new[] { "Devoluciones", "Calcular importe", "Vuelve a stock", "Merma", "Sin registro de consumo: solo merma", "El efectivo se reintegra como egreso de la caja abierta actual", "Parcialmente devueltas", "GetDisplayStatusLabel" })
+        Check(refundSource.Contains(label), "page contains '" + label + "'");
+    Check(Src("Pages/CashHistory.razor").Contains("CashMovementType.Refund") && Src("Pages/CashHistory.razor").Contains("Devolución"), "cash history shows refunds as an outflow labelled Devolución");
 }
 
 // ---- Legacy data: sales saved before operators, payments or items existed.
 storage.SaveToFile();
+var preLegacyCount = storage.Sales.Count;
 var baseline = JsonNode.Parse(File.ReadAllText("data.json"))!.AsObject();
 var salesArray = baseline["Sales"]!.AsArray();
 salesArray.Add(JsonNode.Parse("{\"Id\":901,\"Date\":\"2025-01-02T10:00:00\",\"Items\":[{\"ProductName\":\"Viejo\",\"Price\":5,\"Quantity\":2}]}"));
@@ -525,7 +645,7 @@ var legacyHistory = new SaleHistoryService(legacy);
 var legacyAdmin = legacy.Users.Single(u => u.Id == 10);
 var legacyPage = legacyHistory.GetHistory(new SaleHistoryFilter(PageSize: 50), legacyAdmin);
 var l901 = legacyPage.Entries.Single(e => e.Id == 901); var l902 = legacyPage.Entries.Single(e => e.Id == 902);
-Check(legacyPage.TotalCount == 35 && Ids(legacyPage).TakeLast(2).SequenceEqual(new[] { 902, 901 }), "legacy sales are listed, oldest last");
+Check(legacyPage.TotalCount == preLegacyCount + 2 && Ids(legacyPage).TakeLast(2).SequenceEqual(new[] { 902, 901 }), "legacy sales are listed, oldest last");
 Check(l901.OperatorUserId == null && l901.OperatorUsername == null && l901.CashRegisterId == null && l901.Status == SaleStatus.Completed && l901.Total == 10m && l901.ProductNames.SequenceEqual(new[] { "Viejo" }) && l901.PaymentMethods.Count == 0, "legacy sale without operator, register or payments is browsable");
 Check(l902.Status == SaleStatus.Cancelled && l902.Total == 0m && l902.ProductNames.Count == 0 && l902.PaymentMethods.Count == 0 && l902.ItemCount == 0, "legacy sale with null items and payments does not break the history");
 var dl = legacyHistory.GetDetail(902, legacyAdmin)!;

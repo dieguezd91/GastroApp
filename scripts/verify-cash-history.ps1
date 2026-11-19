@@ -494,6 +494,7 @@ if (uiType != null)
     var historySource = Src("Pages/CashHistory.razor");
     Check(!Regex.IsMatch(historySource, @"\b(Close|Open|Cancel)\(") && !historySource.Contains("AddManualMovement") && !historySource.Contains("SaveToFile"), "CashHistory page has no mutating calls");
     Check(Regex.Matches(historySource, @"CashService\.(\w+)").Select(m => m.Groups[1].Value).Distinct().OrderBy(x => x).SequenceEqual(new[] { "GetHistory", "GetHistoryDetail" }), "CashHistory page only calls the read-only history queries of the cash service");
+    Check(Regex.IsMatch(historySource, @"IsOutflow\(CashMovementType type\)\s*=>[^;]*CashMovementType\.Refund") && historySource.Contains("CashMovementType.Refund => \"Devoluci\u00f3n\""), "CashHistory treats refunds as an outflow labelled Devolucion");
     Check(historySource.Contains("@page \"/cash/history\"") && historySource.Contains("@page \"/cash/history/{RegisterId:int}\""), "CashHistory page declares both routes");
 }
 
