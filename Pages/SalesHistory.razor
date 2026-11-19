@@ -274,7 +274,9 @@
                 }
                 else if (refundability != null)
                 {
-                    <p>@(entry.DisplayStatus == SaleDisplayStatus.Cancelled ? "La venta anulada no admite devoluciones." : "No quedan unidades pendientes de devolución.")</p>
+                    <p>@(entry.DisplayStatus == SaleDisplayStatus.Cancelled ? "La venta anulada no admite devoluciones."
+                        : refundability.Lines.Any(l => l.RemainingQuantity > 0) && !refundability.HasRefundableMoney ? "La venta no tiene pagos registrados; no puede devolverse."
+                        : "No quedan unidades pendientes de devolución.")</p>
                 }
                 @if (!string.IsNullOrEmpty(refundError))
                 {

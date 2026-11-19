@@ -16,6 +16,7 @@
             <div class="summary-icon">💰</div>
             <h3>Total Vendido</h3>
             <p class="summary-value">$@totalSales</p>
+            <p class="summary-detail">Ventas completadas de hoy, con descuentos aplicados; no resta devoluciones.</p>
         </div>
 
         <div class="summary-card">
@@ -46,6 +47,24 @@
             </div>
         }
     </div>
+
+    <section aria-label="Reporte de ventas de hoy">
+        <h2>Ventas, descuentos, anulaciones y devoluciones de hoy</h2>
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead><tr><th>Concepto</th><th>Importe</th><th>Qué incluye</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row">Ventas brutas</th><td>$@report.GrossSales</td><td>Precio de lista de las ventas completadas de hoy, antes de descuentos.</td></tr>
+                    <tr><th scope="row">Descuentos</th><td>$@report.Discounts</td><td>Descuentos de línea y de venta de esas mismas ventas.</td></tr>
+                    <tr><th scope="row">Anulaciones</th><td>$@report.CancelledTotal (@report.CancelledCount)</td><td>Importe final de las ventas de hoy anuladas; no están incluidas en las ventas brutas ni en el total vendido.</td></tr>
+                    <tr><th scope="row">Devoluciones</th><td>$@report.RefundedTotal (@report.RefundCount)</td><td>Dinero devuelto hoy, aunque la venta original sea de otro día. La venta sigue contando como cobrada.</td></tr>
+                </tbody>
+                <tfoot>
+                    <tr><th scope="row">Importe neto</th><td>$@report.NetTotal</td><td>Ventas brutas − descuentos − devoluciones de hoy.</td></tr>
+                </tfoot>
+            </table>
+        </div>
+    </section>
 
     <section aria-label="Cancelar venta de hoy">
         <h2>Cancelar venta de hoy</h2>
@@ -84,6 +103,7 @@
 
 @code {
     private decimal totalSales;
+    private SalesReport report = null!;
     private int salesCount;
     private string topProduct = "Ninguno";
     private int topProductQty;
@@ -116,6 +136,7 @@
     {
         todaySales = SaleService.GetToday();
         totalSales = SaleService.GetTodayTotal();
+        report = SaleService.GetTodayReport();
         salesCount = SaleService.GetTodayCount();
         var top = SaleService.GetTopProduct();
         topProduct = top.Name;

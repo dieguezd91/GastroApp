@@ -246,17 +246,19 @@
         <p>Importes aplicados a las ventas de esta caja, incluidas las canceladas: no se revierten los cobros.
             No son las ventas completadas del día ni el efectivo disponible en caja.
             No incluyen monto inicial, movimientos manuales, efectivo entregado ni vuelto.</p>
+        <p>"Devuelto" son las devoluciones registradas en esta caja (aunque la venta sea de otra caja); "Neto" es lo registrado menos lo devuelto.
+            Los cobros registrados no se modifican.</p>
         <p role="status">@PaymentStateLabel(paymentSummary.State)</p>
         <div style="overflow-x: auto;">
             <table class="table">
-                <thead><tr><th>Medio de pago</th><th>Importe registrado</th></tr></thead>
+                <thead><tr><th>Medio de pago</th><th>Importe registrado</th><th>Devuelto</th><th>Neto</th></tr></thead>
                 <tbody>
                     @foreach (var row in paymentSummary.Rows)
                     {
-                        <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@(row.Amount.HasValue ? $"${row.Amount.Value}" : "No disponible")</td></tr>
+                        <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@(row.Amount.HasValue ? $"${row.Amount.Value}" : "No disponible")</td><td>@(row.RefundedAmount.HasValue ? $"${row.RefundedAmount.Value}" : "No disponible")</td><td>@(row.NetAmount.HasValue ? $"${row.NetAmount.Value}" : "No disponible")</td></tr>
                     }
                 </tbody>
-                <tfoot><tr><th>Total de cobros registrados</th><td>@(paymentSummary.RegisteredTotal.HasValue ? $"${paymentSummary.RegisteredTotal.Value}" : "No disponible")</td></tr></tfoot>
+                <tfoot><tr><th>Total de cobros registrados</th><td>@(paymentSummary.RegisteredTotal.HasValue ? $"${paymentSummary.RegisteredTotal.Value}" : "No disponible")</td><td>@(paymentSummary.RefundedTotal.HasValue ? $"${paymentSummary.RefundedTotal.Value}" : "No disponible")</td><td>@(paymentSummary.NetTotal.HasValue ? $"${paymentSummary.NetTotal.Value}" : "No disponible")</td></tr></tfoot>
             </table>
         </div>
         @foreach (var warning in paymentSummary.Warnings)

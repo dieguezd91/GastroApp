@@ -59,13 +59,28 @@ Mixed allocations record applied amounts but add no fees, tips, refunds, or exte
 
 `SaleStatus.Completed = 0` and `Cancelled = 1`. New checkout rejects prefilled status, cancellation audit or stock snapshot fields; it replaces the caller's empty snapshot with one owned by checkout. `SaleService.Cancel(id, reason, user)` checks the stored sale is Completed, trims and requires a nonblank reason, and verifies the supplied user's stable ID, username and Admin role against storage. The Admin-only Summary lists today's completed sales and resolves a fresh, live circuit actor at action time, verifies Admin, then passes that actor to cancellation. Cancellation prevalidates a reliable non-null snapshot, each positive quantity/ID/unit, the existence and unchanged unit of every ingredient, and checked aggregate additions and final stock for overflow before changing anything. Duplicate ingredient entries aggregate for validation. It restores exactly the captured quantities once, then records reason, timestamp, user ID and username and saves. Changed recipes have no effect. Missing or malformed stock snapshots cannot be reconstructed from current recipes. Cancelled sales remain in `GetAll()` with original items, notes, discounts and payments; no physical deletion or monetary refund occurs.
 
-`GetToday()`, today's total/count and top-product calculations include only Completed sales; the Summary selector and displayed metrics follow the same filter. Closed `DailySummary` records and past cash reconciliation are **not** retroactively updated. Cash payments are not refunded or reversed. Authentication identity is isolated per circuit and cancellation audit attribution uses its freshly validated actor. Business state remains singleton/shared; permission checks and writes are not atomic across concurrent changes.
+`GetToday()`, today's total/count and top-product calculations include only Completed sales; the Summary selector and displayed metrics follow the same filter. Closed `DailySummary` records and past cash reconciliation are **not** retroactively updated. Cash payments are not reversed by cancellation; refunds are a separate operation (below). Authentication identity is isolated per circuit and cancellation audit attribution uses its freshly validated actor. Business state remains singleton/shared; permission checks and writes are not atomic across concurrent changes.
 
 ## Seller, refunds and sales history
 
 ### Seller recording
 
 `SaleService.Add()` records the operator of every new sale as `Sale.CreatedByUserId` and `CreatedByUsername`, taken from the live authenticated actor (both Admin and Employee may sell). Legacy sales have both fields `null`; the history shows them as **Sin registro** and never infers an operator.
+
+### Daily report: gross, discounts, cancellations, refunds and net (S13)
+
+`SaleService.GetTodayReport()` / `GetReport(day)` derive a read-only `SalesReport` (never persisted; closed `DailySummary` records are not inputs or rewritten). The Admin `/summary` page renders it in the **Ventas, descuentos, anulaciones y devoluciones de hoy** table, each row with a short Spanish note of what it includes:
+
+| Figure | Definition |
+| --- | --- |
+| **Ventas brutas** (`GrossSales`) | List price (`Price × Quantity`, before line and sale discounts) of the Completed sales dated that day. |
+| **Descuentos** (`Discounts`) | Line plus sale discounts of those same sales. |
+| **Total Vendido** (`SoldTotal`, unchanged meaning) | `GrossSales − Discounts`; equals `GetTodayTotal()`. Cancelled sales are excluded and refunds are **not** subtracted. |
+| **Anulaciones** (`CancelledTotal`, `CancelledCount`) | Final total (after discounts) of the sales dated that day whose status is Cancelled; they are in none of the figures above. |
+| **Devoluciones** (`RefundedTotal`, `RefundCount`) | Sum of the `SaleRefund` records **dated that day**, whatever the date of the refunded sale (the refunded sale keeps counting as sold on its own day). |
+| **Importe neto** (`NetTotal`) | `SoldTotal − RefundedTotal`; it can be negative when refunds of older sales exceed the day's sales. |
+
+Sales are attributed by sale date and refunds by refund date. Per-method refunded and net figures of a register are in [CashRegisters.md](CashRegisters.md#refunds).
 
 ### Refunds and cancellation are separate operations
 
@@ -81,6 +96,7 @@ Cancellation voids the whole sale and restores its stock snapshot; a refund retu
 - **Per-method caps.** The caller assigns an amount per payment method. Each amount is positive, a method appears once, and no method exceeds what was collected with it minus what was already refunded through it. The assigned amounts must add up exactly to the refund total.
 - **Restock or waste, per line (S7).** Each line is marked `Restock` (valid physical return: ingredients go back to stock) or `Waste` (merma: money is returned and stock is untouched). Restock uses the per-line consumption snapshot recorded at checkout (`SaleItem.StockConsumption`), proportionally to the refunded quantity. Legacy lines, or sales whose snapshot is unreliable, have no such snapshot, so only `Waste` is accepted (`... sólo puede devolverse como merma`). All restock quantities are validated before any ingredient changes.
 - **Cash goes through the current open register.** The cash part of a refund creates one `CashMovementType.Refund` outflow linked to the original sale in the **current open register**, even when the sale belongs to an already closed register; the earlier close, count and summary stay untouched. With no open register a cash refund is rejected (`Debe haber una caja abierta para devolver efectivo.`), as is an amount above the available drawer cash. Noncash refunds create no movement and, without an open register, are recorded with no register. See [CashRegisters.md](CashRegisters.md#refunds).
+- **Refundable money.** `SaleRefundability.CanRefund` is false for a cancelled sale, when no units remain, or when money remains to be refunded but no payment method has a remaining amount (`HasRefundableMoney`), as in a legacy sale without payments: every attempt would fail the exact-sum rule. The detail then shows "La venta no tiene pagos registrados; no puede devolverse." instead of the form.
 - **Atomic validation.** Every rejection happens before the single mutation block (ingredients, refund record, cash movement, one save).
 
 ### Derived states

@@ -114,7 +114,9 @@ public sealed class SaleRefundability
     public decimal RemainingTotal => Math.Max(0m, SaleTotal - RefundedTotal);
     public IReadOnlyList<SaleRefundLineStatus> Lines { get; }
     public IReadOnlyList<SaleRefundMethodStatus> Methods { get; }
-    public bool CanRefund => Status != SaleDisplayStatus.Cancelled && Lines.Any(l => l.RemainingQuantity > 0);
+    // False for a legacy sale without payments: its remaining money cannot be assigned to any method.
+    public bool HasRefundableMoney => RemainingTotal <= 0m || Methods.Any(m => m.RemainingAmount > 0m);
+    public bool CanRefund => Status != SaleDisplayStatus.Cancelled && Lines.Any(l => l.RemainingQuantity > 0) && HasRefundableMoney;
 
     internal SaleRefundability(int saleId, SaleDisplayStatus status, decimal saleTotal, decimal refundedTotal,
         IEnumerable<SaleRefundLineStatus> lines, IEnumerable<SaleRefundMethodStatus> methods)

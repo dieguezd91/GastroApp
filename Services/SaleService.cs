@@ -688,6 +688,21 @@ public class SaleService
         return GetToday().Sum(s => s.Total);
     }
 
+    // Reporting (S13): sales by sale date, refunds by refund date; read-only and never persisted.
+    public SalesReport GetTodayReport() => GetReport(DateTime.Today);
+
+    public SalesReport GetReport(DateTime day)
+    {
+        var date = day.Date;
+        var daySales = _storage.Sales.Where(s => s != null && s.Date.Date == date).ToList();
+        var completed = daySales.Where(s => s.Status == SaleStatus.Completed).ToList();
+        var cancelled = daySales.Where(s => s.Status == SaleStatus.Cancelled).ToList();
+        var refunds = _storage.SaleRefunds.Where(r => r != null && r.Date.Date == date).ToList();
+        var gross = completed.Sum(s => s.Items?.Sum(i => i?.GrossSubtotal ?? 0m) ?? 0m);
+        return new SalesReport(date, gross, gross - completed.Sum(s => s.Total), completed.Count,
+            cancelled.Sum(s => s.Total), cancelled.Count, refunds.Sum(r => r.Total), refunds.Count);
+    }
+
     public int GetTodayCount()
     {
         return GetToday().Count;

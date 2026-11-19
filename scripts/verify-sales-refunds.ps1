@@ -355,11 +355,41 @@ DataStorageService LoadFrom(JsonObject json)
 }
 JsonObject Fresh() => JsonNode.Parse(savedJson)!.AsObject();
 var legacyJson = Fresh(); legacyJson.Remove("SaleRefunds"); legacyJson.Remove("NextSaleRefundId");
-foreach (var sale in legacyJson["Sales"]!.AsArray()) foreach (var item in sale!["Items"]!.AsArray()) item!.AsObject().Remove("StockConsumption");
+foreach (var sale in legacyJson["Sales"]!.AsArray())
+{
+    sale!.AsObject().Remove("CreatedByUserId"); sale.AsObject().Remove("CreatedByUsername");
+    foreach (var item in sale["Items"]!.AsArray()) item!.AsObject().Remove("StockConsumption");
+}
+legacyJson["Sales"]!.AsArray().First(s => s!["Id"]!.GetValue<int>() == s5.Id)!["Payments"] = new JsonArray(); // legacy sale without payments
+var legacyOriginalSales = JsonNode.Parse(legacyJson["Sales"]!.ToJsonString())!;
 var legacyStorage = LoadFrom(legacyJson);
+var legacyDir = Path.Combine(root, "load-" + dirs);
 var legacySales = new SaleService(legacyStorage);
 Check(legacyStorage.SaleRefunds.Count == 0 && legacyStorage.Sales.Count == storage.Sales.Count && legacyStorage.Sales.All(s => s.Items.All(i => i.StockConsumption == null))
     && legacySales.GetDisplayStatus(s1.Id) == SaleDisplayStatus.Collected && legacySales.GetRefundability(s1.Id)!.Lines.All(l => !l.CanRestock), "legacy JSON without refunds or line snapshots loads; sales show Cobrada and cannot Restock");
+// ---- T6 regression: legacy data keeps loading, rejecting restock and saving original fields ----
+Check(legacyStorage.Sales.All(s => s.CreatedByUserId == null && s.CreatedByUsername == null), "legacy sales without CreatedBy* load with null operator");
+var legacyView = legacySales.GetRefundability(s1.Id)!;
+Check(legacyView.Lines.All(l => !l.CanRestock) && legacyView.Status == SaleDisplayStatus.Collected, "legacy lines without per-line snapshot expose CanRestock=false");
+var legacyRestock = false; var legacyMessage = "";
+try { legacySales.Refund(s1.Id, "x", [RL(0, 1, RefundDisposition.Restock)], [RP(PaymentMethod.Cash, 81m)], legacyStorage.Users[0]); }
+catch (InvalidOperationException ex) { legacyRestock = ex.Message.Contains("s\u00f3lo puede devolverse como merma"); legacyMessage = ex.Message; }
+Check(legacyRestock && legacyStorage.SaleRefunds.Count == 0, "legacy Restock refund rejected with 's\u00f3lo puede devolverse como merma' and nothing recorded [" + legacyMessage + "]");
+Directory.SetCurrentDirectory(legacyDir);
+try { legacyStorage.SaveToFile(); } finally { Directory.SetCurrentDirectory(root); }
+bool Preserves(JsonNode? original, JsonNode? saved) => original switch
+{
+    null => saved == null,
+    JsonObject o => saved is JsonObject so && o.All(p => so.ContainsKey(p.Key) && Preserves(p.Value, so[p.Key])),
+    JsonArray a => saved is JsonArray sa && sa.Count == a.Count && a.Select((n, i) => Preserves(n, sa[i])).All(ok => ok),
+    _ => saved != null && original.ToJsonString() == saved.ToJsonString()
+};
+var resaved = JsonNode.Parse(File.ReadAllText(Path.Combine(legacyDir, "data.json")))!;
+Check(Preserves(legacyOriginalSales, resaved["Sales"]), "saving a legacy-loaded store keeps every original sale field");
+var noPay = legacySales.GetRefundability(s5.Id)!;
+Check(noPay.RemainingTotal == 20m && noPay.Methods.Count == 0 && noPay.Lines[0].RemainingQuantity == 2 && !noPay.CanRefund && !noPay.HasRefundableMoney,
+    "legacy sale without payments: CanRefund false (remaining total > 0, no method with remaining amount)");
+Check(legacySales.GetRefundability(s1.Id)!.CanRefund && legacySales.GetRefundability(s1.Id)!.HasRefundableMoney, "legacy sale with payments stays refundable");
 void BadLoad(string name, Action<JsonObject> mutate)
 {
     var json = Fresh(); mutate(json);
@@ -384,10 +414,83 @@ BadLoad("cumulative refunds above sale total", j =>
     j["SaleRefunds"]!.AsArray().Add(copy);
 });
 
+// ---- T6 / S13: gross, discounts, cancellations, refunds and net; closed-register cash refund ----
+(DataStorageService St, SaleService Sales, CashRegisterService Cash, User Admin) NewStack(string name)
+{
+    var dir = Path.Combine(root, name); Directory.CreateDirectory(dir);
+    Directory.SetCurrentDirectory(dir);
+    var st = new DataStorageService();
+    st.Users = [new User { Id = 10, Username = "fixture-admin", PasswordHash = hash, Role = UserRole.Admin }];
+    st.Products = [new Product { Id = 1, Name = "Cafe", Price = 20m }, new Product { Id = 2, Name = "Menu", Price = 150m }];
+    var sv = new SaleService(st); var cs = new CashRegisterService(st, sv);
+    cs.Open(100m);
+    return (st, sv, cs, st.Users[0]);
+}
+try
+{
+    var t6 = NewStack("t6-report");
+    var cafe = t6.St.Products[0];
+    var saleA = Simple([Line(cafe, 5)], CashPay(100m)); t6.Sales.Add(saleA, Copy(t6.Admin));
+    var beforeRefundReport = t6.Sales.GetTodayReport();
+    Check(beforeRefundReport.GrossSales == 100m && beforeRefundReport.RefundedTotal == 0m && beforeRefundReport.NetTotal == 100m, "S13 report before refunds: gross 100, refunds 0, net 100");
+    t6.Sales.Refund(saleA.Id, "devolucion parcial", [RL(0, 2, RefundDisposition.Waste)], [RP(PaymentMethod.Cash, 40m)], t6.Admin);
+    var rep = t6.Sales.GetTodayReport();
+    Check(rep.GrossSales == 100m && rep.Discounts == 0m && rep.SoldTotal == 100m && rep.CancelledTotal == 0m && rep.RefundedTotal == 40m && rep.RefundCount == 1 && rep.NetTotal == 60m,
+        "S13 sale 100, refund 40: gross 100, refunds 40, net 60");
+    var saleB = Simple([Line(cafe, 2, DiscountType.Percentage, 10m)], CashPay(36m)); t6.Sales.Add(saleB, Copy(t6.Admin));
+    var saleC = Simple([Line(cafe, 1)], CashPay(20m)); t6.Sales.Add(saleC, Copy(t6.Admin));
+    t6.Sales.Cancel(saleC.Id, "error", t6.Admin);
+    var before6 = JsonSerializer.Serialize(new { t6.St.Sales, t6.St.SaleRefunds, t6.St.Summaries, t6.St.CashMovements });
+    var rep2 = t6.Sales.GetTodayReport();
+    Check(rep2.GrossSales == 140m && rep2.Discounts == 4m && rep2.SoldTotal == 136m && rep2.SalesCount == 2 && rep2.CancelledTotal == 20m && rep2.CancelledCount == 1
+        && rep2.RefundedTotal == 40m && rep2.NetTotal == 96m, "S13 report separates gross 140, discounts 4, sold 136, cancelled 20, refunds 40, net 96");
+    Check(t6.Sales.GetTodayTotal() == 136m && t6.Sales.GetTodayCount() == 2, "PRESERVE: Total Vendido (completed, after discounts) and count keep their meaning");
+    Check(JsonSerializer.Serialize(new { t6.St.Sales, t6.St.SaleRefunds, t6.St.Summaries, t6.St.CashMovements }) == before6, "report is read-only");
+    saleA.Date = DateTime.Today.AddDays(-1);
+    var rep3 = t6.Sales.GetTodayReport();
+    Check(rep3.GrossSales == 40m && rep3.RefundedTotal == 40m && rep3.NetTotal == -4m, "refunds count by refund date, sales by sale date");
+    saleA.Date = DateTime.Now;
+    var yesterday = t6.Sales.GetReport(DateTime.Today.AddDays(-1));
+    Check(yesterday.GrossSales == 0m && yesterday.RefundedTotal == 0m && yesterday.NetTotal == 0m && yesterday.CancelledTotal == 0m, "report of another day is empty");
+
+    var t6c = NewStack("t6-closed");
+    var menu = t6c.St.Products[1];
+    var big = Simple([Line(menu, 1)], CashPay(150m)); t6c.Sales.Add(big, Copy(t6c.Admin));
+    var review6 = t6c.Cash.GetCountReview();
+    t6c.Cash.Close(new CashCountRequest { Review = review6, Lines = new[] { new CashCountLineInput(50m, 5) }, Confirmed = true }, Copy(t6c.Admin));
+    var closedId = t6c.St.CashRegisters.Single().Id;
+    string Closed6() => JsonSerializer.Serialize(new { Reg = t6c.St.CashRegisters.Where(r => r.Id == closedId), Cnt = t6c.St.CashCounts.Where(c => c.CashRegisterId == closedId),
+        Sum = t6c.St.Summaries.Where(s => s.CashRegisterId == closedId), Mov = t6c.St.CashMovements.Where(m => m.CashRegisterId == closedId) });
+    var closedBefore6 = Closed6();
+    var closed6 = t6c.St.CashRegisters.Single();
+    Check(!closed6.IsOpen && closed6.FinalAmount == 250m && closed6.ExpectedAmount == 250m, "closed fixture register: expected 250 counted 250");
+    t6c.Cash.Open(500m);
+    var open6 = t6c.Cash.GetCurrent()!;
+    var closedRefund = t6c.Sales.Refund(big.Id, "cliente de ayer", [RL(0, 1, RefundDisposition.Waste)], [RP(PaymentMethod.Cash, 150m)], t6c.Admin);
+    var mv = t6c.St.CashMovements.Last();
+    Check(mv.Type == CashMovementType.Refund && mv.Amount == 150m && mv.CashRegisterId == open6.Id && mv.SaleId == big.Id && closedRefund.CashRegisterId == open6.Id
+        && t6c.Cash.GetExpectedCash(open6.Id) == 350m, "closed-register sale cash refund 150 is a Refund movement in the open register");
+    var closedAfter = t6c.St.CashRegisters.Single(r => r.Id == closedId);
+    Check(closedAfter.FinalAmount == 250m && closedAfter.ExpectedAmount == 250m && t6c.St.CashCounts.Single(c => c.CashRegisterId == closedId).CountedAmount == 250m && Closed6() == closedBefore6,
+        "closed register FinalAmount, ExpectedAmount and CashCount unchanged by the refund");
+    var closedPay = t6c.Cash.GetPaymentSummary(closedId); var openPay = t6c.Cash.GetPaymentSummary(open6.Id);
+    Check(closedPay.RegisteredTotal == 150m && closedPay.RefundedTotal == 0m && openPay.RefundedTotal == 150m && openPay.NetTotal == -150m, "payment summaries: receipts stay in the closed register, refund nets the open one");
+}
+finally { Directory.SetCurrentDirectory(root); }
+
 // ---- UI label ----
 var cashPage = File.ReadAllText(Path.Combine(args[0], "Pages", "Cash.razor"));
 Check(cashPage.Contains("CashMovementType.Refund => \"Devoluci\u00f3n\""), "Cash page labels Refund movements as Devolucion");
 Check(System.Text.RegularExpressions.Regex.IsMatch(cashPage, @"CashMovementType\.Refund\s*\?\s*""[^""]"""), "Cash page shows Refund movements as outflows");
+var summaryPage = File.ReadAllText(Path.Combine(args[0], "Pages", "Summary.razor"));
+foreach (var label in new[] { "Ventas brutas", "Descuentos", "Anulaciones", "Devoluciones", "Importe neto" })
+    Check(summaryPage.Contains(label), "Summary page renders label: " + label);
+var cashHistoryPage = File.ReadAllText(Path.Combine(args[0], "Pages", "CashHistory.razor"));
+foreach (var (pageName, text) in new[] { ("Cash", cashPage), ("CashHistory", cashHistoryPage) })
+    Check(text.Contains("Cobros registrados") && text.Contains("Devuelto") && text.Contains("Neto") && text.Contains("RefundedAmount") && text.Contains("NetAmount")
+        && text.Contains("RefundedTotal") && text.Contains("NetTotal"), pageName + " page keeps Cobros registrados and renders Devuelto/Neto per method and totals");
+var historyPage = File.ReadAllText(Path.Combine(args[0], "Pages", "SalesHistory.razor"));
+Check(historyPage.Contains("La venta no tiene pagos registrados; no puede devolverse."), "Sales history explains a sale without payments cannot be refunded");
 Console.WriteLine($"{checks} checks, {failures} failures; fixture: {root}");
 return failures == 0 ? 0 : 1;
 '@ | Set-Content (Join-Path $ScratchPath 'Program.cs') -Encoding utf8

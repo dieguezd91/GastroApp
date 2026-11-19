@@ -101,17 +101,19 @@
                 <h4>Cobros registrados por medio de pago</h4>
                 <p>Importes aplicados a las ventas vinculadas a esta caja, incluidas las canceladas: no se revierten los cobros.
                     No son las ventas completadas del día ni el efectivo disponible en caja.</p>
+                <p>"Devuelto" son las devoluciones registradas en esta caja (aunque la venta sea de otra caja); "Neto" es lo registrado menos lo devuelto.
+                    Los cobros registrados no se modifican.</p>
                 <p role="status">@PaymentStateLabel(payments.State)</p>
                 <div style="overflow-x: auto;">
                     <table class="table">
-                        <thead><tr><th>Medio de pago</th><th>Importe registrado</th></tr></thead>
+                        <thead><tr><th>Medio de pago</th><th>Importe registrado</th><th>Devuelto</th><th>Neto</th></tr></thead>
                         <tbody>
                             @foreach (var row in payments.Rows)
                             {
-                                <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@Money(row.Amount)</td></tr>
+                                <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@Money(row.Amount)</td><td>@Money(row.RefundedAmount)</td><td>@Money(row.NetAmount)</td></tr>
                             }
                         </tbody>
-                        <tfoot><tr><th>Total de cobros registrados</th><td>@Money(payments.RegisteredTotal)</td></tr></tfoot>
+                        <tfoot><tr><th>Total de cobros registrados</th><td>@Money(payments.RegisteredTotal)</td><td>@Money(payments.RefundedTotal)</td><td>@Money(payments.NetTotal)</td></tr></tfoot>
                     </table>
                 </div>
                 @foreach (var warning in payments.Warnings)
