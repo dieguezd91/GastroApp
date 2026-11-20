@@ -13,6 +13,11 @@
         <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Ingrediente</button>
     </div>
 
+    @if (errorMessage != null)
+    {
+        <p class="text-danger" role="alert">@errorMessage</p>
+    }
+
     @if (showForm)
     {
         <div class="form-card">
@@ -97,6 +102,7 @@
                     {
                         <div class="stock-adjust-form">
                             <input type="number" @bind="newStockValue" class="form-control-small" placeholder="Nuevo stock" step="0.01" />
+                            <input type="text" @bind="stockAdjustReason" class="form-control-small" placeholder="Motivo (obligatorio)" />
                             <button class="btn btn-small btn-success" @onclick="() => SaveStockAdjustment(ingredient.Id)">✓</button>
                             <button class="btn btn-small" @onclick="CancelStockAdjustment">✕</button>
                         </div>
@@ -176,6 +182,8 @@
     private bool showForm = false;
     private int adjustingStockId = 0;
     private decimal newStockValue = 0;
+    private string stockAdjustReason = string.Empty;
+    private string? errorMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -237,7 +245,16 @@
     private void SaveStockAdjustment(int ingredientId)
     {
         if (!EnsureAdmin()) return;
-        IngredientService.AdjustStock(ingredientId, newStockValue);
+        try
+        {
+            IngredientService.AdjustStock(ingredientId, newStockValue, stockAdjustReason, AuthService.CurrentUser);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+            return;
+        }
+        errorMessage = null;
         LoadIngredients();
         CancelStockAdjustment();
     }
@@ -246,6 +263,7 @@
     {
         adjustingStockId = 0;
         newStockValue = 0;
+        stockAdjustReason = string.Empty;
     }
 
     private void SaveIngredient()
@@ -254,14 +272,23 @@
         if (string.IsNullOrWhiteSpace(editingIngredient.Name))
             return;
 
-        if (editingIngredient.Id == 0)
+        try
         {
-            IngredientService.Add(editingIngredient);
+            if (editingIngredient.Id == 0)
+            {
+                IngredientService.Add(editingIngredient, AuthService.CurrentUser);
+            }
+            else
+            {
+                IngredientService.Update(editingIngredient);
+            }
         }
-        else
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
         {
-            IngredientService.Update(editingIngredient);
+            errorMessage = ex.Message;
+            return;
         }
+        errorMessage = null;
 
         LoadIngredients();
         CancelEdit();

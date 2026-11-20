@@ -355,6 +355,7 @@ DataStorageService LoadFrom(JsonObject json)
 }
 JsonObject Fresh() => JsonNode.Parse(savedJson)!.AsObject();
 var legacyJson = Fresh(); legacyJson.Remove("SaleRefunds"); legacyJson.Remove("NextSaleRefundId");
+legacyJson.Remove("StockMovements"); legacyJson.Remove("NextStockMovementId"); // a legacy file has neither refunds nor the ledger that links to them
 foreach (var sale in legacyJson["Sales"]!.AsArray())
 {
     sale!.AsObject().Remove("CreatedByUserId"); sale.AsObject().Remove("CreatedByUsername");

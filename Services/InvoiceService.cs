@@ -22,8 +22,16 @@ public class InvoiceService
 
     public Invoice? GetById(int id) => _storage.Invoices.FirstOrDefault(i => i.Id == id);
 
-    public void Add(Invoice invoice)
+    // The invoice is the reception (S7): each applicable item becomes an InvoiceReceipt movement linked to it.
+    // Everything is validated before the invoice is stored, so a rejected invoice leaves no trace.
+    public void Add(Invoice invoice, User? actor = null)
     {
+        var operatorUser = _storage.FindLiveUser(actor);
+        if (actor != null && operatorUser == null)
+            throw new UnauthorizedAccessException("Se requiere un usuario vigente para registrar la factura.");
+
+        var batch = PrepareReceipts(invoice, operatorUser);
+
         invoice.Id = _storage.GetNextInvoiceId();
         // Asignar InvoiceId a todos los items
         foreach (var item in invoice.Items)
@@ -32,16 +40,21 @@ public class InvoiceService
         }
         _storage.Invoices.Add(invoice);
 
-        // Sumar stock por cada item de la factura
-        UpdateStockFromInvoice(invoice);
+        if (batch != null)
+        {
+            foreach (var movement in batch.Movements)
+                movement.InvoiceId = invoice.Id;
+            _ingredientService!.Commit(batch);
+        }
 
         _storage.SaveToFile();
     }
 
-    private void UpdateStockFromInvoice(Invoice invoice)
+    private StockMovementBatch? PrepareReceipts(Invoice invoice, User? operatorUser)
     {
-        if (_ingredientService == null) return;
+        if (_ingredientService == null) return null;
 
+        var requests = new List<StockMovementRequest>();
         foreach (var item in invoice.Items)
         {
             // Obtener el ingrediente para saber su unidad base
@@ -49,12 +62,20 @@ public class InvoiceService
             if (ingredient == null) continue;
 
             // Convertir cantidad a unidad base del ingrediente
-            var quantityInBaseUnit = UnitConverter.Convert(item.Quantity, item.Unit, ingredient.Unit);
+            decimal? quantityInBaseUnit;
+            try { quantityInBaseUnit = UnitConverter.Convert(item.Quantity, item.Unit, ingredient.Unit); }
+            catch (OverflowException) { throw new InvalidOperationException("La cantidad de la factura supera el límite permitido."); }
             if (quantityInBaseUnit == null) continue; // Unidades incompatibles
+            if (quantityInBaseUnit.Value <= 0m)
+                throw new InvalidOperationException("La cantidad de cada ítem de la factura debe ser positiva.");
 
-            // Sumar al stock
-            _ingredientService.AddStock(item.IngredientId, quantityInBaseUnit.Value);
+            requests.Add(new StockMovementRequest
+            {
+                IngredientId = ingredient.Id, Type = StockMovementType.InvoiceReceipt, Quantity = quantityInBaseUnit.Value
+            });
         }
+
+        return requests.Count == 0 ? null : _ingredientService.Prepare(requests, operatorUser, DateTime.Now);
     }
 
     public void Update(Invoice invoice)

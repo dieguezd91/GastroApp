@@ -10,6 +10,8 @@ public class DataStorageService
     public List<Sale> Sales { get; set; } = new();
     // Append-only refund ledger; sales themselves are never deleted or rewritten by a refund.
     public List<SaleRefund> SaleRefunds { get; private set; } = new();
+    // Append-only stock ledger (M15). Only IngredientService changes it, together with CurrentStock.
+    public List<StockMovement> StockMovements { get; private set; } = new();
     public List<CashRegister> CashRegisters { get; private set; } = new();
     public List<CashMovement> CashMovements { get; private set; } = new();
     public List<CashCount> CashCounts { get; private set; } = new();
@@ -28,6 +30,7 @@ public class DataStorageService
     private int _nextProductCategoryId = 1;
     private int _nextSaleId = 1;
     private int _nextSaleRefundId = 1;
+    private int _nextStockMovementId = 1;
     private int _nextCashRegisterId = 1;
     private int _nextCashMovementId = 1;
     private int _nextUserId = 1;
@@ -42,6 +45,7 @@ public class DataStorageService
     public int GetNextProductCategoryId() => _nextProductCategoryId++;
     public int GetNextSaleId() => Allocate(ref _nextSaleId, "ventas");
     public int GetNextSaleRefundId() => Allocate(ref _nextSaleRefundId, "devoluciones");
+    public int GetNextStockMovementId() => Allocate(ref _nextStockMovementId, "movimientos de stock");
 
     // Fail before checkout or opening mutates state; int.MaxValue cannot be followed by a valid counter.
     private static int Allocate(ref int next, string name)
@@ -54,6 +58,12 @@ public class DataStorageService
     public void EnsureSaleCapacity() => EnsureCapacity(_nextSaleId, "ventas");
     public void EnsureCashMovementCapacity() => EnsureCapacity(_nextCashMovementId, "movimientos de caja");
     public void EnsureSaleRefundCapacity() => EnsureCapacity(_nextSaleRefundId, "devoluciones");
+    // Room for `count` more ledger entries, so a batch can be rejected before anything changes.
+    public void EnsureStockMovementCapacity(int count = 1)
+    {
+        if (_nextStockMovementId <= 0 || (long)_nextStockMovementId + count > int.MaxValue)
+            throw new InvalidOperationException("Se agotaron los identificadores de movimientos de stock.");
+    }
     private static void EnsureCapacity(int next, string name)
     {
         if (next <= 0 || next == int.MaxValue)
@@ -102,6 +112,15 @@ public class DataStorageService
             || actor.Role != UserRole.Admin)
             throw new UnauthorizedAccessException("Se requiere un usuario administrador vigente.");
         return user;
+    }
+
+    // The stored user matching every identity field of the actor, or null (also for a blank stored username).
+    internal User? FindLiveUser(User? actor)
+    {
+        if (actor == null) return null;
+        var user = Users.FirstOrDefault(u => u.Id == actor.Id && u.Username == actor.Username
+            && u.PasswordHash == actor.PasswordHash && u.Role == actor.Role);
+        return user == null || string.IsNullOrWhiteSpace(user.Username) ? null : user;
     }
 
     public int GetNextUserId() => _nextUserId++;
@@ -202,6 +221,7 @@ public class DataStorageService
                 ProductCategories,
                 Sales,
                 SaleRefunds,
+                StockMovements,
                 CashRegisters,
                 CashMovements,
                 CashCounts,
@@ -216,6 +236,7 @@ public class DataStorageService
                 NextProductCategoryId = _nextProductCategoryId,
                 NextSaleId = _nextSaleId,
                 NextSaleRefundId = _nextSaleRefundId,
+                NextStockMovementId = _nextStockMovementId,
                 NextCashRegisterId = _nextCashRegisterId,
                 NextCashMovementId = _nextCashMovementId,
                 NextUserId = _nextUserId,
@@ -415,6 +436,71 @@ public class DataStorageService
         }
     }
 
+    // A missing list is a legacy file; an explicit null or inconsistent entry is corruption. Ingredients and
+    // invoices may be deleted after the fact, so only the (never deleted) sale and refund links must resolve.
+    private void LoadStockMovementState(JsonElement root)
+    {
+        var movements = root.TryGetProperty("StockMovements", out var movementsElement)
+            ? JsonSerializer.Deserialize<List<StockMovement>>(movementsElement.GetRawText())
+                ?? throw new InvalidDataException("StockMovements no puede ser null.")
+            : new List<StockMovement>();
+        if (movements.Any(m => m == null))
+            throw new InvalidDataException("StockMovements contiene un movimiento null.");
+        var next = RecoverNext(root, "NextStockMovementId", movements.Select(m => m.Id));
+        ValidateStockMovements(movements);
+        StockMovements = movements;
+        _nextStockMovementId = next;
+    }
+
+    private void ValidateStockMovements(List<StockMovement> movements)
+    {
+        foreach (var m in movements)
+        {
+            if (!Enum.IsDefined(typeof(StockMovementType), m.Type) || m.IngredientId <= 0
+                || m.Quantity == 0m || string.IsNullOrWhiteSpace(m.Unit))
+                throw new InvalidDataException("Movimiento de stock inválido.");
+            var increases = m.Type is StockMovementType.InvoiceReceipt or StockMovementType.SaleCancellationReturn
+                or StockMovementType.RefundReturn or StockMovementType.InitialStock;
+            var decreases = m.Type is StockMovementType.SaleConsumption or StockMovementType.Waste;
+            if ((increases && m.Quantity < 0m) || (decreases && m.Quantity > 0m))
+                throw new InvalidDataException("El signo del movimiento de stock no corresponde a su tipo.");
+            if (checked(m.PreviousStock + m.Quantity) != m.ResultingStock)
+                throw new InvalidDataException("Los saldos del movimiento de stock no coinciden con su cantidad.");
+            var needsReason = m.Type is StockMovementType.Adjustment or StockMovementType.Waste
+                or StockMovementType.CountAdjustment;
+            if (needsReason && string.IsNullOrWhiteSpace(m.Reason))
+                throw new InvalidDataException("Movimiento de stock sin motivo.");
+            if (m.Type == StockMovementType.Waste
+                ? !m.WasteCategory.HasValue || !Enum.IsDefined(typeof(WasteCategory), m.WasteCategory.Value)
+                : m.WasteCategory.HasValue)
+                throw new InvalidDataException("Categoría de merma inválida.");
+            if (m.UserId.HasValue != (m.Username != null)
+                || (m.UserId.HasValue && (m.UserId.Value <= 0 || string.IsNullOrWhiteSpace(m.Username))))
+                throw new InvalidDataException("Movimiento de stock con responsable inválido.");
+            var linked = m.Type switch
+            {
+                StockMovementType.SaleConsumption or StockMovementType.SaleCancellationReturn =>
+                    m.SaleId.HasValue && Sales.Any(s => s != null && s.Id == m.SaleId.Value),
+                StockMovementType.RefundReturn => m.SaleId.HasValue && m.RefundId.HasValue
+                    && SaleRefunds.Any(r => r != null && r.Id == m.RefundId.Value && r.SaleId == m.SaleId.Value),
+                StockMovementType.InvoiceReceipt => m.InvoiceId is > 0,
+                StockMovementType.CountAdjustment => m.StockCountId is > 0,
+                _ => true
+            };
+            if (!linked)
+                throw new InvalidDataException("Movimiento de stock sin documento de origen válido.");
+        }
+    }
+
+    private void LoadStockMovementStateGuarded(JsonElement root)
+    {
+        try { LoadStockMovementState(root); }
+        catch (Exception ex) when (ex is JsonException or FormatException or OverflowException or InvalidOperationException)
+        {
+            throw new InvalidDataException("Contenido de movimientos de stock inválido.", ex);
+        }
+    }
+
     public void LoadFromFile()
     {
         try
@@ -519,6 +605,8 @@ public class DataStorageService
             {
                 _nextRecipeId = nextRecipeIdElement.GetInt32();
             }
+
+            LoadStockMovementStateGuarded(root);
         }
         catch (InvalidDataException)
         {

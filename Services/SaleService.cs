@@ -40,9 +40,8 @@ public class SaleService
         var (isValid, errorMessage) = ValidateSale(sale);
         if (!isValid)
             throw new InvalidOperationException(errorMessage);
-        var operatorUser = seller == null ? null : _storage.Users.FirstOrDefault(u => u.Id == seller.Id
-            && u.Username == seller.Username && u.PasswordHash == seller.PasswordHash && u.Role == seller.Role);
-        if (seller != null && (operatorUser == null || string.IsNullOrWhiteSpace(operatorUser.Username)))
+        var operatorUser = _storage.FindLiveUser(seller);
+        if (seller != null && operatorUser == null)
             throw new UnauthorizedAccessException("Se requiere un usuario vigente para registrar la venta.");
 
         _storage.EnsureSaleCapacity();
@@ -56,6 +55,14 @@ public class SaleService
             catch (OverflowException) { throw new InvalidOperationException("El saldo de caja supera el límite permitido."); }
         }
 
+        // Plan and validate the whole deduction (aggregated per ingredient) before anything changes, so a
+        // failure leaves no sale, movement, cash movement or counter behind. After this point nothing can fail.
+        var now = DateTime.Now;
+        var (lines, totals) = PlanDeductions(sale.Items);
+        var batch = totals.Count == 0 ? null : RequireIngredientService().Prepare(totals.Select(t =>
+            new StockMovementRequest { IngredientId = t.IngredientId, Type = StockMovementType.SaleConsumption, Quantity = -t.Quantity }).ToList(),
+            operatorUser, now);
+
         foreach (var item in sale.Items)
         {
             item.Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim();
@@ -65,16 +72,27 @@ public class SaleService
 
         // The checkout owns the snapshot; no caller-provided deductions are trusted.
         sale.StockConsumption = new();
-        sale.IsStockConsumptionReliable = false;
         sale.Id = _storage.GetNextSaleId();
         sale.CashRegisterId = registerId;
         sale.CreatedByUserId = operatorUser?.Id;
         sale.CreatedByUsername = operatorUser?.Username;
-        sale.Date = DateTime.Now;
+        sale.Date = now;
         _storage.Sales.Add(sale);
 
-        // Descontar stock por cada producto vendido
-        DeductStockFromSale(sale);
+        // Snapshots record the same quantities the ledger deducts: per line, and aggregated for cancellation.
+        foreach (var (item, entry) in lines)
+        {
+            sale.StockConsumption.Add(new SaleStockConsumption { IngredientId = entry.IngredientId, Quantity = entry.Quantity, Unit = entry.Unit });
+            // Per-line copy lets a partial refund restock proportionally; the aggregate stays intact.
+            item.StockConsumption!.Add(new SaleStockConsumption { IngredientId = entry.IngredientId, Quantity = entry.Quantity, Unit = entry.Unit });
+        }
+        if (batch != null)
+        {
+            foreach (var movement in batch.Movements)
+                movement.SaleId = sale.Id;
+            _ingredientService!.Commit(batch);
+        }
+        sale.IsStockConsumptionReliable = true;
 
         if (cashAmount > 0m)
             _storage.CashMovements.Add(new CashMovement
@@ -149,12 +167,16 @@ public class SaleService
             }
         }
 
-        foreach (var addition in additions.Values)
-            addition.Ingredient.CurrentStock += addition.Quantity;
+        var now = DateTime.Now;
+        var batch = additions.Count == 0 ? null : RequireIngredientService().Prepare(additions.Values.Select(a =>
+            new StockMovementRequest { IngredientId = a.Ingredient.Id, Type = StockMovementType.SaleCancellationReturn,
+                Quantity = a.Quantity, Reason = trimmedReason, SaleId = sale.Id }).ToList(), user, now);
+        if (batch != null)
+            _ingredientService!.Commit(batch);
 
         sale.Status = SaleStatus.Cancelled;
         sale.CancellationReason = trimmedReason;
-        sale.CancelledAt = DateTime.Now;
+        sale.CancelledAt = now;
         sale.CancelledByUserId = user.Id;
         sale.CancelledByUsername = user.Username;
         _storage.SaveToFile();
@@ -294,90 +316,79 @@ public class SaleService
         if (_recipeService == null || _ingredientService == null)
             return (true, string.Empty); // Sin validación si no hay servicios
 
-        foreach (var item in items)
+        // Requirements are aggregated per ingredient across all lines (S9): two lines sharing an ingredient
+        // must fit in its stock together, not one by one.
+        var needed = new Dictionary<int, decimal>();
+        try
         {
-            // Buscar si el producto tiene una receta asociada
-            var recipe = _storage.Recipes.FirstOrDefault(r => r.Name == item.ProductName);
-            if (recipe == null) continue; // Producto sin receta, omitir validación
-
-            // Verificar stock de cada ingrediente de la receta
-            foreach (var recipeIngredient in recipe.Ingredients)
+            foreach (var (_, ingredient, quantity) in RecipeRequirements(items))
             {
-                var ingredient = _storage.Ingredients.FirstOrDefault(i => i.Id == recipeIngredient.IngredientId);
-                if (ingredient == null) continue;
-
-                // Convertir cantidad a unidad base del ingrediente
-                var quantityNeeded = UnitConverter.Convert(
-                    recipeIngredient.Quantity * item.Quantity,
-                    recipeIngredient.Unit,
-                    ingredient.Unit
-                );
-
-                if (quantityNeeded == null) continue; // Unidades incompatibles
-                if (quantityNeeded <= 0m)
+                if (quantity <= 0m)
                     return (false, "La receta contiene una cantidad de ingrediente no positiva.");
 
-                // Verificar si hay stock suficiente
-                if (ingredient.CurrentStock < quantityNeeded.Value)
-                {
+                var total = checked(needed.GetValueOrDefault(ingredient.Id) + quantity);
+                needed[ingredient.Id] = total;
+                if (ingredient.CurrentStock < total)
                     return (false, $"Stock insuficiente de {ingredient.Name}. Disponible: {ingredient.CurrentStock} {ingredient.Unit}");
-                }
             }
+        }
+        catch (OverflowException)
+        {
+            return (false, "La cantidad de ingredientes requerida supera el límite permitido.");
         }
 
         return (true, string.Empty);
     }
 
-    private void DeductStockFromSale(Sale sale)
+    // Recipes are matched by line product name; quantities are multiplied by the line quantity and converted to
+    // the ingredient unit. Missing recipes/ingredients and incompatible units are skipped (existing behavior).
+    private IEnumerable<(SaleItem Item, Ingredient Ingredient, decimal Quantity)> RecipeRequirements(IEnumerable<SaleItem> items)
     {
-        if (_recipeService == null || _ingredientService == null)
+        foreach (var item in items)
         {
-            sale.IsStockConsumptionReliable = true;
-            return;
-        }
-
-        foreach (var item in sale.Items)
-        {
-            // Buscar si el producto tiene una receta asociada
             var recipe = _storage.Recipes.FirstOrDefault(r => r.Name == item.ProductName);
-            if (recipe == null) continue; // Producto sin receta
+            if (recipe == null) continue;
 
-            // Descontar stock de cada ingrediente de la receta
             foreach (var recipeIngredient in recipe.Ingredients)
             {
                 var ingredient = _storage.Ingredients.FirstOrDefault(i => i.Id == recipeIngredient.IngredientId);
                 if (ingredient == null) continue;
 
-                // Convertir cantidad a unidad base del ingrediente
-                var quantityToDeduct = UnitConverter.Convert(
-                    recipeIngredient.Quantity * item.Quantity,
-                    recipeIngredient.Unit,
-                    ingredient.Unit
-                );
-
-                if (quantityToDeduct == null) continue; // Unidades incompatibles
-
-                // TryRemoveStock persists each successful deduction as before. Capture only
-                // those successes, never recipe projections or failed attempts.
-                if (!_ingredientService.TryRemoveStock(recipeIngredient.IngredientId, quantityToDeduct.Value))
-                    throw new InvalidOperationException($"No se pudo descontar stock de {ingredient.Name}.");
-                sale.StockConsumption!.Add(new SaleStockConsumption
-                {
-                    IngredientId = ingredient.Id,
-                    Quantity = quantityToDeduct.Value,
-                    Unit = ingredient.Unit
-                });
-                // Per-line copy lets a partial refund restock proportionally; the aggregate stays intact.
-                (item.StockConsumption ??= new()).Add(new SaleStockConsumption
-                {
-                    IngredientId = ingredient.Id,
-                    Quantity = quantityToDeduct.Value,
-                    Unit = ingredient.Unit
-                });
+                var quantity = UnitConverter.Convert(recipeIngredient.Quantity * item.Quantity, recipeIngredient.Unit, ingredient.Unit);
+                if (quantity == null) continue;
+                yield return (item, ingredient, quantity.Value);
             }
         }
+    }
 
-        sale.IsStockConsumptionReliable = true;
+    private IngredientService RequireIngredientService() =>
+        _ingredientService ?? throw new InvalidOperationException("El servicio de ingredientes no está disponible.");
+
+    // Per-line snapshot entries and the per-ingredient totals (in order of first use) a sale deducts. Pure:
+    // nothing is changed. Without the recipe/ingredient services no stock is deducted.
+    private (List<(SaleItem Item, SaleStockConsumption Entry)> Lines, List<(int IngredientId, decimal Quantity)> Totals)
+        PlanDeductions(List<SaleItem> items)
+    {
+        var lines = new List<(SaleItem, SaleStockConsumption)>();
+        var totals = new List<(int IngredientId, decimal Quantity)>();
+        if (_recipeService == null || _ingredientService == null)
+            return (lines, totals);
+
+        try
+        {
+            foreach (var (item, ingredient, quantity) in RecipeRequirements(items))
+            {
+                lines.Add((item, new SaleStockConsumption { IngredientId = ingredient.Id, Quantity = quantity, Unit = ingredient.Unit }));
+                var index = totals.FindIndex(t => t.IngredientId == ingredient.Id);
+                if (index < 0) totals.Add((ingredient.Id, quantity));
+                else totals[index] = (ingredient.Id, checked(totals[index].Quantity + quantity));
+            }
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidOperationException("La cantidad de ingredientes requerida supera el límite permitido.");
+        }
+        return (lines, totals);
     }
 
     // ---- Refunds (money returned) are separate from cancellation (sale voided): S9 ----
@@ -475,16 +486,24 @@ public class SaleService
         }
         _storage.EnsureSaleRefundCapacity();
 
-        foreach (var (ingredient, quantity) in restock)
-            ingredient.CurrentStock += quantity;
+        var now = DateTime.Now;
+        var batch = restock.Count == 0 ? null : RequireIngredientService().Prepare(restock.Select(r =>
+            new StockMovementRequest { IngredientId = r.Ingredient.Id, Type = StockMovementType.RefundReturn,
+                Quantity = r.Quantity, Reason = trimmedReason, SaleId = sale.Id }).ToList(), user, now);
 
         var refund = new SaleRefund
         {
-            Id = _storage.GetNextSaleRefundId(), SaleId = sale.Id, Date = DateTime.Now,
+            Id = _storage.GetNextSaleRefundId(), SaleId = sale.Id, Date = now,
             UserId = user.Id, Username = user.Username, Reason = trimmedReason,
             CashRegisterId = register?.Id, Lines = refundLines, Payments = refundPayments, Total = total
         };
         _storage.SaleRefunds.Add(refund);
+        if (batch != null)
+        {
+            foreach (var movement in batch.Movements)
+                movement.RefundId = refund.Id;
+            _ingredientService!.Commit(batch);
+        }
         if (cashAmount > 0m)
             _storage.CashMovements.Add(new CashMovement
             {

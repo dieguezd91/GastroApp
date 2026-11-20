@@ -276,7 +276,7 @@
         if (!CanSaveInvoice())
             return;
 
-        InvoiceService.Add(editingInvoice);
+        InvoiceService.Add(editingInvoice, AuthService.CurrentUser);
         LoadData();
         CancelEdit();
     }
