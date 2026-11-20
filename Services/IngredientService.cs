@@ -65,12 +65,16 @@ public class IngredientService
         _storage.SaveToFile();
     }
 
-    // Stock is never edited here: it only changes through the ledger (S6).
+    // Stock is never edited here: it only changes through the ledger (S6). The unit is frozen once the
+    // ingredient has stock or any movement, because recipes, invoices and the ledger count in that unit (S13).
     public void Update(Ingredient ingredient)
     {
         var existing = GetById(ingredient.Id);
         if (existing != null)
         {
+            if (!string.Equals(existing.Unit, ingredient.Unit, StringComparison.Ordinal)
+                && (existing.CurrentStock != 0m || HasMovements(existing.Id)))
+                throw new InvalidOperationException("No se puede cambiar la unidad de un ingrediente con stock o movimientos.");
             existing.Name = ingredient.Name;
             existing.Unit = ingredient.Unit;
             existing.IsActive = ingredient.IsActive;
@@ -183,15 +187,66 @@ public class IngredientService
     private static bool InDayRange(DateTime date, DateTime? from, DateTime? to) =>
         (from == null || date.Date >= from.Value.Date) && (to == null || date.Date <= to.Value.Date);
 
+    // Ingredients and alerts for the stock overview (S5). Only active ingredients are listed: out of stock
+    // (stock <= 0) and below minimum (0 < stock <= MinStock). Coverage estimates how many days the stock lasts
+    // at the net sale consumption of the last `days` calendar days ending on asOf (default today). Ordered by
+    // level, then shortest coverage first (unknown last), then name. Read-only.
+    public List<StockAlert> GetStockAlerts(int days = 7, DateTime? asOf = null)
+    {
+        if (days <= 0)
+            throw new InvalidOperationException("El período debe ser mayor a cero.");
+        var to = (asOf ?? DateTime.Today).Date;
+        var from = to.AddDays(-(days - 1));
+
+        var alerts = new List<StockAlert>();
+        foreach (var ingredient in _storage.Ingredients.Where(i => i != null && i.IsActive))
+        {
+            var level = ingredient.CurrentStock <= 0m ? StockAlertLevel.OutOfStock
+                : ingredient.CurrentStock <= ingredient.MinStock ? StockAlertLevel.BelowMinimum
+                : (StockAlertLevel?)null;
+            if (level == null) continue;
+            var consumption = GetConsumption(ingredient.Id, from, to);
+            alerts.Add(new StockAlert
+            {
+                IngredientId = ingredient.Id, Name = ingredient.Name, Unit = ingredient.Unit,
+                CurrentStock = ingredient.CurrentStock, MinStock = ingredient.MinStock, Level = level.Value,
+                Days = days, RecentConsumption = consumption, CoverageDays = Coverage(ingredient.CurrentStock, consumption, days)
+            });
+        }
+        return alerts.OrderBy(a => a.Level)
+            .ThenBy(a => a.CoverageDays.HasValue ? 0 : 1).ThenBy(a => a.CoverageDays ?? 0m)
+            .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(a => a.IngredientId).ToList();
+    }
+
+    private static decimal? Coverage(decimal stock, decimal consumption, int days)
+    {
+        if (consumption <= 0m) return null;
+        if (stock <= 0m) return 0m;
+        try { return checked(stock * days) / consumption; }
+        catch (OverflowException) { return null; }
+    }
+
+    // Deleting would orphan recipes, invoices, sale snapshots or the ledger: those ingredients are deactivated
+    // instead (S13). An unknown ingredient stays a no-op.
     public void Delete(int id)
     {
         var ingredient = GetById(id);
         if (ingredient != null)
         {
+            if (IsReferenced(id))
+                throw new InvalidOperationException("El ingrediente tiene registros asociados; desactívelo en lugar de eliminarlo.");
             _storage.Ingredients.Remove(ingredient);
             _storage.SaveToFile();
         }
     }
+
+    private bool IsReferenced(int id) =>
+        HasMovements(id)
+        || _storage.Recipes.Any(r => r?.Ingredients?.Any(i => i != null && i.IngredientId == id) == true)
+        || _storage.Invoices.Any(inv => inv?.Items?.Any(i => i != null && i.IngredientId == id) == true)
+        || _storage.Sales.Any(s => s != null
+            && (s.StockConsumption?.Any(c => c != null && c.IngredientId == id) == true
+                || s.Items?.Any(line => line?.StockConsumption?.Any(c => c != null && c.IngredientId == id) == true) == true));
 
     // Obtener último precio conocido desde facturas
     public decimal? GetLastPrice(int ingredientId)

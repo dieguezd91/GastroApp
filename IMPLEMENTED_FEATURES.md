@@ -213,11 +213,17 @@ Admin functionality:
 - delete ingredients;
 - activate/deactivate ingredients;
 - configure a base unit;
-- define current stock;
+- define the opening stock of a new ingredient (recorded as an `InitialStock` movement);
 - define minimum stock;
-- manually adjust stock;
+- adjust stock with a mandatory reason and confirmation (**Ajustar stock**);
+- register waste with category and reason (**Registrar merma**);
+- view the movement history of each ingredient with date and cause filters (`/ingredients/{id}/movements`);
+- view stock alerts (**Alertas de stock**): exhausted and below-minimum ingredients with estimated coverage;
+- see a visible warning for negative balances (**Stock negativo: requiere ajuste**);
 - view the latest known purchase price;
 - view stock status.
+
+The edit form shows the stock read-only; stock changes only through the ledger. The unit cannot be changed once an ingredient has stock or movements, and an ingredient referenced by recipes, invoices, sales or movements cannot be deleted (deactivate it). See [Stock.md](Docs/Architecture/Stock.md).
 
 Supported units currently exposed by the UI:
 
@@ -322,21 +328,21 @@ The variation is absolute, so both increases and decreases can trigger yellow or
 
 ## Inventory Flow
 
-Current stock changes through three paths.
+Every stock change is a persisted ledger movement with its cause, previous and resulting stock, responsible user and origin document (see [Stock.md](Docs/Architecture/Stock.md)).
 
-### Manual Adjustment
+### Manual Adjustment and Waste
 
-Administrators can set an ingredient's current stock directly from the ingredient page.
+Administrators adjust stock to a new value with a mandatory reason, or register waste with a category and reason, from the ingredient page; both show a confirmation and never leave a negative balance.
 
 ### Purchase Entry
 
-Creating an invoice adds the purchased quantity to ingredient stock.
+Creating an invoice adds the purchased quantity to ingredient stock as `InvoiceReceipt` movements linked to the invoice.
 
 ### Sale Consumption
 
-A completed sale deducts recipe ingredient quantities when the sold product name matches a recipe name.
+A completed sale deducts recipe ingredient quantities when the sold product name matches a recipe name, as one atomic batch aggregated per ingredient. Cancellations and restock refunds return stock through linked movements.
 
-The sale is blocked when a required ingredient does not have sufficient stock.
+The sale is blocked, without any partial deduction, when a required ingredient does not have sufficient stock.
 
 ## Persistence
 

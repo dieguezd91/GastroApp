@@ -13,10 +13,46 @@
         <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Ingrediente</button>
     </div>
 
-    @if (errorMessage != null)
+    @if (successMessage != null)
     {
-        <p class="text-danger" role="alert">@errorMessage</p>
+        <p class="text-success" role="status">@successMessage</p>
     }
+
+    <section class="form-card stock-alerts" aria-label="Alertas de stock">
+        <h3>Alertas de stock</h3>
+        @if (alerts == null || alerts.Count == 0)
+        {
+            <p class="text-muted">Sin alertas de stock: ningún ingrediente activo está agotado ni bajo su mínimo.</p>
+        }
+        else
+        {
+            <div style="overflow-x: auto;">
+                <table class="table">
+                    <thead>
+                        <tr><th>Ingrediente</th><th>Estado</th><th>Stock</th><th>Mínimo</th><th>Cobertura estimada (consumo de @alerts[0].Days días)</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var alert in alerts)
+                        {
+                            <tr>
+                                <td><a href="/ingredients/@alert.IngredientId/movements">@alert.Name</a></td>
+                                <td>
+                                    @(alert.Level == StockAlertLevel.OutOfStock ? "Agotado" : "Bajo mínimo")
+                                    @if (alert.IsNegative)
+                                    {
+                                        <span class="stock-warning" role="alert">Stock negativo: requiere ajuste</span>
+                                    }
+                                </td>
+                                <td>@alert.CurrentStock @alert.Unit</td>
+                                <td>@alert.MinStock @alert.Unit</td>
+                                <td>@CoverageText(alert)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
 
     @if (showForm)
     {
@@ -30,19 +66,34 @@
 
             <div class="form-group">
                 <label>Unidad de Medida</label>
-                <select @bind="editingIngredient.Unit" class="form-control">
+                <select @bind="editingIngredient.Unit" class="form-control" disabled="@(!CanChangeUnit())">
                     <option value="kg">Kilogramo (kg)</option>
                     <option value="lt">Litro (lt)</option>
                     <option value="unidad">Unidad</option>
                     <option value="gr">Gramo (gr)</option>
                     <option value="ml">Mililitro (ml)</option>
                 </select>
+                @if (!CanChangeUnit())
+                {
+                    <small class="text-muted">La unidad no puede cambiarse porque el ingrediente tiene stock o movimientos.</small>
+                }
             </div>
 
-            <div class="form-group">
-                <label>Stock Actual</label>
-                <input type="number" @bind="editingIngredient.CurrentStock" class="form-control" placeholder="0" step="0.01" />
-            </div>
+            @if (editingIngredient.Id == 0)
+            {
+                <div class="form-group">
+                    <label>Stock inicial</label>
+                    <input type="number" @bind="editingIngredient.CurrentStock" class="form-control" placeholder="0" step="0.01" />
+                </div>
+            }
+            else
+            {
+                <div class="form-group">
+                    <label>Stock actual</label>
+                    <p class="form-readonly">@LiveStock(editingIngredient.Id) @editingIngredient.Unit</p>
+                    <small class="text-muted">El stock solo cambia con «Ajustar stock», «Registrar merma», compras, ventas o conteos, y queda en el historial.</small>
+                </div>
+            }
 
             <div class="form-group">
                 <label>Stock Mínimo (Alerta)</label>
@@ -55,6 +106,11 @@
                     Activo
                 </label>
             </div>
+
+            @if (formError != null)
+            {
+                <p class="text-danger" role="alert">@formError</p>
+            }
 
             <div class="form-actions">
                 <button class="btn btn-primary" @onclick="SaveIngredient">Guardar</button>
@@ -86,6 +142,10 @@
                             <span class="text-muted"> (Mín: @ingredient.MinStock)</span>
                         }
                     </p>
+                    @if (ingredient.CurrentStock < 0)
+                    {
+                        <p class="stock-warning" role="alert">⚠️ Stock negativo: requiere ajuste</p>
+                    }
                     @{
                         var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
                     }
@@ -98,20 +158,94 @@
                         <p class="cost">Sin precio registrado</p>
                     }
 
-                    @if (adjustingStockId == ingredient.Id)
+                    @if (deleteErrorId == ingredient.Id && deleteError != null)
                     {
-                        <div class="stock-adjust-form">
-                            <input type="number" @bind="newStockValue" class="form-control-small" placeholder="Nuevo stock" step="0.01" />
-                            <input type="text" @bind="stockAdjustReason" class="form-control-small" placeholder="Motivo (obligatorio)" />
-                            <button class="btn btn-small btn-success" @onclick="() => SaveStockAdjustment(ingredient.Id)">✓</button>
-                            <button class="btn btn-small" @onclick="CancelStockAdjustment">✕</button>
+                        <p class="text-danger" role="alert">@deleteError</p>
+                    }
+
+                    @if (adjustIngredientId == ingredient.Id)
+                    {
+                        <div class="stock-dialog" role="dialog" aria-label="Ajustar stock">
+                            <h4>Ajustar stock</h4>
+                            <p>Stock actual: <strong>@ingredient.CurrentStock @ingredient.Unit</strong></p>
+                            <div class="form-group">
+                                <label>Nuevo stock (@ingredient.Unit)</label>
+                                <input type="number" @bind="adjustNewStock" @bind:event="oninput" class="form-control" placeholder="Nuevo stock" step="0.01" />
+                            </div>
+                            @{
+                                var difference = GetAdjustDifference();
+                            }
+                            @if (difference.HasValue)
+                            {
+                                <p class="stock-difference">Diferencia: <strong>@SignedAmount(difference.Value) @ingredient.Unit</strong> (el stock quedará en @adjustNewStock @ingredient.Unit)</p>
+                            }
+                            <div class="form-group">
+                                <label>Motivo (obligatorio)</label>
+                                <input type="text" @bind="adjustReason" class="form-control" placeholder="Ej: conteo rápido, diferencia detectada" />
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" @bind="adjustConfirmed" />
+                                    Confirmo el ajuste de stock
+                                </label>
+                            </div>
+                            @if (adjustError != null)
+                            {
+                                <p class="text-danger" role="alert">@adjustError</p>
+                            }
+                            <div class="form-actions">
+                                <button class="btn btn-small btn-success" @onclick="SaveStockAdjustment">Confirmar ajuste</button>
+                                <button class="btn btn-small" @onclick="CancelStockAdjustment">Cancelar</button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (wasteIngredientId == ingredient.Id)
+                    {
+                        <div class="stock-dialog" role="dialog" aria-label="Registrar merma">
+                            <h4>Registrar merma</h4>
+                            <p>Stock actual: <strong>@ingredient.CurrentStock @ingredient.Unit</strong></p>
+                            <div class="form-group">
+                                <label>Cantidad perdida (@ingredient.Unit)</label>
+                                <input type="number" @bind="wasteQuantity" class="form-control" placeholder="Cantidad" step="0.01" />
+                            </div>
+                            <div class="form-group">
+                                <label>Categoría</label>
+                                <select @bind="wasteCategory" class="form-control">
+                                    <option value="">Seleccionar...</option>
+                                    @foreach (var category in Enum.GetValues<WasteCategory>())
+                                    {
+                                        <option value="@category">@StockMovementLabels.GetLabel(category)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Motivo (obligatorio)</label>
+                                <input type="text" @bind="wasteReason" class="form-control" placeholder="Ej: bolsa vencida, se cayó" />
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" @bind="wasteConfirmed" />
+                                    Confirmo la merma
+                                </label>
+                            </div>
+                            @if (wasteError != null)
+                            {
+                                <p class="text-danger" role="alert">@wasteError</p>
+                            }
+                            <div class="form-actions">
+                                <button class="btn btn-small btn-success" @onclick="SaveWaste">Confirmar merma</button>
+                                <button class="btn btn-small" @onclick="CancelWaste">Cancelar</button>
+                            </div>
                         </div>
                     }
                 </div>
                 <div class="product-actions">
-                    <button class="btn btn-small" @onclick="() => ShowStockAdjust(ingredient)" title="Ajustar stock">📦</button>
-                    <button class="btn btn-small" @onclick="() => EditIngredient(ingredient)">✏️</button>
-                    <button class="btn btn-small btn-danger" @onclick="() => DeleteIngredient(ingredient.Id)">🗑️</button>
+                    <a class="btn btn-small" href="/ingredients/@ingredient.Id/movements" title="Historial de movimientos">📜 Historial</a>
+                    <button class="btn btn-small" @onclick="() => ShowStockAdjust(ingredient)" title="Ajustar stock">📦 Ajustar stock</button>
+                    <button class="btn btn-small" @onclick="() => ShowWaste(ingredient)" title="Registrar merma">🗑 Registrar merma</button>
+                    <button class="btn btn-small" @onclick="() => EditIngredient(ingredient)" title="Editar">✏️</button>
+                    <button class="btn btn-small btn-danger" @onclick="() => DeleteIngredient(ingredient.Id)" title="Eliminar">🗑️</button>
                 </div>
             </div>
         }
@@ -152,20 +286,6 @@
         font-size: 0.85rem;
     }
 
-    .stock-adjust-form {
-        display: flex;
-        gap: 0.5rem;
-        margin-top: 0.5rem;
-        align-items: center;
-    }
-
-    .form-control-small {
-        width: 120px;
-        padding: 0.25rem 0.5rem;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-    }
-
     .btn-success {
         background: #28a745;
         color: white;
@@ -178,12 +298,29 @@
 
 @code {
     private List<Ingredient> ingredients = new();
+    private IReadOnlyList<StockAlert>? alerts;
     private Ingredient editingIngredient = new();
     private bool showForm = false;
-    private int adjustingStockId = 0;
-    private decimal newStockValue = 0;
-    private string stockAdjustReason = string.Empty;
-    private string? errorMessage;
+    private string? formError;
+    private string? deleteError;
+    private int deleteErrorId = 0;
+    // Result of the last stock operation (adjustment or waste).
+    private string? successMessage;
+
+    // "Ajustar stock" dialog: the ingredient being adjusted (0 = closed).
+    private int adjustIngredientId = 0;
+    private decimal? adjustNewStock;
+    private string? adjustReason;
+    private bool adjustConfirmed;
+    private string? adjustError;
+
+    // "Registrar merma" dialog: the ingredient (0 = closed).
+    private int wasteIngredientId = 0;
+    private decimal? wasteQuantity;
+    private WasteCategory? wasteCategory;
+    private string? wasteReason;
+    private bool wasteConfirmed;
+    private string? wasteError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -211,11 +348,32 @@
     private void LoadIngredients()
     {
         ingredients = IngredientService.GetAll();
+        alerts = IngredientService.GetStockAlerts();
+    }
+
+    private decimal LiveStock(int id) => IngredientService.GetById(id)?.CurrentStock ?? 0m;
+
+    // The unit is frozen once the ingredient has stock or movements (the service enforces it too).
+    private bool CanChangeUnit()
+    {
+        if (editingIngredient.Id == 0) return true;
+        var live = IngredientService.GetById(editingIngredient.Id);
+        return live != null && live.CurrentStock == 0m && !IngredientService.HasMovements(live.Id);
+    }
+
+    private static string SignedAmount(decimal value) => value.ToString("+0.####;-0.####;0");
+
+    private static string CoverageText(StockAlert alert)
+    {
+        if (alert.RecentConsumption <= 0m) return "Sin consumo reciente";
+        if (!alert.CoverageDays.HasValue) return "No calculable";
+        return $"{alert.CoverageDays.Value:0.#} días (consumo {alert.RecentConsumption / alert.Days:0.##} {alert.Unit}/día)";
     }
 
     private void ShowAddForm()
     {
         if (!EnsureAdmin()) return;
+        formError = null;
         editingIngredient = new Ingredient();
         showForm = true;
     }
@@ -223,54 +381,27 @@
     private void EditIngredient(Ingredient ingredient)
     {
         if (!EnsureAdmin()) return;
+        formError = null;
         editingIngredient = new Ingredient
         {
             Id = ingredient.Id,
             Name = ingredient.Name,
             Unit = ingredient.Unit,
             IsActive = ingredient.IsActive,
-            CurrentStock = ingredient.CurrentStock,
+            CurrentStock = ingredient.CurrentStock, // display only: Update never writes stock
             MinStock = ingredient.MinStock
         };
         showForm = true;
-    }
-
-    private void ShowStockAdjust(Ingredient ingredient)
-    {
-        if (!EnsureAdmin()) return;
-        adjustingStockId = ingredient.Id;
-        newStockValue = ingredient.CurrentStock;
-    }
-
-    private void SaveStockAdjustment(int ingredientId)
-    {
-        if (!EnsureAdmin()) return;
-        try
-        {
-            IngredientService.AdjustStock(ingredientId, newStockValue, stockAdjustReason, AuthService.CurrentUser);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
-        {
-            errorMessage = ex.Message;
-            return;
-        }
-        errorMessage = null;
-        LoadIngredients();
-        CancelStockAdjustment();
-    }
-
-    private void CancelStockAdjustment()
-    {
-        adjustingStockId = 0;
-        newStockValue = 0;
-        stockAdjustReason = string.Empty;
     }
 
     private void SaveIngredient()
     {
         if (!EnsureAdmin()) return;
         if (string.IsNullOrWhiteSpace(editingIngredient.Name))
+        {
+            formError = "El nombre del ingrediente es obligatorio.";
             return;
+        }
 
         try
         {
@@ -285,25 +416,165 @@
         }
         catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
         {
-            errorMessage = ex.Message;
+            if (EnsureAdmin()) formError = ex.Message;
             return;
         }
-        errorMessage = null;
 
         LoadIngredients();
         CancelEdit();
     }
 
+    private void CancelEdit()
+    {
+        if (!EnsureAdmin()) return;
+        showForm = false;
+        formError = null;
+        editingIngredient = new Ingredient();
+    }
+
     private void DeleteIngredient(int id)
     {
         if (!EnsureAdmin()) return;
-        IngredientService.Delete(id);
+        deleteError = null;
+        deleteErrorId = 0;
+        try
+        {
+            IngredientService.Delete(id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            if (EnsureAdmin())
+            {
+                deleteError = ex.Message;
+                deleteErrorId = id;
+            }
+            return;
+        }
         LoadIngredients();
     }
 
-    private void CancelEdit()
+    // ---- Ajustar stock (S6): new stock, mandatory reason, difference preview and confirmation ----
+
+    private void ShowStockAdjust(Ingredient ingredient)
     {
-        showForm = false;
-        editingIngredient = new Ingredient();
+        if (!EnsureAdmin()) return;
+        ResetDialogs();
+        successMessage = null;
+        adjustIngredientId = ingredient.Id;
+    }
+
+    // Difference between the typed stock and the live stock, or null while nothing valid is typed.
+    private decimal? GetAdjustDifference()
+    {
+        var ingredient = IngredientService.GetById(adjustIngredientId);
+        if (ingredient == null || !adjustNewStock.HasValue) return null;
+        try { return checked(adjustNewStock.Value - ingredient.CurrentStock); }
+        catch (OverflowException) { return null; }
+    }
+
+    private void SaveStockAdjustment()
+    {
+        if (!EnsureAdmin()) return;
+        adjustError = null;
+        if (adjustIngredientId == 0) return;
+        if (!adjustNewStock.HasValue)
+        {
+            adjustError = "Indique el nuevo stock.";
+            return;
+        }
+        if (!adjustConfirmed)
+        {
+            adjustError = "Confirme el ajuste de stock para continuar.";
+            return;
+        }
+
+        StockMovement movement;
+        try
+        {
+            movement = IngredientService.AdjustStock(adjustIngredientId, adjustNewStock.Value, adjustReason, AuthService.CurrentUser);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            if (EnsureAdmin()) adjustError = ex.Message;
+            return;
+        }
+        var name = IngredientService.GetById(movement.IngredientId)?.Name;
+        ResetDialogs();
+        successMessage = $"Stock de {name} ajustado a {movement.ResultingStock} {movement.Unit} ({SignedAmount(movement.Quantity)}).";
+        LoadIngredients();
+    }
+
+    private void CancelStockAdjustment()
+    {
+        if (!EnsureAdmin()) return;
+        ResetDialogs();
+    }
+
+    // ---- Registrar merma (S8): quantity, category, mandatory reason and confirmation ----
+
+    private void ShowWaste(Ingredient ingredient)
+    {
+        if (!EnsureAdmin()) return;
+        ResetDialogs();
+        successMessage = null;
+        wasteIngredientId = ingredient.Id;
+    }
+
+    private void SaveWaste()
+    {
+        if (!EnsureAdmin()) return;
+        wasteError = null;
+        if (wasteIngredientId == 0) return;
+        if (!wasteQuantity.HasValue)
+        {
+            wasteError = "Indique la cantidad de la merma.";
+            return;
+        }
+        if (!wasteCategory.HasValue)
+        {
+            wasteError = "Debe seleccionar la categoría de la merma.";
+            return;
+        }
+        if (!wasteConfirmed)
+        {
+            wasteError = "Confirme la merma para continuar.";
+            return;
+        }
+
+        StockMovement movement;
+        try
+        {
+            movement = IngredientService.RegisterWaste(wasteIngredientId, wasteQuantity.Value, wasteCategory.Value, wasteReason, AuthService.CurrentUser);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            if (EnsureAdmin()) wasteError = ex.Message;
+            return;
+        }
+        var name = IngredientService.GetById(movement.IngredientId)?.Name;
+        ResetDialogs();
+        successMessage = $"Merma de {-movement.Quantity} {movement.Unit} de {name} registrada; stock actual {movement.ResultingStock} {movement.Unit}.";
+        LoadIngredients();
+    }
+
+    private void CancelWaste()
+    {
+        if (!EnsureAdmin()) return;
+        ResetDialogs();
+    }
+
+    private void ResetDialogs()
+    {
+        adjustIngredientId = 0;
+        adjustNewStock = null;
+        adjustReason = null;
+        adjustConfirmed = false;
+        adjustError = null;
+        wasteIngredientId = 0;
+        wasteQuantity = null;
+        wasteCategory = null;
+        wasteReason = null;
+        wasteConfirmed = false;
+        wasteError = null;
     }
 }

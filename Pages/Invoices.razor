@@ -97,6 +97,11 @@
                 }
             </div>
 
+            @if (invoiceError != null)
+            {
+                <p class="text-danger" role="alert">@invoiceError</p>
+            }
+
             <div class="form-actions">
                 <button class="btn btn-success" @onclick="SaveInvoice" disabled="@(!CanSaveInvoice())">Guardar Factura</button>
                 <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
@@ -191,6 +196,7 @@
     private List<Ingredient> activeIngredients = new();
     private Invoice editingInvoice = new();
     private bool showForm = false;
+    private string? invoiceError;
 
     // Para agregar items
     private int selectedIngredientId = 0;
@@ -230,6 +236,7 @@
     private void ShowAddForm()
     {
         if (!EnsureAdmin()) return;
+        invoiceError = null;
         editingInvoice = new Invoice { Date = DateTime.Now };
         showForm = true;
     }
@@ -276,7 +283,15 @@
         if (!CanSaveInvoice())
             return;
 
-        InvoiceService.Add(editingInvoice, AuthService.CurrentUser);
+        try
+        {
+            InvoiceService.Add(editingInvoice, AuthService.CurrentUser);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            if (EnsureAdmin()) invoiceError = ex.Message;
+            return;
+        }
         LoadData();
         CancelEdit();
     }
@@ -291,6 +306,7 @@
     private void CancelEdit()
     {
         showForm = false;
+        invoiceError = null;
         editingInvoice = new Invoice();
         selectedIngredientId = 0;
         itemQuantity = 0;

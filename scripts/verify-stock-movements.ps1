@@ -393,7 +393,7 @@ Check(orphanLoaded, "history of a deleted ingredient or invoice does not make th
 
 // ---- Pages: minimal wiring ----
 var ingredientsPage = File.ReadAllText(Path.Combine(args[0], "Pages", "Ingredients.razor"));
-Check(System.Text.RegularExpressions.Regex.IsMatch(ingredientsPage, @"AdjustStock\(ingredientId, newStockValue, \w+, AuthService\.CurrentUser\)") && ingredientsPage.Contains("IngredientService.Add(editingIngredient, AuthService.CurrentUser)"), "Ingredients page passes the current user and a reason to the stock commands");
+Check(System.Text.RegularExpressions.Regex.IsMatch(ingredientsPage, @"AdjustStock\(adjustIngredientId, [\w.]+, adjustReason, AuthService\.CurrentUser\)") && ingredientsPage.Contains("IngredientService.Add(editingIngredient, AuthService.CurrentUser)"), "Ingredients page passes the current user and a reason to the stock adjustment command");
 var invoicesPage = File.ReadAllText(Path.Combine(args[0], "Pages", "Invoices.razor"));
 Check(invoicesPage.Contains("InvoiceService.Add(editingInvoice, AuthService.CurrentUser)"), "Invoices page passes the current user to the invoice receipt");
 Console.WriteLine($"{checks} checks, {failures} failures; fixture: {root}");
