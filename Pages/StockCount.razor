@@ -1,0 +1,462 @@
+@page "/stock/count"
+@page "/stock/count/{CountId:int}"
+@using System.Globalization
+@using GastroApp.Models
+@using GastroApp.Services
+@using StockCountRecord = GastroApp.Models.StockCount
+@inject StockCountService StockCountService
+@inject IngredientService IngredientService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Conteo de stock</PageTitle>
+
+<div class="page-container">
+    <h1>📋 Conteo de stock</h1>
+
+    @if (successMessage != null)
+    {
+        <p class="text-success" role="status">@successMessage</p>
+    }
+    @if (errorMessage != null)
+    {
+        <p class="text-danger" role="alert">@errorMessage</p>
+    }
+
+    @if (CountId.HasValue)
+    {
+        <p><a href="/stock/count">← Volver al conteo de stock</a></p>
+        <div class="form-card" role="region" aria-label="Detalle del conteo">
+            @if (detail == null)
+            {
+                <h3>Conteo #@CountId</h3>
+                <p role="alert">@(detailMessage ?? "No se pudo cargar el conteo.")</p>
+            }
+            else
+            {
+                <h3>Conteo #@detail.Id</h3>
+                <p>Fecha: @detail.Date.ToString("dd/MM/yyyy HH:mm")</p>
+                <p>Responsable: @detail.Username (ID @detail.UserId)</p>
+                <p>Notas: @(string.IsNullOrWhiteSpace(detail.Notes) ? "Sin notas" : detail.Notes)</p>
+                <p>Ingredientes contados: @detail.Lines.Count. Con diferencia (ajustados): @detail.AdjustedLineCount.</p>
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr><th>Ingrediente</th><th>Unidad</th><th>Stock registrado</th><th>Stock contado</th><th>Diferencia</th><th>Resultado</th><th>Motivo</th><th>Movimientos</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in detail.Lines)
+                            {
+                                <tr @key="line.IngredientId">
+                                    <td>@line.IngredientName</td>
+                                    <td>@line.Unit</td>
+                                    <td>@line.ExpectedStock</td>
+                                    <td>@line.CountedStock</td>
+                                    <td>@Signed(line.Difference)</td>
+                                    <td><strong>@StockCountLabels.GetLabel(line.Difference)</strong></td>
+                                    <td>@(string.IsNullOrWhiteSpace(line.Reason) ? "—" : line.Reason)</td>
+                                    <td><a href="/ingredients/@line.IngredientId/movements">Ver movimientos</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <p>Compare el stock registrado con lo que hay físicamente. Nada cambia hasta que confirme el conteo; cada diferencia queda registrada con su motivo y responsable.</p>
+
+        <div class="form-card">
+            <h3>1. Elegir ingredientes</h3>
+            <div class="form-group">
+                <label for="count-name-filter">Filtrar por nombre</label>
+                <input id="count-name-filter" type="text" @bind="nameFilter" @bind:event="oninput" class="form-control" placeholder="Ej: Harina" />
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" @bind="onlyLowStock" />
+                    Solo con stock bajo (stock menor o igual al mínimo)
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" @onclick="SelectAllActive">Seleccionar todos los activos</button>
+                <button class="btn btn-secondary" @onclick="SelectVisible">Seleccionar los visibles</button>
+                <button class="btn btn-secondary" @onclick="ClearSelection">Limpiar selección</button>
+            </div>
+
+            <h3>2. Ingresar lo contado</h3>
+            @if (VisibleRows.Count == 0)
+            {
+                <p class="empty-state">No hay ingredientes para mostrar con este filtro.</p>
+            }
+            else
+            {
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr><th>Contar</th><th>Ingrediente</th><th>Stock registrado</th><th>Stock contado</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in VisibleRows)
+                            {
+                                <tr @key="row.Id">
+                                    <td><input type="checkbox" @bind="row.Selected" @bind:after="Invalidate" aria-label="Contar @row.Name" /></td>
+                                    <td>
+                                        @row.Name
+                                        @if (!row.IsActive)
+                                        {
+                                            <span class="badge-inactive">Inactivo</span>
+                                        }
+                                        @if (row.Stock < 0m)
+                                        {
+                                            <span class="text-danger" role="alert">⚠ Stock negativo registrado. Un conteo permite regularizarlo.</span>
+                                        }
+                                    </td>
+                                    <td>@row.Stock @row.Unit</td>
+                                    <td>
+                                        <input type="text" inputmode="decimal" @bind="row.Counted" @bind:after="Invalidate" class="form-control-small"
+                                               disabled="@(!row.Selected)" aria-label="Stock contado de @row.Name" placeholder="@row.Unit" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="Compare">Comparar</button>
+            </div>
+        </div>
+
+        @if (preview != null)
+        {
+            <div class="form-card" role="region" aria-label="Comparación del conteo">
+                <h3>3. Revisar diferencias</h3>
+                <p>Con diferencia: @preview.AdjustedLineCount de @preview.Lines.Count. Cada diferencia necesita un motivo.</p>
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr><th>Ingrediente</th><th>Registrado</th><th>Contado</th><th>Diferencia</th><th>Resultado</th><th>Motivo</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in preview.Lines)
+                            {
+                                <tr @key="line.IngredientId">
+                                    <td>
+                                        @line.IngredientName
+                                        @if (line.HasNegativeStock)
+                                        {
+                                            <span class="text-danger">⚠ Stock negativo registrado</span>
+                                        }
+                                    </td>
+                                    <td>@line.ExpectedStock @line.Unit</td>
+                                    <td>@line.CountedStock @line.Unit</td>
+                                    <td>@Signed(line.Difference) @line.Unit</td>
+                                    <td><strong>@StockCountLabels.GetLabel(line.Kind)</strong></td>
+                                    <td>
+                                        @if (line.Difference != 0m)
+                                        {
+                                            <input type="text" @bind="reasons[line.IngredientId]" class="form-control-small" placeholder="Motivo (obligatorio)"
+                                                   aria-label="Motivo de la diferencia de @line.IngredientName" />
+                                        }
+                                        else
+                                        {
+                                            <span>No requiere motivo</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="form-group">
+                    <label for="count-notes">Notas (opcional)</label>
+                    <input id="count-notes" type="text" @bind="notes" class="form-control" />
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" @bind="confirmChecked" />
+                        Confirmo las diferencias y que el stock registrado se ajuste a lo contado
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-success" @onclick="Confirm">Confirmar conteo</button>
+                    <button class="btn btn-secondary" @onclick="Invalidate">Descartar comparación</button>
+                </div>
+            </div>
+        }
+
+        <div class="form-card">
+            <h3>Conteos anteriores</h3>
+            @if (history == null || history.Count == 0)
+            {
+                <p class="empty-state">Todavía no se registraron conteos.</p>
+            }
+            else
+            {
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr><th>Conteo</th><th>Fecha</th><th>Responsable</th><th>Ingredientes</th><th>Con diferencia</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var entry in history)
+                            {
+                                <tr @key="entry.Id">
+                                    <td>#@entry.Id</td>
+                                    <td>@entry.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>@entry.Username</td>
+                                    <td>@entry.Lines.Count</td>
+                                    <td>@entry.AdjustedLineCount</td>
+                                    <td><button class="btn btn-small" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? CountId { get; set; }
+
+    private sealed class CountRow
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Unit { get; set; } = string.Empty;
+        public decimal Stock { get; set; }
+        public decimal MinStock { get; set; }
+        public bool IsActive { get; set; }
+        public bool Selected { get; set; }
+        public string Counted { get; set; } = string.Empty;
+    }
+
+    private List<CountRow> rows = new();
+    private string nameFilter = string.Empty;
+    private bool onlyLowStock;
+    private string notes = string.Empty;
+    private bool confirmChecked;
+    private StockCountPreview? preview;
+    private Dictionary<int, string> reasons = new();
+    private IReadOnlyList<StockCountRecord>? history;
+    private StockCountRecord? detail;
+    private string? errorMessage;
+    private string? successMessage;
+    private string? detailMessage;
+
+    private List<CountRow> VisibleRows => rows.Where(IsVisible).ToList();
+
+    private bool IsVisible(CountRow row) =>
+        (string.IsNullOrWhiteSpace(nameFilter) || row.Name.Contains(nameFilter.Trim(), StringComparison.CurrentCultureIgnoreCase))
+        && (!onlyLowStock || row.Stock <= row.MinStock);
+
+    // Runs on first load and on every route change, so each selection rechecks live permissions.
+    protected override void OnParametersSet()
+    {
+        if (!EnsureAdmin()) return;
+        if (rows.Count == 0) LoadRows();
+        LoadHistory();
+        LoadDetail();
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
+    }
+
+    // Refreshes the registered stock; with keepEntries the selection and typed quantities survive.
+    private void LoadRows(bool keepEntries = false)
+    {
+        var previous = keepEntries ? rows.ToDictionary(r => r.Id) : new Dictionary<int, CountRow>();
+        rows = IngredientService.GetAll().OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).Select(i =>
+        {
+            previous.TryGetValue(i.Id, out var old);
+            return new CountRow
+            {
+                Id = i.Id, Name = i.Name, Unit = i.Unit, Stock = i.CurrentStock, MinStock = i.MinStock, IsActive = i.IsActive,
+                Selected = old?.Selected ?? false, Counted = old?.Counted ?? string.Empty
+            };
+        }).ToList();
+    }
+
+    private void LoadHistory() => history = StockCountService.GetHistory();
+
+    private void LoadDetail()
+    {
+        detail = null;
+        detailMessage = null;
+        if (!CountId.HasValue) return;
+        detail = StockCountService.GetDetail(CountId.Value);
+        if (detail == null) detailMessage = $"No existe un conteo con el ID {CountId}.";
+    }
+
+    private void ClearFeedback()
+    {
+        errorMessage = null;
+        successMessage = null;
+    }
+
+    private void SelectAllActive()
+    {
+        if (!EnsureAdmin()) return;
+        foreach (var row in rows) row.Selected = row.IsActive;
+        Invalidate();
+    }
+
+    private void SelectVisible()
+    {
+        if (!EnsureAdmin()) return;
+        foreach (var row in rows.Where(IsVisible)) row.Selected = true;
+        Invalidate();
+    }
+
+    private void ClearSelection()
+    {
+        if (!EnsureAdmin()) return;
+        foreach (var row in rows) row.Selected = false;
+        Invalidate();
+    }
+
+    // Any edit of the selection or of a quantity drops the comparison: the operator must compare again.
+    private void Invalidate()
+    {
+        if (!EnsureAdmin()) return;
+        preview = null;
+        reasons = new Dictionary<int, string>();
+        confirmChecked = false;
+    }
+
+    private bool TryReadSelection(out List<StockCountLineInput> lines)
+    {
+        lines = new List<StockCountLineInput>();
+        var selected = rows.Where(r => r.Selected).ToList();
+        if (selected.Count == 0)
+        {
+            errorMessage = "Seleccione al menos un ingrediente para contar.";
+            return false;
+        }
+        foreach (var row in selected)
+        {
+            if (!decimal.TryParse(row.Counted, NumberStyles.Number, CultureInfo.CurrentCulture, out var counted))
+            {
+                errorMessage = $"Ingrese una cantidad contada válida para {row.Name}.";
+                return false;
+            }
+            lines.Add(new StockCountLineInput { IngredientId = row.Id, CountedStock = counted });
+        }
+        return true;
+    }
+
+    private void Compare()
+    {
+        if (!EnsureAdmin()) return;
+        ClearFeedback();
+        preview = null;
+        confirmChecked = false;
+        if (!TryReadSelection(out var lines)) return;
+        try
+        {
+            preview = StockCountService.Preview(lines);
+            reasons = preview.Lines.ToDictionary(l => l.IngredientId, _ => string.Empty);
+            LoadRows(keepEntries: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    // True when the selection and every quantity still match what was compared.
+    private bool MatchesPreview()
+    {
+        if (preview == null || !TryReadSelection(out var lines)) return false;
+        errorMessage = null;
+        return lines.Count == preview.Lines.Count
+            && lines.All(l => preview.Lines.Any(p => p.IngredientId == l.IngredientId && p.CountedStock == l.CountedStock));
+    }
+
+    private void Confirm()
+    {
+        if (!EnsureAdmin()) return;
+        ClearFeedback();
+        if (preview == null)
+        {
+            errorMessage = "Compare el conteo antes de confirmarlo.";
+            return;
+        }
+        if (!MatchesPreview())
+        {
+            preview = null;
+            confirmChecked = false;
+            errorMessage ??= "Los datos cambiaron desde la comparación; vuelva a comparar.";
+            return;
+        }
+
+        var request = new StockCountRequest
+        {
+            Confirmed = confirmChecked,
+            Notes = notes,
+            Lines = preview.Lines.Select(l => new StockCountLineInput
+            {
+                IngredientId = l.IngredientId, CountedStock = l.CountedStock, ExpectedStock = l.ExpectedStock,
+                Reason = reasons.TryGetValue(l.IngredientId, out var reason) ? reason : null
+            }).ToList()
+        };
+        try
+        {
+            var count = StockCountService.Confirm(request, AuthService.CurrentUser);
+            successMessage = $"Conteo #{count.Id} registrado. Ajustes aplicados: {count.AdjustedLineCount}.";
+            preview = null;
+            reasons = new Dictionary<int, string>();
+            confirmChecked = false;
+            notes = string.Empty;
+            LoadRows();
+            LoadHistory();
+            Navigation.NavigateTo($"/stock/count/{count.Id}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            if (EnsureAdmin()) errorMessage = ex.Message;
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+            if (ex.Message == StockCountService.StaleStockMessage)
+            {
+                // The registered stock moved: show the new values and require a new comparison.
+                preview = null;
+                confirmChecked = false;
+                LoadRows(keepEntries: true);
+            }
+        }
+    }
+
+    private void ShowDetail(int countId)
+    {
+        if (!EnsureAdmin()) return;
+        Navigation.NavigateTo($"/stock/count/{countId}");
+    }
+
+    private void CloseDetail()
+    {
+        if (!EnsureAdmin()) return;
+        Navigation.NavigateTo("/stock/count");
+    }
+
+    private static string Signed(decimal value) => value > 0m ? $"+{value}" : value.ToString(CultureInfo.CurrentCulture);
+}

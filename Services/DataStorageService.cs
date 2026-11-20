@@ -12,6 +12,8 @@ public class DataStorageService
     public List<SaleRefund> SaleRefunds { get; private set; } = new();
     // Append-only stock ledger (M15). Only IngredientService changes it, together with CurrentStock.
     public List<StockMovement> StockMovements { get; private set; } = new();
+    // Physical counts (M15). Created only by StockCountService together with their CountAdjustment movements.
+    public List<StockCount> StockCounts { get; private set; } = new();
     public List<CashRegister> CashRegisters { get; private set; } = new();
     public List<CashMovement> CashMovements { get; private set; } = new();
     public List<CashCount> CashCounts { get; private set; } = new();
@@ -31,6 +33,7 @@ public class DataStorageService
     private int _nextSaleId = 1;
     private int _nextSaleRefundId = 1;
     private int _nextStockMovementId = 1;
+    private int _nextStockCountId = 1;
     private int _nextCashRegisterId = 1;
     private int _nextCashMovementId = 1;
     private int _nextUserId = 1;
@@ -46,6 +49,20 @@ public class DataStorageService
     public int GetNextSaleId() => Allocate(ref _nextSaleId, "ventas");
     public int GetNextSaleRefundId() => Allocate(ref _nextSaleRefundId, "devoluciones");
     public int GetNextStockMovementId() => Allocate(ref _nextStockMovementId, "movimientos de stock");
+
+    // Allocates the ID and appends the count; the caller either saves or calls DiscardStockCount.
+    internal void AddStockCount(StockCount count)
+    {
+        count.Id = Allocate(ref _nextStockCountId, "conteos de stock");
+        StockCounts.Add(count);
+    }
+
+    // Undoes AddStockCount when the count could not be completed, so a rejection leaves no trace.
+    internal void DiscardStockCount(StockCount count)
+    {
+        if (!StockCounts.Remove(count)) return;
+        if (_nextStockCountId == count.Id + 1) _nextStockCountId = count.Id;
+    }
 
     // Fail before checkout or opening mutates state; int.MaxValue cannot be followed by a valid counter.
     private static int Allocate(ref int next, string name)
@@ -222,6 +239,7 @@ public class DataStorageService
                 Sales,
                 SaleRefunds,
                 StockMovements,
+                StockCounts,
                 CashRegisters,
                 CashMovements,
                 CashCounts,
@@ -237,6 +255,7 @@ public class DataStorageService
                 NextSaleId = _nextSaleId,
                 NextSaleRefundId = _nextSaleRefundId,
                 NextStockMovementId = _nextStockMovementId,
+                NextStockCountId = _nextStockCountId,
                 NextCashRegisterId = _nextCashRegisterId,
                 NextCashMovementId = _nextCashMovementId,
                 NextUserId = _nextUserId,
@@ -501,6 +520,64 @@ public class DataStorageService
         }
     }
 
+    // A missing list is a legacy file; an explicit null or inconsistent count is corruption. Counts are never
+    // deleted, so each line with a difference must still have its CountAdjustment movement. The reverse is not
+    // required: movements may reference counts that were never persisted (ledger written before counts existed),
+    // and their IDs stay reserved so a new count cannot reuse them.
+    private void LoadStockCountState(JsonElement root)
+    {
+        var loaded = root.TryGetProperty("StockCounts", out var countsElement)
+            ? JsonSerializer.Deserialize<List<StockCount>>(countsElement.GetRawText())
+                ?? throw new InvalidDataException("StockCounts no puede ser null.")
+            : new List<StockCount>();
+        if (loaded.Any(c => c == null))
+            throw new InvalidDataException("StockCounts contiene un conteo null.");
+        var next = RecoverNext(root, "NextStockCountId", loaded.Select(c => c.Id));
+        var referenced = StockMovements.Where(m => m.StockCountId.HasValue).Select(m => m.StockCountId!.Value).DefaultIfEmpty(0).Max();
+        if (referenced == int.MaxValue)
+            throw new InvalidDataException("Identificadores agotados en StockCounts.");
+        ValidateStockCounts(loaded);
+        StockCounts = loaded;
+        _nextStockCountId = Math.Max(next, referenced + 1);
+    }
+
+    private void ValidateStockCounts(List<StockCount> loaded)
+    {
+        foreach (var count in loaded)
+        {
+            if (count.UserId <= 0 || string.IsNullOrWhiteSpace(count.Username))
+                throw new InvalidDataException("Conteo de stock sin responsable.");
+            if (count.Lines == null || count.Lines.Count == 0 || count.Lines.Any(l => l == null))
+                throw new InvalidDataException("Conteo de stock sin líneas válidas.");
+            var seen = new HashSet<int>();
+            foreach (var line in count.Lines)
+            {
+                if (line.IngredientId <= 0 || !seen.Add(line.IngredientId) || string.IsNullOrWhiteSpace(line.IngredientName)
+                    || string.IsNullOrWhiteSpace(line.Unit) || line.CountedStock < 0m
+                    || checked(line.CountedStock - line.ExpectedStock) != line.Difference
+                    || (line.Difference != 0m && string.IsNullOrWhiteSpace(line.Reason)))
+                    throw new InvalidDataException("Línea de conteo de stock inválida.");
+            }
+            var adjusted = count.Lines.Where(l => l.Difference != 0m).ToList();
+            if (count.AdjustedLineCount != adjusted.Count)
+                throw new InvalidDataException("El conteo de stock no coincide con sus líneas ajustadas.");
+            var movements = StockMovements.Where(m => m.StockCountId == count.Id).ToList();
+            if (movements.Count != adjusted.Count || movements.Any(m => m.Type != StockMovementType.CountAdjustment)
+                || !adjusted.All(l => movements.Any(m => m.IngredientId == l.IngredientId && m.Quantity == l.Difference
+                    && m.PreviousStock == l.ExpectedStock && m.ResultingStock == l.CountedStock)))
+                throw new InvalidDataException("El conteo de stock no coincide con sus movimientos.");
+        }
+    }
+
+    private void LoadStockCountStateGuarded(JsonElement root)
+    {
+        try { LoadStockCountState(root); }
+        catch (Exception ex) when (ex is JsonException or FormatException or OverflowException or InvalidOperationException)
+        {
+            throw new InvalidDataException("Contenido de conteos de stock inválido.", ex);
+        }
+    }
+
     public void LoadFromFile()
     {
         try
@@ -607,6 +684,7 @@ public class DataStorageService
             }
 
             LoadStockMovementStateGuarded(root);
+            LoadStockCountStateGuarded(root);
         }
         catch (InvalidDataException)
         {

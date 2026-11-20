@@ -23,6 +23,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton<SupplierService>();
 builder.Services.AddSingleton<InvoiceService>();
 builder.Services.AddSingleton<IngredientService>();
+builder.Services.AddSingleton<StockCountService>();
 builder.Services.AddSingleton<RecipeService>();
 
 var app = builder.Build();
