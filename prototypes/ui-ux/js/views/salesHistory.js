@@ -20,6 +20,54 @@ let filters = {
   query: '',
 };
 
+let refundDraft = null; // null | { saleId, lineDrafts, payDrafts, reason, confirmed, error }
+
+function startRefundWorkspace(sale) {
+  const state = getState();
+  const hasSnapshot = (sale.stockConsumptions || []).length > 0;
+  refundDraft = {
+    saleId: sale.id,
+    lineDrafts: sale.items.map((it) => {
+      const alreadyQty = (sale.refunds || []).reduce(
+        (acc, r) => acc + (r.lines || []).filter((l) => l.lineId === it.lineId).reduce((a, l) => a + Number(l.quantity || 0), 0),
+        0
+      );
+      const availableQty = Math.max(0, it.quantity - alreadyQty);
+      const canRestock = hasSnapshot && state.recipes.some((r) => r.name.toLowerCase() === it.productName.toLowerCase());
+      return {
+        lineId: it.lineId,
+        productName: it.productName,
+        soldQty: it.quantity,
+        alreadyQty,
+        availableQty,
+        canRestock,
+        unitEffective: roundMoney((it.lineSubtotal / it.quantity) * (sale.subtotal > 0 ? sale.total / sale.subtotal : 1)),
+        refundQty: 0,
+        disposition: canRestock ? 'Restock' : 'Waste',
+      };
+    }),
+    payDrafts: sale.payments.map((p) => {
+      const prevRef = roundMoney(
+        (sale.refunds || []).reduce(
+          (acc, r) => acc + (r.payments || []).filter((rp) => rp.method === p.method).reduce((a, rp) => a + rp.amount, 0),
+          0
+        )
+      );
+      return {
+        method: p.method,
+        label: PAYMENT_METHOD_MAP[p.method]?.label || p.method,
+        paid: p.amount,
+        prevRefunded: prevRef,
+        available: roundMoney(Math.max(0, p.amount - prevRef)),
+        refundAmount: 0,
+      };
+    }),
+    reason: '',
+    confirmed: false,
+    error: '',
+  };
+}
+
 export function renderSalesHistory(container) {
   const state = getState();
   if (state.demo.simulateLoading) {
@@ -29,6 +77,16 @@ export function renderSalesHistory(container) {
     `;
     return;
   }
+
+  if (refundDraft) {
+    const targetSale = state.sales.find((s) => s.id === refundDraft.saleId);
+    if (targetSale) {
+      renderRefundWorkspace(container, targetSale);
+      return;
+    }
+    refundDraft = null;
+  }
+
   const operators = [...new Set(state.sales.map((s) => s.operator).filter(Boolean))];
 
   const sales = state.demo.simulateEmpty
@@ -284,241 +342,207 @@ function openSaleDetailModal(sale) {
 
       dlg.querySelector('#btn-start-refund')?.addEventListener('click', () => {
         dlg.close();
-        openRefundModal(sale);
+        startRefundWorkspace(sale);
+        const viewRoot = document.getElementById('view-root');
+        if (viewRoot) {
+          renderSalesHistory(viewRoot);
+          document.getElementById('page-heading')?.focus();
+        }
       });
     },
   });
 }
 
-function openRefundModal(sale) {
-  const state = getState();
-  const hasSnapshot = (sale.stockConsumptions || []).length > 0;
-  const lineDrafts = sale.items.map((it) => {
-    const alreadyQty = (sale.refunds || []).reduce(
-      (acc, r) => acc + (r.lines || []).filter((l) => l.lineId === it.lineId).reduce((a, l) => a + Number(l.quantity || 0), 0),
-      0
-    );
-    const availableQty = Math.max(0, it.quantity - alreadyQty);
-    const canRestock = hasSnapshot && state.recipes.some((r) => r.name.toLowerCase() === it.productName.toLowerCase());
-    return {
-      lineId: it.lineId,
-      productName: it.productName,
-      soldQty: it.quantity,
-      alreadyQty,
-      availableQty,
-      canRestock,
-      unitEffective: roundMoney((it.lineSubtotal / it.quantity) * (sale.subtotal > 0 ? sale.total / sale.subtotal : 1)),
-      refundQty: 0,
-      disposition: canRestock ? 'Restock' : 'Waste',
-    };
-  });
-
-  const payDrafts = sale.payments.map((p) => {
-    const prevRef = roundMoney(
-      (sale.refunds || []).reduce(
-        (acc, r) => acc + (r.payments || []).filter((rp) => rp.method === p.method).reduce((a, rp) => a + rp.amount, 0),
-        0
-      )
-    );
-    return {
-      method: p.method,
-      label: PAYMENT_METHOD_MAP[p.method]?.label || p.method,
-      paid: p.amount,
-      prevRefunded: prevRef,
-      available: roundMoney(Math.max(0, p.amount - prevRef)),
-      refundAmount: 0,
-    };
-  });
-
-  let reason = '';
-  let confirmed = false;
-  let inlineError = '';
+function renderRefundWorkspace(container, sale) {
+  const d = refundDraft;
+  const totalLinesCalc = roundMoney(d.lineDrafts.reduce((a, l) => a + l.refundQty * l.unitEffective, 0));
+  const totalPayRefund = roundMoney(d.payDrafts.reduce((a, p) => a + Number(p.refundAmount || 0), 0));
 
   const calculateProportional = () => {
-    const target = roundMoney(lineDrafts.reduce((a, l) => a + l.refundQty * l.unitEffective, 0));
+    const target = roundMoney(d.lineDrafts.reduce((a, l) => a + l.refundQty * l.unitEffective, 0));
     let rem = target;
-    for (const pd of payDrafts) {
+    for (const pd of d.payDrafts) {
       const alloc = roundMoney(Math.min(pd.available, rem));
       pd.refundAmount = alloc;
       rem = roundMoney(rem - alloc);
     }
-    return target;
   };
 
-  openModal({
-    title: `Registrar devolución · Venta #${sale.id}`,
-    subtitle: 'Seleccioná cantidades por ítem, destino del stock y cómo se reintegra entre los medios cobrados.',
-    size: 'lg',
-    lightDismiss: false,
-    bodyHtml: '<div id="refund-modal-body"></div>',
-    footerHtml: `
-      <button type="button" class="btn" data-modal-close>Cancelar</button>
-      <button type="button" class="btn btn--danger" id="ref-submit-btn">Confirmar devolución</button>
-    `,
-    onMount(dlg) {
-      const body = dlg.querySelector('#refund-modal-body');
-      const submitBtn = dlg.querySelector('#ref-submit-btn');
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 id="page-heading" tabindex="-1">Registrar devolución · Venta #${sale.id}</h1>
+        <p class="page-header__subtitle">${formatDateTime(sale.date)} · Operador: ${escapeHtml(sale.operator)} · Seleccioná cantidades por ítem y reintegro por medio de pago.</p>
+      </div>
+      <div class="page-header__actions">
+        <button type="button" class="btn" id="ref-cancel-top">← Volver al Historial</button>
+      </div>
+    </div>
 
-      const renderRefund = () => {
-        const totalLinesCalc = roundMoney(lineDrafts.reduce((a, l) => a + l.refundQty * l.unitEffective, 0));
-        const totalPayRefund = roundMoney(payDrafts.reduce((a, p) => a + Number(p.refundAmount || 0), 0));
+    <section class="workspace-panel stack" aria-label="Formulario de devolución">
+      ${d.error ? banner({ variant: 'danger', body: escapeHtml(d.error) }) : ''}
 
-        body.innerHTML = `
-          <div class="stack">
-            ${inlineError ? banner({ variant: 'danger', body: escapeHtml(inlineError) }) : ''}
+      <div class="stack stack--sm">
+        <div class="row-between">
+          <h2 class="card__title">1. Ítems a devolver</h2>
+          <button type="button" class="btn btn--sm" id="ref-calc-btn">${icon('refresh', 14)} Calcular importe (${formatARS(totalLinesCalc)})</button>
+        </div>
+        <div class="table-wrapper" tabindex="0" role="region" aria-label="Ítems disponibles para devolver">
+          <table class="data-table data-table--stack">
+            <thead>
+              <tr>
+                <th scope="col">Producto</th>
+                <th scope="col" class="col-num">Disp.</th>
+                <th scope="col">Cant. a devolver</th>
+                <th scope="col">Destino de stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${d.lineDrafts.map((l, idx) => `
+                <tr>
+                  <th scope="row">
+                    <div>${escapeHtml(l.productName)}</div>
+                    <div class="text-xs text-muted fw-600">${formatARS(l.unitEffective)} neto c/u · Vendido ${l.soldQty}${l.alreadyQty ? ` · Ya dev. ${l.alreadyQty}` : ''}</div>
+                  </th>
+                  <td data-label="Disponible" class="col-num fw-700">${l.availableQty}</td>
+                  <td data-label="Devolver">
+                    <input type="number" min="0" max="${l.availableQty}" step="1" class="input input--compact tnum" style="max-inline-size: 6rem;" data-ref-qty="${idx}" value="${l.refundQty}" ${l.availableQty === 0 ? 'disabled' : ''} aria-label="Cantidad a devolver de ${escapeHtml(l.productName)}">
+                  </td>
+                  <td data-label="Destino">
+                    ${l.canRestock
+                      ? `<select class="select select--compact" data-ref-disp="${idx}" ${l.availableQty === 0 ? 'disabled' : ''} aria-label="Destino de stock para ${escapeHtml(l.productName)}">
+                          <option value="Restock" ${l.disposition === 'Restock' ? 'selected' : ''}>Vuelve a stock</option>
+                          <option value="Waste" ${l.disposition === 'Waste' ? 'selected' : ''}>Merma</option>
+                        </select>`
+                      : `<span class="text-xs text-muted fw-600">Merma (sin registro de consumo)</span>`}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-            <div class="stack stack--sm">
-              <div class="row-between">
-                <h3 class="card__title">1. Ítems a devolver</h3>
-                <button type="button" class="btn btn--sm" id="ref-calc-btn">${icon('refresh', 14)} Calcular importe (${formatARS(totalLinesCalc)})</button>
-              </div>
-              <div class="table-wrapper" tabindex="0" role="region" aria-label="Ítems disponibles para devolver">
-                <table class="data-table data-table--stack">
-                  <thead>
-                    <tr>
-                      <th scope="col">Producto</th>
-                      <th scope="col" class="col-num">Disp.</th>
-                      <th scope="col">Cant. a devolver</th>
-                      <th scope="col">Destino de stock</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${lineDrafts.map((l, idx) => `
-                      <tr>
-                        <th scope="row">
-                          <div>${escapeHtml(l.productName)}</div>
-                          <div class="text-xs text-muted fw-600">${formatARS(l.unitEffective)} neto c/u · Vendido ${l.soldQty}${l.alreadyQty ? ` · Ya dev. ${l.alreadyQty}` : ''}</div>
-                        </th>
-                        <td data-label="Disponible" class="col-num fw-700">${l.availableQty}</td>
-                        <td data-label="Devolver">
-                          <input type="number" min="0" max="${l.availableQty}" step="1" class="input input--compact tnum" style="max-inline-size: 6rem;" data-ref-qty="${idx}" value="${l.refundQty}" ${l.availableQty === 0 ? 'disabled' : ''} aria-label="Cantidad a devolver de ${escapeHtml(l.productName)}">
-                        </td>
-                        <td data-label="Destino">
-                          ${l.canRestock
-                            ? `<select class="select select--compact" data-ref-disp="${idx}" ${l.availableQty === 0 ? 'disabled' : ''} aria-label="Destino de stock para ${escapeHtml(l.productName)}">
-                                <option value="Restock" ${l.disposition === 'Restock' ? 'selected' : ''}>Vuelve a stock</option>
-                                <option value="Waste" ${l.disposition === 'Waste' ? 'selected' : ''}>Merma</option>
-                              </select>`
-                            : `<span class="text-xs text-muted fw-600">Merma (sin registro de consumo)</span>`}
-                        </td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+      <div class="stack stack--sm">
+        <h2 class="card__title">2. Reintegro por medio de pago</h2>
+        <div class="table-wrapper" tabindex="0" role="region" aria-label="Medios de pago disponibles para reintegro">
+          <table class="data-table data-table--stack">
+            <thead>
+              <tr>
+                <th scope="col">Medio</th>
+                <th scope="col" class="col-num">Cobrado</th>
+                <th scope="col" class="col-num">Devuelto</th>
+                <th scope="col" class="col-num">Disponible</th>
+                <th scope="col">Importe a devolver ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${d.payDrafts.map((p, idx) => `
+                <tr>
+                  <th scope="row">${escapeHtml(p.label)}</th>
+                  <td data-label="Cobrado" class="col-num">${formatARS(p.paid)}</td>
+                  <td data-label="Devuelto" class="col-num">${formatARS(p.prevRefunded)}</td>
+                  <td data-label="Disponible" class="col-num fw-700">${formatARS(p.available)}</td>
+                  <td data-label="Reintegro">
+                    <input type="number" min="0" max="${p.available}" step="any" class="input input--compact tnum" style="max-inline-size: 8.5rem;" data-ref-pay="${idx}" value="${p.refundAmount}" ${p.available <= 0 ? 'disabled' : ''} aria-label="Importe a devolver en ${escapeHtml(p.label)}">
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="card card--compact card--subtle row-between">
+          <span class="text-sm fw-700">Total a reintegrar</span>
+          <span class="fw-700 tnum" id="ref-total-pay" style="font-size: var(--text-lg);">${formatARS(totalPayRefund)}</span>
+        </div>
+      </div>
 
-            <div class="stack stack--sm">
-              <h3 class="card__title">2. Reintegro por medio de pago</h3>
-              <div class="table-wrapper" tabindex="0" role="region" aria-label="Medios de pago disponibles para reintegro">
-                <table class="data-table data-table--stack">
-                  <thead>
-                    <tr>
-                      <th scope="col">Medio</th>
-                      <th scope="col" class="col-num">Cobrado</th>
-                      <th scope="col" class="col-num">Devuelto</th>
-                      <th scope="col" class="col-num">Disponible</th>
-                      <th scope="col">Importe a devolver ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${payDrafts.map((p, idx) => `
-                      <tr>
-                        <th scope="row">${escapeHtml(p.label)}</th>
-                        <td data-label="Cobrado" class="col-num">${formatARS(p.paid)}</td>
-                        <td data-label="Devuelto" class="col-num">${formatARS(p.prevRefunded)}</td>
-                        <td data-label="Disponible" class="col-num fw-700">${formatARS(p.available)}</td>
-                        <td data-label="Reintegro">
-                          <input type="number" min="0" max="${p.available}" step="any" class="input input--compact tnum" style="max-inline-size: 8.5rem;" data-ref-pay="${idx}" value="${p.refundAmount}" ${p.available <= 0 ? 'disabled' : ''} aria-label="Importe a devolver en ${escapeHtml(p.label)}">
-                        </td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-              </div>
-              <div class="card card--compact card--subtle row-between">
-                <span class="text-sm fw-700">Total a reintegrar</span>
-                <span class="fw-700 tnum" id="ref-total-pay" style="font-size: var(--text-lg);">${formatARS(totalPayRefund)}</span>
-              </div>
-            </div>
+      <div class="field">
+        <label class="field__label" for="ref-reason">Motivo de la devolución (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+        <input id="ref-reason" type="text" class="input" value="${escapeHtml(d.reason)}" required placeholder="Ej.: Producto con temperatura incorrecta">
+      </div>
 
-            <div class="field">
-              <label class="field__label" for="ref-reason">Motivo de la devolución (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
-              <input id="ref-reason" type="text" class="input" value="${escapeHtml(reason)}" required placeholder="Ej.: Producto con temperatura incorrecta">
-            </div>
+      <label class="check-field">
+        <input type="checkbox" id="ref-confirm" ${d.confirmed ? 'checked' : ''}>
+        <span>Confirmo registrar esta devolución (el efectivo devuelto impacta automáticamente en la caja abierta).</span>
+      </label>
 
-            <label class="check-field">
-              <input type="checkbox" id="ref-confirm" ${confirmed ? 'checked' : ''}>
-              <span>Confirmo registrar esta devolución (el efectivo devuelto impacta automáticamente en la caja abierta).</span>
-            </label>
-          </div>
-        `;
+      <div class="workspace-panel__footer">
+        <button type="button" class="btn" id="ref-cancel-btn">Cancelar</button>
+        <button type="button" class="btn btn--danger btn--lg" id="ref-submit-btn">Confirmar devolución</button>
+      </div>
+    </section>
+  `;
 
-        body.querySelectorAll('[data-ref-qty]').forEach((inp) => {
-          const syncQty = (clampInput) => {
-            const idx = Number(inp.dataset.refQty);
-            const max = lineDrafts[idx].availableQty;
-            const parsed = Math.max(0, Math.min(max, Math.floor(Number(inp.value || 0))));
-            lineDrafts[idx].refundQty = parsed;
-            if (clampInput && String(parsed) !== inp.value) inp.value = String(parsed);
-            const nextCalc = roundMoney(lineDrafts.reduce((a, l) => a + l.refundQty * l.unitEffective, 0));
-            const calcBtn = body.querySelector('#ref-calc-btn');
-            if (calcBtn) calcBtn.innerHTML = `${icon('refresh', 14)} Calcular importe (${formatARS(nextCalc)})`;
-          };
-          inp.addEventListener('input', () => syncQty(false));
-          inp.addEventListener('change', () => syncQty(true));
-        });
+  const closeRefund = () => {
+    refundDraft = null;
+    renderSalesHistory(container);
+    document.getElementById('page-heading')?.focus();
+  };
 
-        body.querySelectorAll('[data-ref-disp]').forEach((sel) => {
-          sel.addEventListener('change', (e) => {
-            lineDrafts[Number(sel.dataset.refDisp)].disposition = e.target.value;
-          });
-        });
+  container.querySelector('#ref-cancel-top').addEventListener('click', closeRefund);
+  container.querySelector('#ref-cancel-btn').addEventListener('click', closeRefund);
 
-        body.querySelector('#ref-calc-btn').addEventListener('click', () => {
-          calculateProportional();
-          inlineError = '';
-          renderRefund();
-        });
+  container.querySelectorAll('[data-ref-qty]').forEach((inp) => {
+    const syncQty = (clampInput) => {
+      const idx = Number(inp.dataset.refQty);
+      const max = d.lineDrafts[idx].availableQty;
+      const parsed = Math.max(0, Math.min(max, Math.floor(Number(inp.value || 0))));
+      d.lineDrafts[idx].refundQty = parsed;
+      if (clampInput && String(parsed) !== inp.value) inp.value = String(parsed);
+      const nextCalc = roundMoney(d.lineDrafts.reduce((a, l) => a + l.refundQty * l.unitEffective, 0));
+      const calcBtn = container.querySelector('#ref-calc-btn');
+      if (calcBtn) calcBtn.innerHTML = `${icon('refresh', 14)} Calcular importe (${formatARS(nextCalc)})`;
+    };
+    inp.addEventListener('input', () => syncQty(false));
+    inp.addEventListener('change', () => syncQty(true));
+  });
 
-        body.querySelectorAll('[data-ref-pay]').forEach((inp) => {
-          inp.addEventListener('input', (e) => {
-            payDrafts[Number(inp.dataset.refPay)].refundAmount = Math.max(0, roundMoney(e.target.value || 0));
-            const nextSum = roundMoney(payDrafts.reduce((a, p) => a + Number(p.refundAmount || 0), 0));
-            const totEl = body.querySelector('#ref-total-pay');
-            if (totEl) totEl.textContent = formatARS(nextSum);
-          });
-        });
+  container.querySelectorAll('[data-ref-disp]').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      d.lineDrafts[Number(sel.dataset.refDisp)].disposition = e.target.value;
+    });
+  });
 
-        body.querySelector('#ref-reason').addEventListener('input', (e) => { reason = e.target.value; });
-        body.querySelector('#ref-confirm').addEventListener('change', (e) => { confirmed = e.target.checked; });
-      };
+  container.querySelector('#ref-calc-btn').addEventListener('click', () => {
+    calculateProportional();
+    d.error = '';
+    renderRefundWorkspace(container, sale);
+  });
 
-      submitBtn.addEventListener('click', () => {
-        if (!confirmed) {
-          inlineError = 'Marcá la casilla de confirmación antes de registrar la devolución.';
-          renderRefund();
-          return;
-        }
-        const res = registerSaleRefund(sale.id, {
-          lines: lineDrafts
-            .filter((l) => l.refundQty > 0)
-            .map((l) => ({ lineId: l.lineId, productName: l.productName, quantity: l.refundQty, disposition: l.disposition })),
-          payments: payDrafts
-            .filter((p) => p.refundAmount > 0)
-            .map((p) => ({ method: p.method, amount: p.refundAmount })),
-          reason,
-        });
-        if (!res.ok) {
-          inlineError = res.error;
-          renderRefund();
-          return;
-        }
-        dlg.close('ok');
-        showToast(`Devolución #${res.refund.id} registrada en Venta #${sale.id}.`, 'ok');
-      });
+  container.querySelectorAll('[data-ref-pay]').forEach((inp) => {
+    inp.addEventListener('input', (e) => {
+      d.payDrafts[Number(inp.dataset.refPay)].refundAmount = Math.max(0, roundMoney(e.target.value || 0));
+      const nextSum = roundMoney(d.payDrafts.reduce((a, p) => a + Number(p.refundAmount || 0), 0));
+      const totEl = container.querySelector('#ref-total-pay');
+      if (totEl) totEl.textContent = formatARS(nextSum);
+    });
+  });
 
-      renderRefund();
-    },
+  container.querySelector('#ref-reason').addEventListener('input', (e) => { d.reason = e.target.value; });
+  container.querySelector('#ref-confirm').addEventListener('change', (e) => { d.confirmed = e.target.checked; });
+
+  container.querySelector('#ref-submit-btn').addEventListener('click', () => {
+    if (!d.confirmed) {
+      d.error = 'Marcá la casilla de confirmación antes de registrar la devolución.';
+      renderRefundWorkspace(container, sale);
+      return;
+    }
+    const res = registerSaleRefund(sale.id, {
+      lines: d.lineDrafts
+        .filter((l) => l.refundQty > 0)
+        .map((l) => ({ lineId: l.lineId, productName: l.productName, quantity: l.refundQty, disposition: l.disposition })),
+      payments: d.payDrafts
+        .filter((p) => p.refundAmount > 0)
+        .map((p) => ({ method: p.method, amount: p.refundAmount })),
+      reason: d.reason,
+    });
+    if (!res.ok) {
+      d.error = res.error;
+      renderRefundWorkspace(container, sale);
+      return;
+    }
+    refundDraft = null;
+    showToast(`Devolución #${res.refund.id} registrada en Venta #${sale.id}.`, 'ok');
   });
 }

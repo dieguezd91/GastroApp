@@ -1,8 +1,27 @@
 import { getState, getRecipeCalculation, recalculateRecipe, saveRecipe, deleteRecipe } from '../state/store.js';
 import { formatARS, formatDateTime, formatNum, formatQtyUnit, escapeHtml, convertUnit, roundMoney, getCompatibleUnits, getDefaultRecipeUnit } from '../utils/format.js';
 import { icon } from '../utils/icons.js';
-import { badge, banner, emptyState, loadingSkeleton, openModal, openConfirmModal } from '../utils/ui.js';
+import { badge, banner, emptyState, loadingSkeleton, openConfirmModal } from '../utils/ui.js';
 import { showToast } from '../utils/a11y.js';
+
+let editorState = null; // null | { existingId, name, yield, ingredients, pickerIngId, pickerQty, pickerUnit, error }
+
+function openRecipeEditor(existingRecipe) {
+  const activeIngredients = getState().ingredients.filter((i) => i.active);
+  const firstIng = activeIngredients[0];
+  editorState = {
+    existingId: existingRecipe?.id || null,
+    existingName: existingRecipe?.name || '',
+    lastCalculatedCost: existingRecipe?.lastCalculatedCost || 0,
+    name: existingRecipe?.name || '',
+    yield: existingRecipe?.yield || 1,
+    ingredients: existingRecipe ? existingRecipe.ingredients.map((ri) => ({ ...ri })) : [],
+    pickerIngId: firstIng?.id || '',
+    pickerQty: '',
+    pickerUnit: getDefaultRecipeUnit(firstIng?.unit || 'kg'),
+    error: '',
+  };
+}
 
 export function renderRecipes(container, navigate) {
   const state = getState();
@@ -12,6 +31,11 @@ export function renderRecipes(container, navigate) {
       <div class="page-header"><h1 id="page-heading" tabindex="-1">Recetas y costos</h1></div>
       ${loadingSkeleton(4)}
     `;
+    return;
+  }
+
+  if (editorState) {
+    renderRecipeWorkspace(container, navigate);
     return;
   }
 
@@ -30,11 +54,10 @@ export function renderRecipes(container, navigate) {
     </div>
 
     <div class="stack">
-      ${banner({
-        variant: 'info',
-        title: 'Contrato actual de vinculación producto ↔ receta',
-        body: 'En la implementación actual, el consumo automático de stock al vender busca una receta con el mismo nombre exacto que el producto. Se propone evolucionar a un vínculo explícito por ID.',
-      })}
+      <p class="proposal-note" role="note" style="background-color: var(--status-info-bg); border-color: color-mix(in oklab, var(--status-info-border) 30%, transparent); color: var(--status-info-ink);">
+        <span class="proposal-note__icon">${icon('info', 15)}</span>
+        <span><strong>Vínculo actual:</strong> el descuento de stock al vender busca una receta con el mismo nombre exacto que el producto.</span>
+      </p>
 
       ${recipes.length === 0
         ? emptyState({
@@ -52,7 +75,7 @@ export function renderRecipes(container, navigate) {
                   <div class="row-between">
                     <div>
                       <h2 class="card__title">${escapeHtml(r.name)}</h2>
-                      <p class="text-xs text-muted">Rendimiento: ${r.yield} porción(es) · ${r.ingredients.length} ingrediente(s) · Último recálculo: ${formatDateTime(r.lastCalculatedAt)}</p>
+                      <p class="text-xs text-muted">Rendimiento: ${r.yield} porción(es) · ${r.ingredients.length} ingrediente(s) · ${formatDateTime(r.lastCalculatedAt)}</p>
                     </div>
                     ${badge(calc.variationLevel.label, calc.variationLevel.variant, calc.variationLevel.code === 'danger' ? 'alertOctagon' : calc.variationLevel.code === 'warn' ? 'alertTriangle' : 'checkCircle')}
                   </div>
@@ -63,7 +86,7 @@ export function renderRecipes(container, navigate) {
                       <p class="fw-700 tnum">${formatARS(calc.totalCost)}</p>
                     </div>
                     <div class="card card--compact card--subtle">
-                      <p class="text-xs text-muted">Costo actual / porc.</p>
+                      <p class="text-xs text-muted">Costo / porc.</p>
                       <p class="fw-700 tnum">${formatARS(calc.unitCost)}</p>
                       <p class="text-xs text-muted">Ant.: ${formatARS(r.lastCalculatedCost)}</p>
                     </div>
@@ -116,13 +139,25 @@ export function renderRecipes(container, navigate) {
   `;
 
   container.querySelector('#rec-go-catalog')?.addEventListener('click', () => navigate('catalog'));
-  container.querySelector('#btn-new-recipe')?.addEventListener('click', () => openRecipeModal(null));
-  container.querySelector('#btn-empty-new-recipe')?.addEventListener('click', () => openRecipeModal(null));
+  container.querySelector('#btn-new-recipe')?.addEventListener('click', () => {
+    openRecipeEditor(null);
+    renderRecipes(container, navigate);
+    document.getElementById('page-heading')?.focus();
+  });
+  container.querySelector('#btn-empty-new-recipe')?.addEventListener('click', () => {
+    openRecipeEditor(null);
+    renderRecipes(container, navigate);
+    document.getElementById('page-heading')?.focus();
+  });
 
   container.querySelectorAll('[data-edit-recipe]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const rec = state.recipes.find((r) => r.id === Number(btn.dataset.editRecipe));
-      if (rec) openRecipeModal(rec);
+      if (rec) {
+        openRecipeEditor(rec);
+        renderRecipes(container, navigate);
+        document.getElementById('page-heading')?.focus();
+      }
     });
   });
 
@@ -157,278 +192,261 @@ export function renderRecipes(container, navigate) {
   });
 }
 
-function openRecipeModal(existingRecipe) {
+function renderRecipeWorkspace(container, navigate) {
   const state = getState();
   const activeIngredients = state.ingredients.filter((i) => i.active);
-  const draft = {
-    name: existingRecipe?.name || '',
-    yield: existingRecipe?.yield || 1,
-    ingredients: existingRecipe ? existingRecipe.ingredients.map((ri) => ({ ...ri })) : [],
-  };
-
-  let pickerIngId = activeIngredients[0]?.id || '';
-  let pickerQty = '';
-  let pickerUnit = getDefaultRecipeUnit(activeIngredients[0]?.unit || 'kg');
-  let inlineError = '';
-
-  const getSelectedIng = () => activeIngredients.find((i) => i.id === Number(pickerIngId)) || activeIngredients[0];
+  const d = editorState;
+  const getSelectedIng = () => activeIngredients.find((i) => i.id === Number(d.pickerIngId)) || activeIngredients[0];
+  const selectedIng = getSelectedIng();
+  const compatUnits = getCompatibleUnits(selectedIng?.unit);
+  if (!compatUnits.includes(d.pickerUnit)) {
+    d.pickerUnit = getDefaultRecipeUnit(selectedIng?.unit);
+  }
 
   const computeLinePreviewText = () => {
     const ing = getSelectedIng();
     if (!ing) return '';
-    const qty = roundMoney(pickerQty);
+    const qty = roundMoney(d.pickerQty);
     if (Number.isNaN(qty) || qty <= 0) {
-      return `Ingresá la cantidad en ${pickerUnit}${pickerUnit !== ing.unit ? ` (se convierte automáticamente a ${ing.unit})` : ''}.`;
+      return `Ingresá la cantidad en ${d.pickerUnit}${d.pickerUnit !== ing.unit ? ` (se convierte automáticamente a ${ing.unit})` : ''}.`;
     }
-    const conv = convertUnit(qty, pickerUnit, ing.unit);
+    const conv = convertUnit(qty, d.pickerUnit, ing.unit);
     if (!conv.ok) return 'Unidad incompatible.';
     const cost = roundMoney(conv.value * (ing.lastUnitPrice || 0));
-    const equiv = pickerUnit !== ing.unit ? `Equivale a ${formatNum(conv.value)} ${ing.unit} · ` : '';
+    const equiv = d.pickerUnit !== ing.unit ? `Equivale a ${formatNum(conv.value)} ${ing.unit} · ` : '';
     return ing.lastUnitPrice
       ? `${equiv}Costo estimado de esta línea: ${formatARS(cost)}`
       : `${equiv}Sin precio de factura cargado aún`;
   };
 
-  openModal({
-    title: existingRecipe ? `Editar receta · ${existingRecipe.name}` : 'Nueva receta estandarizada',
-    subtitle: 'La unidad se adapta automáticamente al ingrediente elegido para evitar errores de carga.',
-    size: 'lg',
-    lightDismiss: false,
-    bodyHtml: '<div id="recipe-modal-body"></div>',
-    footerHtml: `
-      <button type="button" class="btn" data-modal-close>Cancelar</button>
-      <button type="button" class="btn btn--primary" id="rec-save-btn">${existingRecipe ? 'Guardar cambios' : 'Guardar receta'}</button>
-    `,
-    onMount(dlg) {
-      const body = dlg.querySelector('#recipe-modal-body');
-      const saveBtn = dlg.querySelector('#rec-save-btn');
+  const preview = getRecipeCalculation({
+    yield: Math.max(1, Number(d.yield || 1)),
+    ingredients: d.ingredients,
+    lastCalculatedCost: d.lastCalculatedCost,
+  });
 
-      const renderForm = () => {
-        const selectedIng = getSelectedIng();
-        const compatUnits = getCompatibleUnits(selectedIng?.unit);
-        if (!compatUnits.includes(pickerUnit)) {
-          pickerUnit = getDefaultRecipeUnit(selectedIng?.unit);
-        }
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 id="page-heading" tabindex="-1">${d.existingId ? `Editar receta · ${escapeHtml(d.existingName)}` : 'Nueva receta estandarizada'}</h1>
+        <p class="page-header__subtitle">La unidad se adapta automáticamente al ingrediente elegido para evitar errores de carga.</p>
+      </div>
+      <div class="page-header__actions">
+        <button type="button" class="btn" id="rec-cancel-top">← Volver a Recetas</button>
+      </div>
+    </div>
 
-        const preview = getRecipeCalculation({
-          yield: Math.max(1, Number(draft.yield || 1)),
-          ingredients: draft.ingredients,
-          lastCalculatedCost: existingRecipe?.lastCalculatedCost || 0,
-        });
+    <section class="workspace-panel stack" aria-label="Formulario de receta">
+      ${d.error ? banner({ variant: 'danger', body: escapeHtml(d.error) }) : ''}
 
-        body.innerHTML = `
-          <div class="stack">
-            ${inlineError ? banner({ variant: 'danger', body: escapeHtml(inlineError) }) : ''}
+      <div class="form-grid">
+        <div class="field">
+          <label class="field__label" for="rec-name">Nombre de la receta <span class="field__req" aria-hidden="true">*</span></label>
+          <span id="rec-name-hint" class="field__hint">Usá el nombre exacto del producto para vincular el descuento de stock.</span>
+          <input id="rec-name" type="text" class="input" value="${escapeHtml(d.name)}" aria-describedby="rec-name-hint" placeholder="Ej.: Brownie tibio con helado" required>
+        </div>
+        <div class="field">
+          <label class="field__label" for="rec-yield">Rendimiento (porciones / pax) <span class="field__req" aria-hidden="true">*</span></label>
+          <span id="rec-yield-hint" class="field__hint">Divide el costo total para obtener el costo unitario.</span>
+          <input id="rec-yield" type="number" min="1" step="1" class="input tnum" value="${d.yield}" aria-describedby="rec-yield-hint" required>
+        </div>
+      </div>
 
-            <div class="form-grid">
-              <div class="field">
-                <label class="field__label" for="rec-name">Nombre de la receta <span class="field__req" aria-hidden="true">*</span></label>
-                <span id="rec-name-hint" class="field__hint">Usá el nombre exacto del producto para vincular el descuento de stock.</span>
-                <input id="rec-name" type="text" class="input" value="${escapeHtml(draft.name)}" aria-describedby="rec-name-hint" placeholder="Ej.: Brownie tibio con helado" required>
-              </div>
-              <div class="field">
-                <label class="field__label" for="rec-yield">Rendimiento (porciones / pax) <span class="field__req" aria-hidden="true">*</span></label>
-                <span id="rec-yield-hint" class="field__hint">Divide el costo total para obtener el costo unitario.</span>
-                <input id="rec-yield" type="number" min="1" step="1" class="input tnum" value="${draft.yield}" aria-describedby="rec-yield-hint" required>
-              </div>
-            </div>
-
-            <fieldset class="fieldset stack stack--sm">
-              <legend>Agregar ingredientes a la receta</legend>
-              <div class="form-grid" style="align-items: end;">
-                <div class="field">
-                  <label class="field__label" for="rec-pick-ing">Ingrediente activo</label>
-                  <select id="rec-pick-ing" class="select select--compact">
-                    ${activeIngredients.map((i) => `
-                      <option value="${i.id}" ${Number(pickerIngId) === i.id ? 'selected' : ''}>
-                        ${escapeHtml(i.name)} (${i.unit}) — ${i.lastUnitPrice ? `${formatARS(i.lastUnitPrice)}/${i.unit}` : 'Sin precio'}
-                      </option>
-                    `).join('')}
-                  </select>
-                </div>
-                <div class="field">
-                  <label class="field__label" for="rec-pick-qty">Cantidad</label>
-                  <input id="rec-pick-qty" type="number" min="0.01" step="any" class="input input--compact tnum" value="${escapeHtml(pickerQty)}" placeholder="${pickerUnit === 'unidad' ? 'Ej.: 1' : pickerUnit === 'gr' || pickerUnit === 'ml' ? 'Ej.: 180' : 'Ej.: 0.5'}">
-                </div>
-                <div class="field">
-                  <span class="field__label" id="rec-unit-lbl">Unidad (${compatUnits.length === 1 ? 'fija' : 'compatible'})</span>
-                  ${compatUnits.length === 1
-                    ? `<span class="unit-static" aria-labelledby="rec-unit-lbl">${escapeHtml(compatUnits[0])}</span>`
-                    : `<div class="unit-toggle" role="radiogroup" aria-labelledby="rec-unit-lbl">
-                        ${compatUnits.map((u) => `
-                          <label class="unit-toggle__opt">
-                            <input type="radio" name="rec-pick-unit" value="${u}" class="visually-hidden" ${pickerUnit === u ? 'checked' : ''}>
-                            <span>${u}</span>
-                          </label>
-                        `).join('')}
-                      </div>`}
-                </div>
-                <div>
-                  <button type="button" class="btn btn--primary btn--sm btn--block" id="rec-add-ing-btn">
-                    ${icon('plus', 15)}
-                    <span>Agregar ingrediente</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="live-preview-strip" id="rec-line-preview" aria-live="polite">
-                <span>${escapeHtml(computeLinePreviewText())}</span>
-              </div>
-
-              ${draft.ingredients.length === 0
-                ? `<p class="text-sm text-muted">Todavía no agregaste ingredientes. Sumá al menos uno para costear la receta.</p>`
-                : `<div class="table-wrapper mt-2" tabindex="0" role="region" aria-label="Ingredientes agregados a la receta">
-                    <table class="data-table data-table--stack">
-                      <thead>
-                        <tr>
-                          <th scope="col">Ingrediente</th>
-                          <th scope="col" class="col-num">Cantidad</th>
-                          <th scope="col">Estado</th>
-                          <th scope="col" class="col-num">Subtotal</th>
-                          <th scope="col" class="col-actions">Quitar</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${preview.breakdown.map((b, idx) => `
-                          <tr>
-                            <th scope="row">${escapeHtml(b.ingredientName)}</th>
-                            <td data-label="Cantidad" class="col-num">${formatQtyUnit(b.quantity, b.unit)}</td>
-                            <td data-label="Estado">
-                              ${!b.compatible
-                                ? badge(`Unidad incompatible (base: ${b.baseUnit})`, 'danger', 'alertOctagon')
-                                : !b.unitCost
-                                  ? badge('Sin último precio', 'warn', 'alertTriangle')
-                                  : badge(`OK (${formatARS(b.unitCost)}/${b.baseUnit})`, 'ok', 'check')}
-                            </td>
-                            <td data-label="Subtotal" class="col-num fw-700">${b.compatible ? formatARS(b.lineCost) : 'Excluido'}</td>
-                            <td class="col-actions">
-                              <button type="button" class="btn btn--ghost btn--icon" data-rem-rec-ing="${idx}" aria-label="Quitar ${escapeHtml(b.ingredientName)}">
-                                ${icon('trash', 15)}
-                              </button>
-                            </td>
-                          </tr>
-                        `).join('')}
-                      </tbody>
-                    </table>
-                  </div>`}
-            </fieldset>
-
-            <!-- Live Cost Preview -->
-            <div class="card card--compact card--subtle">
-              <div class="grid-kpi" style="grid-template-columns: repeat(2, 1fr); gap: var(--space-3);">
-                <div>
-                  <p class="text-xs fw-700 text-muted" style="text-transform: uppercase;">Costo total estimado</p>
-                  <p class="fw-700 tnum" id="rec-preview-total" style="font-size: var(--text-xl);">${formatARS(preview.totalCost)}</p>
-                </div>
-                <div>
-                  <p class="text-xs fw-700 text-muted" style="text-transform: uppercase;" id="rec-preview-unit-label">Costo por porción (${Math.max(1, Number(draft.yield || 1))} u.)</p>
-                  <p class="fw-700 tnum text-ok" id="rec-preview-unit" style="font-size: var(--text-xl);">${formatARS(preview.unitCost)}</p>
-                </div>
-              </div>
-            </div>
+      <fieldset class="fieldset stack stack--sm">
+        <legend>Agregar ingredientes a la receta</legend>
+        <div class="form-grid" style="align-items: end;">
+          <div class="field">
+            <label class="field__label" for="rec-pick-ing">Ingrediente activo</label>
+            <select id="rec-pick-ing" class="select select--compact">
+              ${activeIngredients.map((i) => `
+                <option value="${i.id}" ${Number(d.pickerIngId) === i.id ? 'selected' : ''}>
+                  ${escapeHtml(i.name)} (${i.unit}) — ${i.lastUnitPrice ? `${formatARS(i.lastUnitPrice)}/${i.unit}` : 'Sin precio'}
+                </option>
+              `).join('')}
+            </select>
           </div>
-        `;
+          <div class="field">
+            <label class="field__label" for="rec-pick-qty">Cantidad</label>
+            <input id="rec-pick-qty" type="number" min="0.01" step="any" class="input input--compact tnum" value="${escapeHtml(d.pickerQty)}" placeholder="${d.pickerUnit === 'unidad' ? 'Ej.: 1' : d.pickerUnit === 'gr' || d.pickerUnit === 'ml' ? 'Ej.: 180' : 'Ej.: 0.5'}">
+          </div>
+          <div class="field">
+            <span class="field__label" id="rec-unit-lbl">Unidad (${compatUnits.length === 1 ? 'fija' : 'compatible'})</span>
+            ${compatUnits.length === 1
+              ? `<span class="unit-static" aria-labelledby="rec-unit-lbl">${escapeHtml(compatUnits[0])}</span>`
+              : `<div class="unit-toggle" role="radiogroup" aria-labelledby="rec-unit-lbl">
+                  ${compatUnits.map((u) => `
+                    <label class="unit-toggle__opt">
+                      <input type="radio" name="rec-pick-unit" value="${u}" class="visually-hidden" ${d.pickerUnit === u ? 'checked' : ''}>
+                      <span>${u}</span>
+                    </label>
+                  `).join('')}
+                </div>`}
+          </div>
+          <div>
+            <button type="button" class="btn btn--primary btn--sm btn--block" id="rec-add-ing-btn">
+              ${icon('plus', 15)}
+              <span>Agregar ingrediente</span>
+            </button>
+          </div>
+        </div>
 
-        const updateLinePreview = () => {
-          const el = body.querySelector('#rec-line-preview span');
-          if (el) el.textContent = computeLinePreviewText();
-        };
+        <div class="live-preview-strip" id="rec-line-preview" aria-live="polite">
+          <span>${escapeHtml(computeLinePreviewText())}</span>
+        </div>
 
-        body.querySelector('#rec-name').addEventListener('input', (e) => {
-          draft.name = e.target.value;
-        });
-        body.querySelector('#rec-yield').addEventListener('input', (e) => {
-          draft.yield = Math.max(1, Math.floor(Number(e.target.value || 1)));
-          const nextPreview = getRecipeCalculation({
-            yield: draft.yield,
-            ingredients: draft.ingredients,
-            lastCalculatedCost: existingRecipe?.lastCalculatedCost || 0,
-          });
-          const totEl = body.querySelector('#rec-preview-total');
-          const unitEl = body.querySelector('#rec-preview-unit');
-          const lblEl = body.querySelector('#rec-preview-unit-label');
-          if (totEl) totEl.textContent = formatARS(nextPreview.totalCost);
-          if (unitEl) unitEl.textContent = formatARS(nextPreview.unitCost);
-          if (lblEl) lblEl.textContent = `Costo por porción (${draft.yield} u.)`;
-        });
+        ${d.ingredients.length === 0
+          ? `<p class="text-sm text-muted">Todavía no agregaste ingredientes. Sumá al menos uno para costear la receta.</p>`
+          : `<div class="table-wrapper mt-2" tabindex="0" role="region" aria-label="Ingredientes agregados a la receta">
+              <table class="data-table data-table--stack">
+                <thead>
+                  <tr>
+                    <th scope="col">Ingrediente</th>
+                    <th scope="col" class="col-num">Cantidad</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col" class="col-num">Subtotal</th>
+                    <th scope="col" class="col-actions">Quitar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${preview.breakdown.map((b, idx) => `
+                    <tr>
+                      <th scope="row">${escapeHtml(b.ingredientName)}</th>
+                      <td data-label="Cantidad" class="col-num">${formatQtyUnit(b.quantity, b.unit)}</td>
+                      <td data-label="Estado">
+                        ${!b.compatible
+                          ? badge(`Unidad incompatible (base: ${b.baseUnit})`, 'danger', 'alertOctagon')
+                          : !b.unitCost
+                            ? badge('Sin último precio', 'warn', 'alertTriangle')
+                            : badge(`OK (${formatARS(b.unitCost)}/${b.baseUnit})`, 'ok', 'check')}
+                      </td>
+                      <td data-label="Subtotal" class="col-num fw-700">${b.compatible ? formatARS(b.lineCost) : 'Excluido'}</td>
+                      <td class="col-actions">
+                        <button type="button" class="btn btn--ghost btn--icon" data-rem-rec-ing="${idx}" aria-label="Quitar ${escapeHtml(b.ingredientName)}">
+                          ${icon('trash', 15)}
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>`}
+      </fieldset>
 
-        body.querySelector('#rec-pick-ing').addEventListener('change', (e) => {
-          pickerIngId = Number(e.target.value);
-          const ing = getSelectedIng();
-          if (ing) pickerUnit = getDefaultRecipeUnit(ing.unit);
-          renderForm();
-        });
+      <div class="card card--compact card--subtle">
+        <div class="grid-kpi" style="grid-template-columns: repeat(2, 1fr); gap: var(--space-3);">
+          <div>
+            <p class="text-xs fw-700 text-muted" style="text-transform: uppercase;">Costo total estimado</p>
+            <p class="fw-700 tnum" id="rec-preview-total" style="font-size: var(--text-xl);">${formatARS(preview.totalCost)}</p>
+          </div>
+          <div>
+            <p class="text-xs fw-700 text-muted" style="text-transform: uppercase;" id="rec-preview-unit-label">Costo por porción (${Math.max(1, Number(d.yield || 1))} u.)</p>
+            <p class="fw-700 tnum text-ok" id="rec-preview-unit" style="font-size: var(--text-xl);">${formatARS(preview.unitCost)}</p>
+          </div>
+        </div>
+      </div>
 
-        body.querySelector('#rec-pick-qty').addEventListener('input', (e) => {
-          pickerQty = e.target.value;
-          updateLinePreview();
-        });
+      <div class="workspace-panel__footer">
+        <button type="button" class="btn" id="rec-cancel-btn">Cancelar</button>
+        <button type="button" class="btn btn--primary btn--lg" id="rec-save-btn">${d.existingId ? 'Guardar cambios' : 'Guardar receta'}</button>
+      </div>
+    </section>
+  `;
 
-        body.querySelectorAll('input[name="rec-pick-unit"]').forEach((rad) => {
-          rad.addEventListener('change', (e) => {
-            pickerUnit = e.target.value;
-            updateLinePreview();
-          });
-        });
+  const closeWorkspace = () => {
+    editorState = null;
+    renderRecipes(container, navigate);
+    document.getElementById('page-heading')?.focus();
+  };
 
-        body.querySelector('#rec-add-ing-btn').addEventListener('click', () => {
-          const ingId = Number(pickerIngId);
-          const qty = roundMoney(pickerQty);
-          if (!ingId) {
-            inlineError = 'Seleccioná un ingrediente.';
-            renderForm();
-            return;
-          }
-          if (Number.isNaN(qty) || qty <= 0) {
-            inlineError = 'Ingresá una cantidad mayor a cero antes de agregar el ingrediente.';
-            renderForm();
-            body.querySelector('#rec-pick-qty')?.focus();
-            return;
-          }
-          const existingIdx = draft.ingredients.findIndex((x) => x.ingredientId === ingId);
-          if (existingIdx >= 0) {
-            const conv = convertUnit(qty, pickerUnit, draft.ingredients[existingIdx].unit);
-            if (conv.ok) {
-              draft.ingredients[existingIdx].quantity = roundMoney(draft.ingredients[existingIdx].quantity + conv.value);
-            } else {
-              draft.ingredients[existingIdx] = { ingredientId: ingId, quantity: qty, unit: pickerUnit };
-            }
-          } else {
-            draft.ingredients.push({ ingredientId: ingId, quantity: qty, unit: pickerUnit });
-          }
-          pickerQty = '';
-          inlineError = '';
-          renderForm();
-          body.querySelector('#rec-pick-ing')?.focus();
-        });
+  container.querySelector('#rec-cancel-top').addEventListener('click', closeWorkspace);
+  container.querySelector('#rec-cancel-btn').addEventListener('click', closeWorkspace);
 
-        body.querySelectorAll('[data-rem-rec-ing]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            draft.ingredients.splice(Number(btn.dataset.remRecIng), 1);
-            inlineError = '';
-            renderForm();
-          });
-        });
-      };
+  const updateLinePreview = () => {
+    const el = container.querySelector('#rec-line-preview span');
+    if (el) el.textContent = computeLinePreviewText();
+  };
 
-      saveBtn.addEventListener('click', () => {
-        const res = saveRecipe({
-          id: existingRecipe?.id,
-          name: draft.name,
-          yield: draft.yield,
-          ingredients: draft.ingredients,
-        });
-        if (!res.ok) {
-          inlineError = res.error;
-          renderForm();
-          return;
-        }
-        dlg.close('ok');
-        showToast(existingRecipe ? 'Receta actualizada y recosteada.' : 'Receta creada y costeada.', 'ok');
-      });
+  container.querySelector('#rec-name').addEventListener('input', (e) => { d.name = e.target.value; });
+  container.querySelector('#rec-yield').addEventListener('input', (e) => {
+    d.yield = Math.max(1, Math.floor(Number(e.target.value || 1)));
+    const nextPreview = getRecipeCalculation({
+      yield: d.yield,
+      ingredients: d.ingredients,
+      lastCalculatedCost: d.lastCalculatedCost,
+    });
+    const totEl = container.querySelector('#rec-preview-total');
+    const unitEl = container.querySelector('#rec-preview-unit');
+    const lblEl = container.querySelector('#rec-preview-unit-label');
+    if (totEl) totEl.textContent = formatARS(nextPreview.totalCost);
+    if (unitEl) unitEl.textContent = formatARS(nextPreview.unitCost);
+    if (lblEl) lblEl.textContent = `Costo por porción (${d.yield} u.)`;
+  });
 
-      renderForm();
-      body.querySelector('#rec-name')?.focus();
-    },
+  container.querySelector('#rec-pick-ing').addEventListener('change', (e) => {
+    d.pickerIngId = Number(e.target.value);
+    const ing = getSelectedIng();
+    if (ing) d.pickerUnit = getDefaultRecipeUnit(ing.unit);
+    renderRecipeWorkspace(container, navigate);
+  });
+
+  container.querySelector('#rec-pick-qty').addEventListener('input', (e) => {
+    d.pickerQty = e.target.value;
+    updateLinePreview();
+  });
+
+  container.querySelectorAll('input[name="rec-pick-unit"]').forEach((rad) => {
+    rad.addEventListener('change', (e) => {
+      d.pickerUnit = e.target.value;
+      updateLinePreview();
+    });
+  });
+
+  container.querySelector('#rec-add-ing-btn').addEventListener('click', () => {
+    const ingId = Number(d.pickerIngId);
+    const qty = roundMoney(d.pickerQty);
+    if (!ingId) { d.error = 'Seleccioná un ingrediente.'; renderRecipeWorkspace(container, navigate); return; }
+    if (Number.isNaN(qty) || qty <= 0) {
+      d.error = 'Ingresá una cantidad mayor a cero antes de agregar el ingrediente.';
+      renderRecipeWorkspace(container, navigate);
+      container.querySelector('#rec-pick-qty')?.focus();
+      return;
+    }
+    const existingIdx = d.ingredients.findIndex((x) => x.ingredientId === ingId);
+    if (existingIdx >= 0) {
+      const conv = convertUnit(qty, d.pickerUnit, d.ingredients[existingIdx].unit);
+      if (conv.ok) d.ingredients[existingIdx].quantity = roundMoney(d.ingredients[existingIdx].quantity + conv.value);
+      else d.ingredients[existingIdx] = { ingredientId: ingId, quantity: qty, unit: d.pickerUnit };
+    } else {
+      d.ingredients.push({ ingredientId: ingId, quantity: qty, unit: d.pickerUnit });
+    }
+    d.pickerQty = '';
+    d.error = '';
+    renderRecipeWorkspace(container, navigate);
+    container.querySelector('#rec-pick-ing')?.focus();
+  });
+
+  container.querySelectorAll('[data-rem-rec-ing]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      d.ingredients.splice(Number(btn.dataset.remRecIng), 1);
+      d.error = '';
+      renderRecipeWorkspace(container, navigate);
+    });
+  });
+
+  container.querySelector('#rec-save-btn').addEventListener('click', () => {
+    const wasEdit = Boolean(d.existingId);
+    const res = saveRecipe({
+      id: d.existingId,
+      name: d.name,
+      yield: d.yield,
+      ingredients: d.ingredients,
+    });
+    if (!res.ok) {
+      d.error = res.error;
+      renderRecipeWorkspace(container, navigate);
+      return;
+    }
+    editorState = null;
+    showToast(wasEdit ? 'Receta actualizada y recosteada.' : 'Receta creada y costeada.', 'ok');
   });
 }

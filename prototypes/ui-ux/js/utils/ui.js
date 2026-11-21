@@ -31,11 +31,12 @@ export function banner({ variant = 'info', title, body, actionHtml = '', role = 
 }
 
 export function proposalBanner(moduleCode, detail) {
-  return banner({
-    variant: 'proposal',
-    title: `Propuesta de evolución (${moduleCode}) — No implementado en el backend actual`,
-    body: escapeHtml(detail),
-  });
+  return `
+    <p class="proposal-note" role="note">
+      <span class="proposal-note__icon">${icon('sparkles', 15)}</span>
+      <span><strong>Propuesta ${escapeHtml(moduleCode)} (no implementado):</strong> ${escapeHtml(detail)}</span>
+    </p>
+  `;
 }
 
 export function kpiCard({ label, value, meta = '', badgeHtml = '' }) {

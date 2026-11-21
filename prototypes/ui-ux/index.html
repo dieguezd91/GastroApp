@@ -17,18 +17,23 @@
 <body>
   <a href="#page-heading" class="skip-link visually-hidden">Saltar al contenido principal</a>
 
-  <!-- Demo-only control bar (strictly for prototype evaluation) -->
-  <div class="demo-bar" role="region" aria-label="Controles de demostración del prototipo">
-    <div class="demo-bar__group">
-      <span class="demo-bar__tag">Prototipo UI/UX</span>
-      <span class="demo-bar__label" id="demo-role-label">Rol demo:</span>
-      <div class="role-switch" role="group" aria-labelledby="demo-role-label">
-        <button type="button" class="role-switch__btn" data-demo-role="Admin" aria-pressed="true">Administrador</button>
-        <button type="button" class="role-switch__btn" data-demo-role="Employee" aria-pressed="false">Empleado</button>
+  <!-- Demo-only control bar (collapsible on mobile to preserve POS space) -->
+  <div class="demo-bar" id="demo-bar" role="region" aria-label="Controles de demostración del prototipo">
+    <div class="demo-bar__top">
+      <div class="demo-bar__group">
+        <span class="demo-bar__tag">Prototipo</span>
+        <span class="demo-bar__label demo-bar__label--desktop" id="demo-role-label">Rol:</span>
+        <div class="role-switch" role="group" aria-labelledby="demo-role-label">
+          <button type="button" class="role-switch__btn" data-demo-role="Admin" aria-pressed="true">Admin</button>
+          <button type="button" class="role-switch__btn" data-demo-role="Employee" aria-pressed="false">Empleado</button>
+        </div>
       </div>
+      <button type="button" class="demo-bar__btn demo-bar__toggle" id="demo-bar-toggle" aria-expanded="false" aria-controls="demo-bar-extras">
+        <span>Opciones</span>
+      </button>
     </div>
 
-    <div class="demo-bar__group">
+    <div class="demo-bar__group demo-bar__extras" id="demo-bar-extras">
       <label class="demo-bar__label" for="demo-scenario">Escenario:</label>
       <select id="demo-scenario" class="demo-bar__select" aria-label="Seleccionar escenario de prueba">
         <option value="normal">Operación normal (Caja abierta)</option>

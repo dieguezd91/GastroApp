@@ -560,6 +560,26 @@ function openCheckoutModal() {
       const body = dlg.querySelector('#checkout-body');
       const confirmBtn = dlg.querySelector('#checkout-confirm-btn');
 
+      const isCheckoutValid = () => {
+        if (totals.total === 0) return true;
+        if (!payments.length) return false;
+        const sum = roundMoney(payments.reduce((a, p) => a + Number(p.amount || 0), 0));
+        if (Math.abs(totals.total - sum) > 0.01) return false;
+        if (payments.some((p) => Number(p.amount || 0) <= 0)) return false;
+        const cashItem = payments.find((p) => p.method === 'Cash');
+        if (cashItem) {
+          const rec = Number(cashItem.receivedAmount);
+          if (Number.isNaN(rec) || rec + 0.001 < Number(cashItem.amount)) return false;
+        }
+        return true;
+      };
+
+      const syncConfirmButtonState = () => {
+        const valid = isCheckoutValid();
+        confirmBtn.disabled = !valid;
+        confirmBtn.setAttribute('aria-disabled', String(!valid));
+      };
+
       const renderCheckout = () => {
         const assigned = roundMoney(payments.reduce((a, p) => a + Number(p.amount || 0), 0));
         const remaining = roundMoney(totals.total - assigned);
@@ -620,7 +640,8 @@ function openCheckoutModal() {
                         <input id="pay-amt-${idx}" type="number" min="0" step="any" class="input input--compact tnum" data-pay-amount="${idx}" value="${p.amount}">
                       </div>
 
-                      <div>
+                      <div class="flex-wrap-gap">
+                        <button type="button" class="btn btn--sm" data-fill-rem="${idx}" ${Math.abs(remaining) <= 0.01 ? 'hidden' : ''}>Completar (${formatARS(Math.max(0, roundMoney(p.amount + remaining)))})</button>
                         ${payments.length > 1
                           ? `<button type="button" class="btn btn--ghost btn--sm" data-remove-pay="${idx}" aria-label="Quitar ${escapeHtml(PAYMENT_METHOD_MAP[p.method]?.label || '')}">${icon('trash', 15)} Quitar</button>`
                           : `<span class="text-xs text-muted">Pago único</span>`}
@@ -675,6 +696,8 @@ function openCheckoutModal() {
           </div>
         `;
 
+        syncConfirmButtonState();
+
         // Bind checkout controls
         body.querySelectorAll('[data-single-method]').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -702,6 +725,19 @@ function openCheckoutModal() {
           renderCheckout();
         });
 
+        body.querySelectorAll('[data-fill-rem]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const idx = Number(btn.dataset.fillRem);
+            const curRem = roundMoney(totals.total - payments.reduce((a, p) => a + Number(p.amount || 0), 0));
+            payments[idx].amount = Math.max(0, roundMoney(payments[idx].amount + curRem));
+            if (payments[idx].method === 'Cash' && Number(payments[idx].receivedAmount || 0) < payments[idx].amount) {
+              payments[idx].receivedAmount = payments[idx].amount;
+            }
+            inlineError = '';
+            renderCheckout();
+          });
+        });
+
         body.querySelectorAll('[data-pay-method]').forEach((sel) => {
           sel.addEventListener('change', (e) => {
             const idx = Number(sel.dataset.payMethod);
@@ -721,6 +757,12 @@ function openCheckoutModal() {
             remEl.textContent = formatARS(nextRemaining);
             remEl.className = `fw-700 tnum ${Math.abs(nextRemaining) > 0.01 ? 'text-danger' : 'text-ok'}`;
           }
+          body.querySelectorAll('[data-fill-rem]').forEach((fillBtn) => {
+            const fIdx = Number(fillBtn.dataset.fillRem);
+            const targetAmt = Math.max(0, roundMoney(Number(payments[fIdx]?.amount || 0) + nextRemaining));
+            fillBtn.hidden = Math.abs(nextRemaining) <= 0.01;
+            fillBtn.textContent = `Completar (${formatARS(targetAmt)})`;
+          });
           const cashItem = payments.find((p) => p.method === 'Cash');
           const slot = body.querySelector('#cash-change-slot');
           if (cashItem && slot) {
@@ -729,35 +771,27 @@ function openCheckoutModal() {
               ? `<div class="change-box"><span>Vuelto a entregar</span><span class="tnum" style="font-size: var(--text-lg);">${formatARS(diffCash)}</span></div>`
               : banner({ variant: 'danger', body: `Faltan ${formatARS(Math.abs(diffCash))} para cubrir el importe en efectivo.` });
           }
+          syncConfirmButtonState();
         };
 
         body.querySelectorAll('[data-pay-amount]').forEach((inp) => {
-          inp.addEventListener('input', (e) => {
+          const onAmountUpdate = (e) => {
             const idx = Number(inp.dataset.payAmount);
             payments[idx].amount = Math.max(0, roundMoney(e.target.value || 0));
             syncCheckoutLiveSummary();
-          });
-          inp.addEventListener('change', (e) => {
-            const idx = Number(inp.dataset.payAmount);
-            payments[idx].amount = Math.max(0, roundMoney(e.target.value || 0));
-            if (payments[idx].method === 'Cash' && payments[idx].receivedAmount < payments[idx].amount) {
-              payments[idx].receivedAmount = payments[idx].amount;
-            }
-            renderCheckout();
-          });
+          };
+          inp.addEventListener('input', onAmountUpdate);
+          inp.addEventListener('change', onAmountUpdate);
         });
 
         body.querySelectorAll('[data-pay-received]').forEach((inp) => {
-          inp.addEventListener('input', (e) => {
+          const onReceivedUpdate = (e) => {
             const idx = Number(inp.dataset.payReceived);
             payments[idx].receivedAmount = roundMoney(e.target.value || 0);
             syncCheckoutLiveSummary();
-          });
-          inp.addEventListener('change', (e) => {
-            const idx = Number(inp.dataset.payReceived);
-            payments[idx].receivedAmount = roundMoney(e.target.value || 0);
-            renderCheckout();
-          });
+          };
+          inp.addEventListener('input', onReceivedUpdate);
+          inp.addEventListener('change', onReceivedUpdate);
         });
 
         body.querySelectorAll('[data-bill-exact]').forEach((btn) => {

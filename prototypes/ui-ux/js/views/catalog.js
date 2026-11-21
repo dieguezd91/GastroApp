@@ -114,9 +114,7 @@ export function renderCatalog(container, navigate) {
                   <tr>
                     <th scope="col">Producto</th>
                     <th scope="col">Categoría</th>
-                    <th scope="col">Estado POS</th>
-                    <th scope="col" class="col-num">Precio</th>
-                    <th scope="col" class="col-num">Costo</th>
+                    <th scope="col" class="col-num">Precio / Costo</th>
                     <th scope="col">Margen</th>
                     <th scope="col" class="col-actions">Acciones</th>
                   </tr>
@@ -132,23 +130,29 @@ export function renderCatalog(container, navigate) {
                     return `
                       <tr>
                         <th scope="row">
-                          <div>${escapeHtml(p.name)}</div>
-                          ${costDrift ? `<div class="text-xs text-warn mt-2">Costo receta actual: <strong>${formatARS(recCalc.unitCost)}</strong> (desfasado)</div>` : ''}
+                          <div class="flex-wrap-gap">
+                            <span>${escapeHtml(p.name)}</span>
+                            ${!p.isActive ? badge('Inactivo', 'neutral') : ''}
+                          </div>
+                          ${costDrift ? `
+                            <div class="flex-wrap-gap mt-2">
+                              <span class="text-xs text-warn fw-600">Receta: ${formatARS(recCalc.unitCost)}</span>
+                              <button type="button" class="btn btn--sm" style="min-block-size: 1.75rem; padding: 0.15rem 0.55rem;" data-sync-recipe="${recipe.id}">Sincronizar</button>
+                            </div>
+                          ` : ''}
                         </th>
                         <td data-label="Categoría">${escapeHtml(cat ? cat.name : 'Sin categoría')}</td>
-                        <td data-label="Estado POS">
-                          ${badge(p.isActive ? 'Activo' : 'Inactivo', p.isActive ? 'ok' : 'neutral')}
+                        <td data-label="Precio / Costo" class="col-num">
+                          <div class="fw-700">${formatARS(p.price)}</div>
+                          <div class="text-xs text-muted">${p.cost != null ? `Costo ${formatARS(p.cost)}` : 'Sin costo'}</div>
                         </td>
-                        <td data-label="Precio" class="col-num fw-700">${formatARS(p.price)}</td>
-                        <td data-label="Costo" class="col-num">${p.cost != null ? formatARS(p.cost) : '—'}</td>
                         <td data-label="Margen">
                           ${badge(margin != null ? `${margin}% · ${health.label}` : 'Sin costo', health.variant)}
                         </td>
                         <td class="col-actions">
                           <div class="flex-wrap-gap" style="justify-content: flex-end;">
-                            ${costDrift ? `<button type="button" class="btn btn--sm" data-sync-recipe="${recipe.id}" title="Actualizar costo del producto con receta">Sincronizar costo</button>` : ''}
                             <button type="button" class="btn btn--sm" data-edit-prod="${p.id}">Editar</button>
-                            <button type="button" class="btn btn--ghost btn--sm" data-toggle-prod="${p.id}">${p.isActive ? 'Desactivar' : 'Activar'}</button>
+                            <button type="button" class="btn btn--ghost btn--sm" data-toggle-prod="${p.id}">${p.isActive ? 'Pausar' : 'Activar'}</button>
                             <button type="button" class="btn btn--ghost btn--icon" data-del-prod="${p.id}" aria-label="Eliminar ${escapeHtml(p.name)}">${icon('trash', 15)}</button>
                           </div>
                         </td>

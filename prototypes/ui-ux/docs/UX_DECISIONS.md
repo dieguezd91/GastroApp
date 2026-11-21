@@ -30,7 +30,7 @@ Resumen de las principales decisiones de diseño, arquitectura de información y
 ## 5. Patrones seleccionados de Modern Web Guidance (Google Chrome)
 - **Diálogos nativos (`dialog`, `prevent-page-scroll-under-modal-dialog`, `light-dismiss-a-dialog`):** `<dialog>` + `showModal()`, `overscroll-behavior: contain` en `dialog:modal` y `dialog::backdrop` (`overflow: hidden`) en lugar de bloquear scroll en `body`, reset de `dialog.returnValue = ''` y fallback de light-dismiss para navegadores sin `closedby`.
 - **Validación post-interacción (`forms`, `validate-input-after-interaction`, `accessible-error-announcement`):** uso de `:is(:user-invalid, .user-invalid-fallback)` y `:has()` para no mostrar errores prematuros al cargar la página, sincronizando `aria-invalid` y `aria-describedby` dinámicamente.
-- **Tablas adaptativas (`responsive-table`):** `container-type: inline-size` con transformación a tarjetas apiladas en contenedores estrechos (`< 37rem`) manteniendo headers semánticos y accesibilidad por teclado (`tabindex="0" role="region"`).
+- **Tablas adaptativas (`responsive-table`):** `container-type: inline-size` con transformación a tarjetas compactas de 2 columnas en contenedores estrechos (`< 30rem`) manteniendo headers semánticos, filas tabulares limpias en columnas desktop de ancho medio y accesibilidad por teclado (`tabindex="0" role="region"`).
 - **Drawer táctil nativo (`navigation-drawer`):** `<dialog>` modal con `scroll-snap-type: x mandatory`, `100svh` e `IntersectionObserver` para gestos táctiles y retorno automático de foco.
 - **Toasts no intrusivos (`persistent-toast-notifications`):** `[popover="manual"]` en esquina inferior derecha con botón explícito de cierre, pausa por foco, supresión cuando hay un modal abierto y respaldo en live region `polite`.
 
@@ -39,3 +39,12 @@ Resumen de las principales decisiones de diseño, arquitectura de información y
 2. **Toast en Top Layer tapando barra superior:** reposicionado explícitamente con `position: fixed; inset-block-end / inset-inline-end` y reemplazo limpio de toast previo.
 3. **Mensaje de error en campo Contraseña (Login):** resuelto mediante `.field:has(:user-invalid) > .field__error` para atravesar el wrapper `.password-wrap`.
 4. **Cálculo en vivo en pagos mixtos:** actualizado sobre evento `input` sin perder el foco del campo numérico.
+
+## 7. Refinamientos tras revisión UX (ronda 2)
+1. **Cobro mixto sincronizado y seguro (Crítica):** el botón `Confirmar cobro` permanece deshabilitado mientras `Restante != $ 0`, exista un importe `<= 0` o `Efectivo recibido < importe aplicado`. Se sincronizan `Asignado`, `Restante`, `Vuelto` y el atajo en 1 clic `Completar ($X)` en vivo sin destruir el foco al tipear.
+2. **Tabla de Productos sin desbordamiento (Alta):** consolidación de 7 a 5 columnas (`Producto` con aviso/botón compacto de sincronización de receta, `Categoría`, `Precio / Costo` apilados, `Margen`, `Acciones`), logrando ajuste completo sin recorte horizontal en `1440px` y `1024px`.
+3. **Barra demo compacta en POS móvil (Alta):** colapsada a una única fila (`~45px`) en `< 60rem` con botón `Opciones` (`aria-expanded`) para desplegar selector de escenario y reinicio solo a demanda; en desktop (`>= 60rem`) el botón `Opciones` se oculta y los controles permanecen en una sola línea.
+4. **Tarjetas compactas en Inventario móvil (Alta):** la vista apilada usa grilla de métricas en 2 columnas (`< 30rem`) para comparar stock actual, mínimo, estado y cobertura de varios insumos en pantalla.
+5. **Workspaces embebidos en lugar de modales extensos (Media):** Recetas, Facturas de compra y Devoluciones pasan a paneles de ancho completo dentro de cada vista (`← Volver`), eliminando el desplazamiento interno en `<dialog>`.
+6. **Jerarquía operativa en 3 niveles en Dashboard (Media):** Hero principal de caja + métricas clave arriba; lista compacta `Requiere atención` + `Últimas ventas del turno` en el nivel medio; franja discreta de accesos secundarios al pie.
+7. **Nota discreta de funcionalidad propuesta (Media):** `.proposal-note` de una línea compacta en Reportes y Configuración para priorizar KPIs y gráficos.

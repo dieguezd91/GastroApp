@@ -314,7 +314,14 @@ function bootstrap() {
     document.getElementById('drawer-close')
   );
 
-  // Demo bar interactions
+  // Demo bar mobile toggle & interactions
+  const demoBar = document.getElementById('demo-bar');
+  const demoToggle = document.getElementById('demo-bar-toggle');
+  demoToggle?.addEventListener('click', () => {
+    const expanded = demoBar.classList.toggle('is-expanded');
+    demoToggle.setAttribute('aria-expanded', String(expanded));
+  });
+
   document.querySelectorAll('[data-demo-role]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const targetRole = btn.dataset.demoRole;
