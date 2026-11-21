@@ -1,0 +1,158 @@
+@layer base {
+  html {
+    box-sizing: border-box;
+    font-family: var(--font-sans);
+    font-size: 100%;
+    line-height: var(--leading-normal);
+    color: var(--text-primary);
+    background-color: var(--surface-canvas);
+    scroll-padding-top: calc(var(--topbar-height) + var(--demo-bar-height) + 1rem);
+    scroll-padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body,
+  main,
+  header,
+  footer,
+  nav,
+  aside,
+  section,
+  article,
+  div,
+  dialog,
+  form,
+  fieldset,
+  input,
+  select,
+  textarea,
+  button,
+  table,
+  th,
+  td {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-block-size: 100dvh;
+    overflow-wrap: break-word;
+    accent-color: var(--brand-primary);
+  }
+
+  h1, h2, h3, h4 {
+    margin: 0;
+    font-weight: 700;
+    line-height: var(--leading-tight);
+    color: var(--text-primary);
+    letter-spacing: -0.015em;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+
+  h1 { font-size: var(--text-2xl); }
+  h2 { font-size: var(--text-xl); }
+  h3 { font-size: var(--text-lg); }
+  h4 { font-size: var(--text-base); }
+
+  p, li {
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  ul, ol {
+    margin: 0;
+    padding: 0;
+  }
+
+  a {
+    color: var(--brand-primary);
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 2px;
+    overflow-wrap: anywhere;
+  }
+
+  a:hover {
+    color: var(--brand-primary-hover);
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background-color: var(--surface-subtle);
+    padding: 0.1em 0.35em;
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
+  }
+
+  img, svg {
+    display: block;
+    max-inline-size: 100%;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  button,
+  select,
+  textarea,
+  input:not([type="checkbox"], [type="radio"]),
+  [role="button"],
+  nav a,
+  label:has(input[type="checkbox"], input[type="radio"]) {
+    min-block-size: var(--target-size);
+    min-inline-size: var(--target-size);
+  }
+
+  :where(a:any-link, button, input, select, textarea, summary, [tabindex="0"], [role="tab"]):focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  .skip-link {
+    position: fixed;
+    inset-block-start: var(--space-3);
+    inset-inline-start: var(--space-3);
+    z-index: 1000;
+    background-color: var(--stone-900);
+    color: var(--text-inverse);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: var(--shadow-md);
+  }
+
+  .visually-hidden:where(:not(:focus-within, :active)) {
+    position: absolute !important;
+    clip-path: inset(50%) !important;
+    overflow: hidden !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}

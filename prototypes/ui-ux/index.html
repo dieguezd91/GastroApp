@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GastroApp — Prototipo UI/UX</title>
+  <meta name="description" content="Prototipo interactivo UI/UX de GastroApp para gestión operativa de pequeños negocios gastronómicos.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles/tokens.css">
+  <link rel="stylesheet" href="./styles/base.css">
+  <link rel="stylesheet" href="./styles/layout.css">
+  <link rel="stylesheet" href="./styles/components.css">
+  <link rel="stylesheet" href="./styles/views.css">
+</head>
+<body>
+  <a href="#page-heading" class="skip-link visually-hidden">Saltar al contenido principal</a>
+
+  <!-- Demo-only control bar (strictly for prototype evaluation) -->
+  <div class="demo-bar" role="region" aria-label="Controles de demostración del prototipo">
+    <div class="demo-bar__group">
+      <span class="demo-bar__tag">Prototipo UI/UX</span>
+      <span class="demo-bar__label" id="demo-role-label">Rol demo:</span>
+      <div class="role-switch" role="group" aria-labelledby="demo-role-label">
+        <button type="button" class="role-switch__btn" data-demo-role="Admin" aria-pressed="true">Administrador</button>
+        <button type="button" class="role-switch__btn" data-demo-role="Employee" aria-pressed="false">Empleado</button>
+      </div>
+    </div>
+
+    <div class="demo-bar__group">
+      <label class="demo-bar__label" for="demo-scenario">Escenario:</label>
+      <select id="demo-scenario" class="demo-bar__select" aria-label="Seleccionar escenario de prueba">
+        <option value="normal">Operación normal (Caja abierta)</option>
+        <option value="closed-cash">Caja cerrada (bloqueo POS)</option>
+        <option value="critical-stock">Stock crítico / Agotado</option>
+        <option value="stale-arqueo">Arqueo desactualizado</option>
+        <option value="empty">Estado vacío</option>
+        <option value="loading">Simular carga</option>
+      </select>
+      <button type="button" class="demo-bar__btn" id="demo-login-btn">Ver Login</button>
+      <button type="button" class="demo-bar__btn" id="demo-reset-btn">Reiniciar demo</button>
+    </div>
+  </div>
+
+  <!-- Application Root -->
+  <div id="app-root"></div>
+
+  <!-- Native Modal <dialog> Host (MWG dialog pattern: no role="dialog" or aria-modal) -->
+  <dialog id="app-modal" class="modal"></dialog>
+
+  <!-- Native Mobile/Tablet Navigation Drawer <dialog> (MWG navigation-drawer pattern) -->
+  <dialog id="nav-drawer" class="drawer" aria-label="Menú de navegación">
+    <div class="drawer-scroller">
+      <nav class="drawer-sheet" aria-label="Navegación móvil">
+        <div class="drawer-sheet__head">
+          <div class="brand" style="border: 0; margin: 0; padding: 0;">
+            <span class="brand__mark" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
+            </span>
+            <span class="brand__text">
+              <span class="brand__name">GastroApp</span>
+              <span class="brand__venue" id="drawer-venue-name">Bistró Sur</span>
+            </span>
+          </div>
+          <button type="button" id="drawer-close" class="drawer-sheet__close" aria-label="Cerrar menú" autofocus>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div id="drawer-nav-body"></div>
+      </nav>
+    </div>
+  </dialog>
+
+  <!-- Accessible Notifications Region (MWG persistent-toast-notifications) -->
+  <div id="toast-region" class="toast-region" role="region" aria-label="Notificaciones"></div>
+  <div id="live-polite" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+  <div id="live-assertive" class="visually-hidden" aria-live="assertive" aria-atomic="true"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
