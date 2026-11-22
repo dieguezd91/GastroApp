@@ -7,9 +7,9 @@ The repository is currently focused on validating product flows and business rul
 ## Tech Stack
 
 - C#
-- ASP.NET Core 7.0
+- ASP.NET Core 10.0
 - Blazor Server
-- .NET 7.0 target framework
+- .NET 10.0 (LTS) target framework
 - JSON file persistence through `DataStorageService`
 - BCrypt.Net-Next 4.0.3 for password hashing
 
@@ -295,6 +295,6 @@ The current implementation has several known architectural limitations:
 - Product-to-recipe stock consumption is matched by product name to recipe name rather than by a stable relationship ID.
 - Deleting or editing an existing invoice does not automatically reconcile stock previously added by that invoice.
 - The application has no automated test project in the repository.
-- The project targets `net7.0`; framework upgrades should be handled as explicit work rather than incidental changes.
+- The project targets `net10.0` (LTS); framework upgrades should be handled as explicit work rather than incidental changes.
 
 These constraints should be treated as current implementation state, not as intended production architecture.

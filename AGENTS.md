@@ -16,7 +16,7 @@ If a client requires a tool-specific instruction file (for example `CLAUDE.md`),
 - Default branch: `main`
 - Application: web-based food business management system
 - Current framework: ASP.NET Core / Blazor Server
-- Target framework: `.NET 7.0`
+- Target framework: `.NET 10.0` (LTS)
 - Language: C#
 - Current persistence: local JSON through `DataStorageService`
 - Authentication dependency: `BCrypt.Net-Next 4.0.3`
@@ -250,7 +250,7 @@ When authentication state affects navigation or layout, trace the full event/sta
 Before adding a NuGet package:
 
 1. Confirm the feature cannot be implemented reasonably with the existing stack.
-2. Check compatibility with `net7.0`.
+2. Check compatibility with `net10.0`.
 3. Add the package only to `GastroApp.csproj`.
 4. Explain why the dependency is needed.
 5. Validate restore/build afterward.
