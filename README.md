@@ -284,6 +284,17 @@ To validate the project without starting the application:
 dotnet build
 ```
 
+### Run with Docker
+
+The repository includes a `Dockerfile` that publishes the app and serves it on port `8080`:
+
+```bash
+docker build -t gastroapp .
+docker run -p 8080:8080 gastroapp
+```
+
+Then open `http://localhost:8080`. The container starts from the `data.json` committed in the repository; changes made inside the container are lost when the container is recreated.
+
 ## Current Constraints
 
 The current implementation has several known architectural limitations:

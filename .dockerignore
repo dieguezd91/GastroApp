@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.git/
+.vs/
+.vscode/
+.atl/
+.codegraph/
+*.user
+*.suo
+Dockerfile
+.dockerignore
