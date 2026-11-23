@@ -2,6 +2,8 @@
 @page "/sales/history/{SaleId:int}"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Pos
+@using GastroApp.Shared.SalesHistory
 @inject SaleHistoryService HistoryService
 @inject SaleService SaleService
 @inject AuthService AuthService
@@ -9,440 +11,496 @@
 
 <PageTitle>Historial de ventas</PageTitle>
 
-<div class="page-container">
-    <h1>🧾 Historial de ventas</h1>
-    <p>Consulta de ventas registradas. Las ventas nunca se eliminan: desde su detalle pueden anularse (venta cobrada sin devoluciones) o devolverse total o parcialmente, siempre con motivo y confirmación.</p>
-
-    @if (SaleId.HasValue)
-    {
-        <div class="form-card history-detail" role="region" aria-label="Detalle de venta">
-            @if (detail == null)
-            {
-                <h3>Venta #@SaleId</h3>
-                <p role="alert">@(detailMessage ?? "No se pudo cargar la venta.")</p>
-            }
-            else
-            {
-                var entry = detail.Entry;
-                <h3>Venta #@entry.Id — @StatusLabel(entry.DisplayStatus)</h3>
-
-                <h4>Información general</h4>
-                <div class="cash-info">
-                    <div class="info-card">
-                        <h4>Fecha</h4>
-                        <p>@entry.Date.ToString("dd/MM/yyyy HH:mm")</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Operador</h4>
-                        <p>@OperatorLabel(entry)</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Caja</h4>
-                        <p>
-                            @if (entry.CashRegisterId.HasValue)
-                            {
-                                <a href="/cash/history/@entry.CashRegisterId">Caja #@entry.CashRegisterId</a>
-                            }
-                            else
-                            {
-                                @:Sin caja asociada
-                            }
-                        </p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Estado</h4>
-                        <p>@StatusLabel(entry.DisplayStatus)</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Total</h4>
-                        <p class="amount">@Money(detail.Total)</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Devuelto</h4>
-                        <p class="amount">@Money(entry.RefundedTotal)</p>
-                    </div>
-                </div>
-                @if (entry.AmountsUnavailable)
-                {
-                    <p role="alert">Algunos importes no están disponibles porque superan el límite de cálculo; no se muestran cifras aproximadas.</p>
-                }
-
-                <h4>Productos</h4>
-                @if (detail.Lines.Count == 0)
-                {
-                    <p>La venta no tiene productos registrados.</p>
-                }
-                else
-                {
-                    <div style="overflow-x: auto;">
-                        <table class="table">
-                            <thead>
-                                <tr><th>Producto</th><th>Precio</th><th>Cantidad</th><th>Observaciones</th><th>Descuento de línea</th><th>Subtotal</th></tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var line in detail.Lines)
-                                {
-                                    <tr>
-                                        <td>@line.ProductName</td>
-                                        <td>$@line.Price</td>
-                                        <td>@line.Quantity</td>
-                                        <td>@(string.IsNullOrWhiteSpace(line.Notes) ? "—" : line.Notes)</td>
-                                        <td>@DiscountLabel(line.DiscountType, line.DiscountValue, line.DiscountAmount)</td>
-                                        <td>@Money(line.Subtotal)</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
-                <p>Subtotal: @Money(detail.Subtotal)</p>
-                <p>Descuento de la venta: @DiscountLabel(detail.SaleDiscountType, detail.SaleDiscountValue, detail.DiscountAmount)</p>
-                <p><strong>Total: @Money(detail.Total)</strong></p>
-
-                <h4>Pagos</h4>
-                @if (detail.Payments.Count == 0)
-                {
-                    <p>La venta no tiene pagos registrados.</p>
-                }
-                else
-                {
-                    <div style="overflow-x: auto;">
-                        <table class="table">
-                            <thead><tr><th>Medio de pago</th><th>Importe aplicado</th><th>Recibido</th><th>Vuelto</th></tr></thead>
-                            <tbody>
-                                @foreach (var payment in detail.Payments)
-                                {
-                                    <tr>
-                                        <td>@PaymentLabel(payment.Method)</td>
-                                        <td>$@payment.Amount</td>
-                                        <td>@(payment.ReceivedAmount.HasValue ? $"${payment.ReceivedAmount.Value}" : "—")</td>
-                                        <td>@(payment.Change > 0m ? $"${payment.Change}" : "—")</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
-
-                <h4>Eventos</h4>
-                <ul>
-                    @foreach (var evt in detail.Events)
-                    {
-                        <li>
-                            <strong>@EventLabel(evt.Kind)</strong>
-                            — @(evt.At.HasValue ? evt.At.Value.ToString("dd/MM/yyyy HH:mm") : "Sin fecha registrada")
-                            — @(string.IsNullOrWhiteSpace(evt.Username) ? "Sin registro" : evt.Username)
-                            @if (evt.Kind == SaleHistoryEventKind.Refunded)
-                            {
-                                <span>— Devolución #@evt.RefundId por @Money(evt.Amount)</span>
-                            }
-                            @if (evt.Kind != SaleHistoryEventKind.Created)
-                            {
-                                <span>— Motivo: @(string.IsNullOrWhiteSpace(evt.Reason) ? "Sin motivo registrado" : evt.Reason)</span>
-                            }
-                        </li>
-                    }
-                </ul>
-
-                <h4>Devoluciones</h4>
-                @if (!string.IsNullOrEmpty(refundSuccess))
-                {
-                    <p role="status">@refundSuccess</p>
-                }
-                @if (refunds.Count == 0)
-                {
-                    <p>La venta no tiene devoluciones registradas.</p>
-                }
-                else
-                {
-                    <div style="overflow-x: auto;">
-                        <table class="table">
-                            <thead><tr><th>Fecha</th><th>Usuario</th><th>Motivo</th><th>Líneas</th><th>Medios e importes</th><th>Total</th></tr></thead>
-                            <tbody>
-                                @foreach (var refund in refunds)
-                                {
-                                    <tr @key="refund.Id">
-                                        <td>@refund.Date.ToString("dd/MM/yyyy HH:mm")</td>
-                                        <td>@(string.IsNullOrWhiteSpace(refund.Username) ? "Sin registro" : refund.Username)</td>
-                                        <td>@(string.IsNullOrWhiteSpace(refund.Reason) ? "Sin motivo registrado" : refund.Reason)</td>
-                                        <td>
-                                            @foreach (var line in refund.Lines)
-                                            {
-                                                <div>@line.Quantity × @RefundLineName(line.SaleItemIndex) — @DispositionLabel(line.Disposition) ($@line.Amount)</div>
-                                            }
-                                        </td>
-                                        <td>
-                                            @foreach (var payment in refund.Payments)
-                                            {
-                                                <div>@PaymentLabel(payment.PaymentMethod): $@payment.Amount</div>
-                                            }
-                                        </td>
-                                        <td>$@refund.Total</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
-                @if (refundability != null && refundability.CanRefund)
-                {
-                    <h5>Registrar devolución</h5>
-                    <p>Indique cuántas unidades se devuelven de cada línea y qué pasa con la mercadería. El importe se calcula con los descuentos prorrateados.</p>
-                    <div style="overflow-x: auto;">
-                        <table class="table">
-                            <thead><tr><th>Producto</th><th>Vendidas</th><th>Ya devueltas</th><th>Cantidad a devolver</th><th>Destino</th></tr></thead>
-                            <tbody>
-                                @foreach (var line in refundability.Lines)
-                                {
-                                    var index = line.SaleItemIndex;
-                                    <tr @key="index">
-                                        <td>@line.ProductName</td>
-                                        <td>@line.SoldQuantity</td>
-                                        <td>@line.RefundedQuantity</td>
-                                        <td>
-                                            @if (line.RemainingQuantity > 0)
-                                            {
-                                                <input type="number" min="0" max="@line.RemainingQuantity" class="form-control" aria-label="Cantidad a devolver de @line.ProductName"
-                                                       @bind="refundQuantities[index]" @bind:after="InvalidatePreview" />
-                                            }
-                                            else
-                                            {
-                                                @:Sin unidades pendientes
-                                            }
-                                        </td>
-                                        <td>
-                                            @if (line.RemainingQuantity > 0)
-                                            {
-                                                <select class="form-control" aria-label="Destino de @line.ProductName" @bind="refundDispositions[index]" @bind:after="InvalidatePreview">
-                                                    <option value="@RefundDisposition.Restock" disabled="@(!line.CanRestock)">@DispositionLabel(RefundDisposition.Restock)</option>
-                                                    <option value="@RefundDisposition.Waste">@DispositionLabel(RefundDisposition.Waste)</option>
-                                                </select>
-                                                @if (!line.CanRestock)
-                                                {
-                                                    <small>Sin registro de consumo: solo merma</small>
-                                                }
-                                            }
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="form-actions">
-                        <button class="btn btn-secondary" @onclick="CalculateRefund">Calcular importe</button>
-                    </div>
-                    @if (refundPreviewTotal.HasValue)
-                    {
-                        <p role="status"><strong>Importe a devolver: $@refundPreviewTotal.Value</strong></p>
-                        @if (refundPreviewLines != null)
-                        {
-                            <ul>
-                                @foreach (var line in refundPreviewLines)
-                                {
-                                    <li>@line.Quantity × @RefundLineName(line.SaleItemIndex): $@line.Amount</li>
-                                }
-                            </ul>
-                        }
-                    }
-
-                    <h5>Medios e importes reintegrados</h5>
-                    <p>El efectivo se reintegra como egreso de la caja abierta actual. La suma debe ser igual al importe a devolver.</p>
-                    <div class="form-group">
-                        @foreach (var method in refundability.Methods.Where(m => m.RemainingAmount > 0m))
-                        {
-                            var methodKey = method.PaymentMethod;
-                            <div>
-                                <label for="refund-amount-@((int)methodKey)">@PaymentLabel(methodKey) — cobrado $@method.PaidAmount, devuelto $@method.RefundedAmount, disponible $@method.RemainingAmount</label>
-                                <input id="refund-amount-@((int)methodKey)" type="number" min="0" step="0.01" class="form-control" @bind="refundAmounts[methodKey]" />
-                            </div>
-                        }
-                    </div>
-                    <p>Asignado: $@RefundAssigned()@(refundPreviewTotal.HasValue ? $" de ${refundPreviewTotal.Value}" : "")</p>
-                    <div class="form-group">
-                        <label for="refund-reason">Motivo de la devolución (obligatorio)</label>
-                        <textarea id="refund-reason" class="form-control" @bind="refundReason" @bind:event="oninput"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="refund-confirm">
-                            <input id="refund-confirm" type="checkbox" @bind="refundConfirmed" />
-                            Confirmo que quiero registrar esta devolución
-                        </label>
-                    </div>
-                    <div class="form-actions">
-                        <button class="btn btn-danger" @onclick="ConfirmRefund">Confirmar devolución</button>
-                    </div>
-                }
-                else if (refundability != null)
-                {
-                    <p>@(entry.DisplayStatus == SaleDisplayStatus.Cancelled ? "La venta anulada no admite devoluciones."
-                        : refundability.Lines.Any(l => l.RemainingQuantity > 0) && !refundability.HasRefundableMoney ? "La venta no tiene pagos registrados; no puede devolverse."
-                        : "No quedan unidades pendientes de devolución.")</p>
-                }
-                @if (!string.IsNullOrEmpty(refundError))
-                {
-                    <p role="alert">@refundError</p>
-                }
-
-                <h4>Anulación</h4>
-                @if (!string.IsNullOrEmpty(cancelSuccess))
-                {
-                    <p role="status">@cancelSuccess</p>
-                }
-                @if (entry.DisplayStatus == SaleDisplayStatus.Collected)
-                {
-                    @if (!cancelOpen)
-                    {
-                        <button class="btn btn-danger" @onclick="StartCancel">Anular venta</button>
-                    }
-                    else
-                    {
-                        <div class="form-group">
-                            <label for="cancel-reason">Motivo de la anulación (obligatorio)</label>
-                            <textarea id="cancel-reason" class="form-control" @bind="cancelReason" @bind:event="oninput"></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="cancel-confirm">
-                                <input id="cancel-confirm" type="checkbox" @bind="cancelConfirmed" />
-                                Confirmo que quiero anular esta venta
-                            </label>
-                        </div>
-                        <div class="form-actions">
-                            <button class="btn btn-danger" @onclick="ConfirmCancel">Confirmar anulación</button>
-                            <button class="btn btn-secondary" @onclick="AbortCancel">No anular</button>
-                        </div>
-                    }
-                }
-                else if (entry.DisplayStatus == SaleDisplayStatus.Cancelled)
-                {
-                    <p>La venta ya no está cobrada, por lo que no puede anularse de nuevo.</p>
-                }
-                else
-                {
-                    <p>La venta tiene devoluciones registradas y no puede anularse: anular y devolver dinero son operaciones distintas, y el dinero ya devuelto no se revierte.</p>
-                }
-                @if (!string.IsNullOrEmpty(cancelError))
-                {
-                    <p role="alert">@cancelError</p>
-                }
-            }
-            <div class="form-actions">
-                <button class="btn btn-secondary" @onclick="CloseDetail">Volver al listado</button>
-            </div>
+@if (ShowRefundWorkspace)
+{
+    var workspaceEntry = detail!.Entry;
+    <div class="page-header">
+        <div>
+            <h1 @ref="headingRef" tabindex="-1">Registrar devolución · Venta #@workspaceEntry.Id</h1>
+            <p class="page-header__subtitle">@PosFormat.DateTimeText(workspaceEntry.Date) · Operador: @OperatorLabel(workspaceEntry). Indique cuántas unidades se devuelven de cada línea y qué pasa con la mercadería. El importe se calcula con los descuentos prorrateados.</p>
         </div>
-    }
-
-    <div class="form-card">
-        <h3>Ventas registradas</h3>
-        <div class="history-filters">
-            <div class="form-group">
-                <label for="history-from">Desde</label>
-                <input id="history-from" type="date" class="form-control" @bind="filterFrom" />
-            </div>
-            <div class="form-group">
-                <label for="history-to">Hasta</label>
-                <input id="history-to" type="date" class="form-control" @bind="filterTo" />
-            </div>
-            <div class="form-group">
-                <label for="history-number">N.º de venta</label>
-                <input id="history-number" type="number" min="1" class="form-control" @bind="filterSaleNumber" />
-            </div>
-            <div class="form-group">
-                <label for="history-operator">Operador</label>
-                <select id="history-operator" class="form-control" @bind="filterOperator">
-                    <option value="">Todos</option>
-                    <option value="@NoOperatorOption">Sin registro</option>
-                    @foreach (var op in operators)
-                    {
-                        <option value="@op.UserId">@op.Username</option>
-                    }
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="history-payment">Medio de pago</label>
-                <select id="history-payment" class="form-control" @bind="filterPayment">
-                    <option value="">Todos</option>
-                    @foreach (var method in Enum.GetValues<PaymentMethod>())
-                    {
-                        <option value="@method">@PaymentLabel(method)</option>
-                    }
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="history-register">Caja (ID)</label>
-                <input id="history-register" type="number" min="1" class="form-control" @bind="filterRegister" />
-            </div>
-            <div class="form-group">
-                <label for="history-status">Estado</label>
-                <select id="history-status" class="form-control" @bind="filterStatus">
-                    <option value="@SaleHistoryStatusFilter.All">Todas</option>
-                    <option value="@SaleHistoryStatusFilter.Completed">Cobradas</option>
-                    <option value="@SaleHistoryStatusFilter.Cancelled">Anuladas</option>
-                    <option value="@SaleHistoryStatusFilter.PartiallyRefunded">Parcialmente devueltas</option>
-                    <option value="@SaleHistoryStatusFilter.Refunded">Devueltas</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="history-text">Producto</label>
-                <input id="history-text" type="text" class="form-control" placeholder="Nombre del producto" @bind="filterText" />
-            </div>
+        <div class="page-header__actions">
+            <button type="button" class="btn" @onclick="CloseRefundWorkspace">← Volver</button>
         </div>
-        <div class="form-actions">
-            <button class="btn btn-primary" @onclick="ApplyFilters">Aplicar filtros</button>
-            <button class="btn btn-secondary" @onclick="ClearFilters">Limpiar</button>
-        </div>
+    </div>
 
-        @if (!string.IsNullOrEmpty(historyError))
+    <section class="workspace-panel stack" aria-label="Formulario de devolución">
+        @if (!string.IsNullOrEmpty(refundError))
         {
-            <p role="alert">@historyError</p>
+            <Banner Variant="danger">@refundError</Banner>
         }
-        else if (historyPage == null)
-        {
-            <p>Cargando historial…</p>
-        }
-        else if (historyPage.TotalCount == 0)
-        {
-            <p>No hay ventas que coincidan con los filtros.</p>
-        }
-        else
-        {
-            <div style="overflow-x: auto;">
-                <table class="table">
+
+        <div class="stack stack--sm">
+            <div class="row-between">
+                <h2 class="card__title">1. Ítems a devolver</h2>
+                <button type="button" class="btn btn--sm" @onclick="CalculateRefund">
+                    <Icon Name="refresh" Size="14" />
+                    <span>Calcular importe</span>
+                </button>
+            </div>
+            <div class="table-wrapper" tabindex="0" role="region" aria-label="Ítems disponibles para devolver">
+                <table class="data-table data-table--stack">
                     <thead>
-                        <tr><th>N.º</th><th>Fecha</th><th>Operador</th><th>Caja</th><th>Productos</th><th>Medios de pago</th><th>Estado</th><th>Total</th><th>Devuelto</th><th></th></tr>
+                        <tr>
+                            <th scope="col">Producto</th>
+                            <th scope="col" class="col-num">Pendientes</th>
+                            <th scope="col">Cantidad a devolver</th>
+                            <th scope="col">Destino de stock</th>
+                        </tr>
                     </thead>
                     <tbody>
-                        @foreach (var entry in historyPage.Entries)
+                        @foreach (var line in refundability!.Lines)
                         {
-                            <tr @key="entry.Id" class="@(entry.Id == SaleId ? "history-selected" : null)">
-                                <td>@entry.Id</td>
-                                <td>@entry.Date.ToString("dd/MM/yyyy HH:mm")</td>
-                                <td>@OperatorLabel(entry)</td>
-                                <td>@(entry.CashRegisterId.HasValue ? $"#{entry.CashRegisterId}" : "—")</td>
-                                <td>@(entry.ProductNames.Count == 0 ? "—" : string.Join(", ", entry.ProductNames))</td>
-                                <td>@(entry.PaymentMethods.Count == 0 ? "—" : string.Join(", ", entry.PaymentMethods.Select(PaymentLabel)))</td>
-                                <td>@StatusLabel(entry.DisplayStatus)</td>
-                                <td>@Money(entry.Total)</td>
-                                <td>@(entry.RefundedTotal == 0m ? "—" : Money(entry.RefundedTotal))</td>
-                                <td><button class="btn btn-secondary btn-small" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
+                            var index = line.SaleItemIndex;
+                            <tr @key="index">
+                                <th scope="row">
+                                    <div>@line.ProductName</div>
+                                    <div class="text-xs text-muted fw-600">Vendidas @line.SoldQuantity@(line.RefundedQuantity > 0 ? $" · Ya devueltas {line.RefundedQuantity}" : "")</div>
+                                </th>
+                                <td data-label="Pendientes" class="col-num fw-700">@line.RemainingQuantity</td>
+                                <td data-label="Devolver">
+                                    @if (line.RemainingQuantity > 0)
+                                    {
+                                        <input type="number" min="0" max="@line.RemainingQuantity" step="1" class="input input--compact tnum sh-qty" aria-label="Cantidad a devolver de @line.ProductName"
+                                               @bind="refundQuantities[index]" @bind:after="InvalidatePreview" />
+                                    }
+                                    else
+                                    {
+                                        <span class="text-xs text-muted fw-600">Sin unidades pendientes</span>
+                                    }
+                                </td>
+                                <td data-label="Destino">
+                                    @if (line.RemainingQuantity > 0)
+                                    {
+                                        <select class="select select--compact" aria-label="Destino de @line.ProductName" @bind="refundDispositions[index]" @bind:after="InvalidatePreview">
+                                            <option value="@RefundDisposition.Restock" disabled="@(!line.CanRestock)">@DispositionLabel(RefundDisposition.Restock)</option>
+                                            <option value="@RefundDisposition.Waste">@DispositionLabel(RefundDisposition.Waste)</option>
+                                        </select>
+                                        @if (!line.CanRestock)
+                                        {
+                                            <div class="text-xs text-muted fw-600">Sin registro de consumo: solo merma</div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-xs text-muted">—</span>
+                                    }
+                                </td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
-            <div class="form-actions history-pagination">
-                <button class="btn btn-secondary" @onclick="PreviousPage" disabled="@(historyPage.Page <= 1)">Anterior</button>
-                <span>Página @historyPage.Page de @historyPage.TotalPages · @historyPage.TotalCount ventas</span>
-                <button class="btn btn-secondary" @onclick="NextPage" disabled="@(historyPage.Page >= historyPage.TotalPages)">Siguiente</button>
+            @if (refundPreviewTotal.HasValue)
+            {
+                <div class="card card--compact card--subtle stack stack--sm" role="status">
+                    <div class="row-between">
+                        <span class="text-sm fw-700">Importe a devolver</span>
+                        <span class="fw-700 tnum sh-total">@PosFormat.Money(refundPreviewTotal.Value)</span>
+                    </div>
+                    @if (refundPreviewLines != null)
+                    {
+                        <ul class="sh-preview-lines">
+                            @foreach (var previewLine in refundPreviewLines)
+                            {
+                                <li class="text-sm"><span>@previewLine.Quantity × @RefundLineName(previewLine.SaleItemIndex) · @DispositionLabel(previewLine.Disposition)</span> <strong class="tnum">@PosFormat.Money(previewLine.Amount)</strong></li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="text-xs text-muted">Calcule el importe después de elegir cantidades y destino: cualquier cambio lo invalida.</p>
+            }
+        </div>
+
+        <div class="stack stack--sm">
+            <div class="row-between">
+                <h2 class="card__title">2. Medios e importes reintegrados</h2>
+                <button type="button" class="btn btn--sm" @onclick="SuggestRefundSplit" disabled="@(!refundPreviewTotal.HasValue)">Sugerir reparto</button>
+            </div>
+            <p class="text-sm text-secondary">El efectivo se reintegra como egreso de la caja abierta actual. La suma debe ser igual al importe a devolver.</p>
+            <div class="table-wrapper" tabindex="0" role="region" aria-label="Medios de pago disponibles para reintegro">
+                <table class="data-table data-table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Medio</th>
+                            <th scope="col" class="col-num">Cobrado</th>
+                            <th scope="col" class="col-num">Devuelto</th>
+                            <th scope="col" class="col-num">Disponible</th>
+                            <th scope="col">Importe a devolver ($)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var method in refundability!.Methods.Where(m => m.RemainingAmount > 0m))
+                        {
+                            var methodKey = method.PaymentMethod;
+                            <tr @key="methodKey">
+                                <th scope="row"><label for="refund-amount-@((int)methodKey)">@PosFormat.PaymentLabel(methodKey)</label></th>
+                                <td data-label="Cobrado" class="col-num">@PosFormat.Money(method.PaidAmount)</td>
+                                <td data-label="Devuelto" class="col-num">@PosFormat.Money(method.RefundedAmount)</td>
+                                <td data-label="Disponible" class="col-num fw-700">@PosFormat.Money(method.RemainingAmount)</td>
+                                <td data-label="Reintegro">
+                                    <input id="refund-amount-@((int)methodKey)" type="number" min="0" step="0.01" class="input input--compact tnum sh-amount" @bind="refundAmounts[methodKey]" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="card card--compact card--subtle sh-assigned">
+                <span class="text-sm fw-700">Asignado</span>
+                <span class="fw-700 tnum sh-total" role="status">@PosFormat.Money(RefundAssigned())@(refundPreviewTotal.HasValue ? $" de {PosFormat.Money(refundPreviewTotal.Value)}" : "")</span>
+            </div>
+        </div>
+
+        <div class="field">
+            <label class="field__label" for="refund-reason">Motivo de la devolución (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+            <textarea id="refund-reason" class="textarea" rows="2" placeholder="Ej.: Producto con temperatura incorrecta" @bind="refundReason" @bind:event="oninput"></textarea>
+        </div>
+        <label class="check-field" for="refund-confirm">
+            <input id="refund-confirm" type="checkbox" @bind="refundConfirmed" />
+            <span>Confirmo que quiero registrar esta devolución (el efectivo devuelto impacta automáticamente en la caja abierta).</span>
+        </label>
+
+        <div class="workspace-panel__footer">
+            <button type="button" class="btn" @onclick="CloseRefundWorkspace">Cancelar</button>
+            <button type="button" class="btn btn--danger btn--lg" @onclick="ConfirmRefund">Confirmar devolución</button>
+        </div>
+    </section>
+}
+else
+{
+    <div class="page-header">
+        <div>
+            <h1 @ref="headingRef" tabindex="-1">Historial de ventas</h1>
+            <p class="page-header__subtitle">Consulta de ventas registradas. Las ventas nunca se eliminan: desde su detalle pueden anularse (venta cobrada sin devoluciones) o devolverse total o parcialmente, siempre con motivo y confirmación.</p>
+        </div>
+    </div>
+
+    <div class="stack">
+        <search class="card card--compact sh-filters" aria-label="Filtros del historial de ventas">
+            <div class="form-grid">
+                <div class="field">
+                    <label class="field__label" for="history-from">Desde</label>
+                    <input id="history-from" type="date" class="input input--compact" @bind="filterFrom" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-to">Hasta</label>
+                    <input id="history-to" type="date" class="input input--compact" @bind="filterTo" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-number">N.º de venta</label>
+                    <input id="history-number" type="number" min="1" class="input input--compact tnum" @bind="filterSaleNumber" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-operator">Operador</label>
+                    <select id="history-operator" class="select select--compact" @bind="filterOperator">
+                        <option value="">Todos</option>
+                        <option value="@NoOperatorOption">Sin registro</option>
+                        @foreach (var op in operators)
+                        {
+                            <option value="@op.UserId">@op.Username</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-payment">Medio de pago</label>
+                    <select id="history-payment" class="select select--compact" @bind="filterPayment">
+                        <option value="">Todos</option>
+                        @foreach (var method in Enum.GetValues<PaymentMethod>())
+                        {
+                            <option value="@method">@PosFormat.PaymentLabel(method)</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-register">Caja (ID)</label>
+                    <input id="history-register" type="number" min="1" class="input input--compact tnum" @bind="filterRegister" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-status">Estado</label>
+                    <select id="history-status" class="select select--compact" @bind="filterStatus">
+                        <option value="@SaleHistoryStatusFilter.All">Todas</option>
+                        <option value="@SaleHistoryStatusFilter.Completed">Cobradas</option>
+                        <option value="@SaleHistoryStatusFilter.Cancelled">Anuladas</option>
+                        <option value="@SaleHistoryStatusFilter.PartiallyRefunded">Parcialmente devueltas</option>
+                        <option value="@SaleHistoryStatusFilter.Refunded">Devueltas</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="history-text">Producto</label>
+                    <input id="history-text" type="text" class="input input--compact" placeholder="Nombre del producto" @bind="filterText" />
+                </div>
+            </div>
+            <div class="flex-wrap-gap">
+                <button type="button" class="btn btn--primary btn--sm" @onclick="ApplyFilters">Aplicar filtros</button>
+                <button type="button" class="btn btn--sm" @onclick="ClearFilters">Limpiar filtros</button>
+                @if (historyPage != null)
+                {
+                    <span class="text-xs text-muted" role="status">@historyPage.TotalCount venta(s) encontradas</span>
+                }
+            </div>
+        </search>
+
+        @if (!string.IsNullOrEmpty(historyError))
+        {
+            <Banner Variant="danger">@historyError</Banner>
+        }
+        else if (historyPage == null)
+        {
+            <p class="text-sm text-secondary" role="status">Cargando historial…</p>
+        }
+        else if (historyPage.TotalCount == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-state__icon"><Icon Name="receipt" Size="24" /></div>
+                <div class="stack stack--sm">
+                    <h2 class="card__title">No hay ventas que coincidan</h2>
+                    <p class="text-sm text-secondary">No hay ventas que coincidan con los filtros. Pruebe limpiándolos para consultar otras ventas.</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrapper" tabindex="0" role="region" aria-label="Listado de ventas">
+                <table class="data-table data-table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Venta</th>
+                            <th scope="col">Fecha</th>
+                            <th scope="col">Operador / Caja</th>
+                            <th scope="col">Productos</th>
+                            <th scope="col">Medios de pago</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col" class="col-num">Total</th>
+                            <th scope="col" class="col-actions">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in historyPage.Entries)
+                        {
+                            <tr @key="entry.Id" class="@(entry.Id == SaleId ? "sh-row--selected" : null)" aria-current="@(entry.Id == SaleId ? "true" : null)">
+                                <th scope="row">#@entry.Id</th>
+                                <td data-label="Fecha">@PosFormat.DateTimeText(entry.Date)</td>
+                                <td data-label="Operador">@OperatorLabel(entry) <span class="text-xs text-muted">· @(entry.CashRegisterId.HasValue ? $"Caja #{entry.CashRegisterId}" : "Sin caja")</span></td>
+                                <td data-label="Productos" class="sh-products">@(entry.ProductNames.Count == 0 ? "—" : string.Join(", ", entry.ProductNames))</td>
+                                <td data-label="Medios">@(entry.PaymentMethods.Count == 0 ? "—" : string.Join(" + ", entry.PaymentMethods.Select(PosFormat.PaymentShortLabel)))</td>
+                                <td data-label="Estado"><Badge Variant="@SaleHistoryFormat.StatusVariant(entry.DisplayStatus)" Label="@StatusLabel(entry.DisplayStatus)" /></td>
+                                <td data-label="Total" class="col-num fw-700">
+                                    <div>@Money(entry.Total)</div>
+                                    @if (!entry.RefundedTotal.HasValue)
+                                    {
+                                        <div class="text-xs text-muted">Devuelto: @Money(entry.RefundedTotal)</div>
+                                    }
+                                    else if (entry.RefundedTotal.Value > 0m)
+                                    {
+                                        <div class="text-xs text-danger">Devuelto −@Money(entry.RefundedTotal)</div>
+                                    }
+                                </td>
+                                <td class="col-actions">
+                                    <button type="button" class="btn btn--sm" aria-label="@($"Ver detalle de la venta {entry.Id}")" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="sh-pagination">
+                <button type="button" class="btn btn--sm" @onclick="PreviousPage" disabled="@(historyPage.Page <= 1)">Anterior</button>
+                <span class="text-sm text-secondary">Página @historyPage.Page de @historyPage.TotalPages · @historyPage.TotalCount ventas</span>
+                <button type="button" class="btn btn--sm" @onclick="NextPage" disabled="@(historyPage.Page >= historyPage.TotalPages)">Siguiente</button>
             </div>
         }
     </div>
-</div>
+}
+
+@* The detail keeps its own route (/sales/history/{id}); the dialog mirrors it after each render and yields to the refund workspace. *@
+<ModalDialog @ref="detailDialog" Size="lg" Title="@DetailTitle" Subtitle="@DetailSubtitle" LightDismiss="false" OnClosed="HandleDetailClosed">
+    <ChildContent>
+        @if (detail == null)
+        {
+            <Banner Variant="danger">@(detailMessage ?? "No se pudo cargar la venta.")</Banner>
+        }
+        else
+        {
+            var detailEntry = detail.Entry;
+            <div class="stack sh-detail">
+                @if (!string.IsNullOrEmpty(refundSuccess))
+                {
+                    <div role="status"><Banner Variant="ok">@refundSuccess</Banner></div>
+                }
+                @if (!string.IsNullOrEmpty(cancelSuccess))
+                {
+                    <div role="status"><Banner Variant="ok">@cancelSuccess</Banner></div>
+                }
+                @if (detailEntry.AmountsUnavailable)
+                {
+                    <Banner Variant="danger">Algunos importes no están disponibles porque superan el límite de cálculo; no se muestran cifras aproximadas.</Banner>
+                }
+
+                <div class="row-between">
+                    <Badge Variant="@SaleHistoryFormat.StatusVariant(detailEntry.DisplayStatus)" Label="@StatusLabel(detailEntry.DisplayStatus)" />
+                    <div class="flex-wrap-gap">
+                        @if (refundability != null && refundability.CanRefund)
+                        {
+                            <button type="button" class="btn btn--sm" @onclick="OpenRefundWorkspace">Registrar devolución</button>
+                        }
+                        @if (detailEntry.DisplayStatus == SaleDisplayStatus.Collected && !cancelOpen)
+                        {
+                            <button type="button" class="btn btn--danger-outline btn--sm" @onclick="StartCancel">Anular venta</button>
+                        }
+                    </div>
+                </div>
+
+                <dl class="sh-facts">
+                    <div><dt>Fecha</dt><dd>@PosFormat.DateTimeText(detailEntry.Date)</dd></div>
+                    <div><dt>Operador</dt><dd>@OperatorLabel(detailEntry)</dd></div>
+                    <div>
+                        <dt>Caja</dt>
+                        <dd>
+                            @if (detailEntry.CashRegisterId.HasValue)
+                            {
+                                <a href="/cash/history/@detailEntry.CashRegisterId">Caja #@detailEntry.CashRegisterId</a>
+                            }
+                            else
+                            {
+                                @:Sin caja asociada
+                            }
+                        </dd>
+                    </div>
+                    <div><dt>Total</dt><dd class="tnum">@Money(detail.Total)</dd></div>
+                    <div><dt>Devuelto</dt><dd class="tnum">@Money(detailEntry.RefundedTotal)</dd></div>
+                </dl>
+
+                @if (cancelOpen)
+                {
+                    <section class="card card--compact stack stack--sm sh-cancel" aria-labelledby="cancel-title">
+                        <h3 id="cancel-title" class="card__title">Anular venta #@detailEntry.Id</h3>
+                        <p class="text-sm text-secondary">Se anulará la venta y se repondrá el stock consumido registrado para sus recetas.</p>
+                        @if (!string.IsNullOrEmpty(cancelError))
+                        {
+                            <Banner Variant="danger">@cancelError</Banner>
+                        }
+                        <div class="field">
+                            <label class="field__label" for="cancel-reason">Motivo de la anulación (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+                            <textarea @ref="cancelReasonRef" id="cancel-reason" class="textarea" rows="2" @bind="cancelReason" @bind:event="oninput"></textarea>
+                        </div>
+                        <label class="check-field" for="cancel-confirm">
+                            <input id="cancel-confirm" type="checkbox" @bind="cancelConfirmed" />
+                            <span>Confirmo que quiero anular esta venta</span>
+                        </label>
+                        <div class="flex-wrap-gap">
+                            <button type="button" class="btn btn--danger btn--sm" @onclick="ConfirmCancel">Confirmar anulación</button>
+                            <button type="button" class="btn btn--sm" @onclick="AbortCancel">No anular</button>
+                        </div>
+                    </section>
+                }
+                else
+                {
+                    @if (detailEntry.DisplayStatus == SaleDisplayStatus.Cancelled)
+                    {
+                        <p class="text-sm text-secondary">La venta ya no está cobrada, por lo que no puede anularse de nuevo.</p>
+                    }
+                    else if (detailEntry.DisplayStatus != SaleDisplayStatus.Collected)
+                    {
+                        <p class="text-sm text-secondary">La venta tiene devoluciones registradas y no puede anularse: anular y devolver dinero son operaciones distintas, y el dinero ya devuelto no se revierte.</p>
+                    }
+                    @if (!string.IsNullOrEmpty(cancelError))
+                    {
+                        <Banner Variant="danger">@cancelError</Banner>
+                    }
+                }
+
+                @if (refundability != null && !refundability.CanRefund)
+                {
+                    <Banner Variant="info">@(detailEntry.DisplayStatus == SaleDisplayStatus.Cancelled ? "La venta anulada no admite devoluciones."
+                        : refundability.Lines.Any(l => l.RemainingQuantity > 0) && !refundability.HasRefundableMoney ? "La venta no tiene pagos registrados; no puede devolverse."
+                        : "No quedan unidades pendientes de devolución.")</Banner>
+                }
+
+                <div class="grid-2 sh-detail-grid">
+                    <div class="stack">
+                        <section class="stack stack--sm" aria-labelledby="sh-lines-title">
+                            <h3 id="sh-lines-title" class="card__title">Productos</h3>
+                            <SaleLinesTable Detail="detail" />
+                        </section>
+                        <section class="stack stack--sm" aria-labelledby="sh-pay-title">
+                            <h3 id="sh-pay-title" class="card__title">Pagos</h3>
+                            <SalePaymentsTable Payments="detail.Payments" />
+                        </section>
+                    </div>
+                    <div class="stack">
+                        <section class="card card--compact stack stack--sm" aria-labelledby="sh-events-title">
+                            <h3 id="sh-events-title" class="card__title">Eventos de la venta</h3>
+                            <SaleTimeline Events="detail.Events" />
+                        </section>
+                    </div>
+                </div>
+
+                <section class="stack stack--sm" aria-labelledby="sh-refunds-title">
+                    <h3 id="sh-refunds-title" class="card__title">Devoluciones</h3>
+                    @if (refunds.Count == 0)
+                    {
+                        <p class="text-sm text-secondary">La venta no tiene devoluciones registradas.</p>
+                    }
+                    else
+                    {
+                        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="sh-refunds-title">
+                            <table class="data-table data-table--stack">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Devolución</th>
+                                        <th scope="col">Motivo</th>
+                                        <th scope="col">Líneas</th>
+                                        <th scope="col">Medios e importes</th>
+                                        <th scope="col" class="col-num">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var refund in refunds)
+                                    {
+                                        <tr @key="refund.Id">
+                                            <th scope="row">
+                                                #@refund.Id
+                                                <div class="text-xs text-muted fw-600">@PosFormat.DateTimeText(refund.Date) · @(string.IsNullOrWhiteSpace(refund.Username) ? "Sin registro" : refund.Username)</div>
+                                            </th>
+                                            <td data-label="Motivo">@(string.IsNullOrWhiteSpace(refund.Reason) ? "Sin motivo registrado" : refund.Reason)</td>
+                                            <td data-label="Líneas">
+                                                @foreach (var refundLine in refund.Lines)
+                                                {
+                                                    <div>@refundLine.Quantity × @RefundLineName(refundLine.SaleItemIndex) — @DispositionLabel(refundLine.Disposition) (@PosFormat.Money(refundLine.Amount))</div>
+                                                }
+                                            </td>
+                                            <td data-label="Medios">
+                                                @foreach (var refundPayment in refund.Payments)
+                                                {
+                                                    <div>@PosFormat.PaymentLabel(refundPayment.PaymentMethod): @PosFormat.Money(refundPayment.Amount)</div>
+                                                }
+                                            </td>
+                                            <td data-label="Total" class="col-num fw-700">@PosFormat.Money(refund.Total)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
+            </div>
+        }
+    </ChildContent>
+    <Footer>
+        <button value="cancel" class="btn btn--primary">Volver al listado</button>
+    </Footer>
+</ModalDialog>
 
 @code {
     [Parameter] public int? SaleId { get; set; }
 
     private const int PageSize = 10;
     private const string NoOperatorOption = "none";
+    private const string ProgrammaticClose = "sync";
     private DateTime? filterFrom;
     private DateTime? filterTo;
     private int? filterSaleNumber;
@@ -476,6 +534,23 @@
     private bool refundConfirmed;
     private string? refundError;
     private string? refundSuccess;
+    // The refund form is a full-width workspace (UX_DECISIONS 7.5), not part of the detail dialog.
+    private bool refundOpen;
+
+    private ModalDialog? detailDialog;
+    private int? dialogShownFor; // Sale whose dialog was already requested, so a user close is never undone by a re-render.
+    private ElementReference headingRef;
+    private bool focusHeading;
+    private ElementReference cancelReasonRef;
+    private bool focusCancelReason;
+
+    private bool ShowRefundWorkspace => SaleId.HasValue && refundOpen && detail != null && refundability != null;
+
+    private bool DialogWanted => SaleId.HasValue && !ShowRefundWorkspace;
+
+    private string DetailTitle => SaleId.HasValue ? $"Venta #{SaleId}" : "Detalle de venta";
+
+    private string? DetailSubtitle => detail == null ? null : $"{PosFormat.DateTimeText(detail.Entry.Date)} · Operador: {OperatorLabel(detail.Entry)}";
 
     // Runs on first load and on every route change, so each selection rechecks live permissions.
     protected override void OnParametersSet()
@@ -488,9 +563,52 @@
             cancelSuccess = null;
             ResetRefundForm();
             refundSuccess = null;
+            refundOpen = false;
         }
         if (historyPage == null && historyError == null) LoadHistory();
         LoadDetail();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (detailDialog is not null)
+            {
+                if (!DialogWanted)
+                {
+                    dialogShownFor = null;
+                    if (detailDialog.IsOpen) await detailDialog.CloseAsync(ProgrammaticClose);
+                }
+                else if (dialogShownFor != SaleId)
+                {
+                    dialogShownFor = SaleId;
+                    await detailDialog.ShowAsync();
+                }
+            }
+            // After the dialog closed (it would otherwise restore focus to the removed opener button).
+            if (focusHeading)
+            {
+                focusHeading = false;
+                await headingRef.FocusAsync();
+            }
+            if (focusCancelReason)
+            {
+                focusCancelReason = false;
+                await cancelReasonRef.FocusAsync();
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException)
+        {
+            // Circuit already gone or heading not rendered; nothing to focus, show or hide.
+        }
+    }
+
+    // Esc, the footer button or the header close button: back to the list route.
+    private Task HandleDetailClosed(string returnValue)
+    {
+        if (returnValue != ProgrammaticClose && SaleId.HasValue) CloseDetail();
+        return Task.CompletedTask;
     }
 
     private bool EnsureAdmin()
@@ -543,6 +661,11 @@
     {
         refundability = SaleService.GetRefundability(saleId);
         refunds = SaleService.GetRefunds(saleId);
+        SeedRefundForm();
+    }
+
+    private void SeedRefundForm()
+    {
         foreach (var line in refundability?.Lines ?? Array.Empty<SaleRefundLineStatus>())
         {
             refundQuantities.TryAdd(line.SaleItemIndex, 0);
@@ -617,6 +740,7 @@
         ResetCancelForm();
         cancelSuccess = null;
         cancelOpen = true;
+        focusCancelReason = true;
     }
 
     private void AbortCancel()
@@ -685,6 +809,26 @@
         refundError = null;
     }
 
+    // Opens the full-width refund workspace (the detail dialog yields to it).
+    private void OpenRefundWorkspace()
+    {
+        if (!EnsureAdmin()) return;
+        if (refundability?.CanRefund != true) return;
+        refundError = null;
+        refundSuccess = null;
+        refundOpen = true;
+        focusHeading = true;
+    }
+
+    // "← Volver": discards the draft, as the prototype does, and returns to the sale detail.
+    private void CloseRefundWorkspace()
+    {
+        if (!EnsureAdmin()) return;
+        ResetRefundForm();
+        SeedRefundForm();
+        refundOpen = false;
+    }
+
     // The amount shown is only valid for the quantities it was computed from.
     private void InvalidatePreview()
     {
@@ -693,6 +837,21 @@
     }
 
     private decimal RefundAssigned() => refundAmounts.Values.Sum(a => a ?? 0m);
+
+    // Convenience only: fills the per-method amounts from the computed total, capped by what each method still allows.
+    // The service keeps validating that the amounts add up exactly.
+    private void SuggestRefundSplit()
+    {
+        if (!EnsureAdmin()) return;
+        if (!refundPreviewTotal.HasValue || refundability == null) return;
+        var remaining = refundPreviewTotal.Value;
+        foreach (var method in refundability.Methods)
+        {
+            var allocated = Math.Min(method.RemainingAmount, remaining);
+            refundAmounts[method.PaymentMethod] = allocated > 0m ? allocated : null;
+            remaining -= allocated;
+        }
+    }
 
     private List<SaleRefundLine> BuildRefundLines() => refundQuantities
         .Where(q => q.Value != 0)
@@ -766,6 +925,7 @@
         }
         ResetRefundForm();
         refundSuccess = $"Devolución #{refund.Id} registrada por ${refund.Total}.";
+        refundOpen = false;
         LoadDetail();
         LoadHistory();
     }
@@ -783,36 +943,11 @@
         _ => "Destino desconocido"
     };
 
-    private static string Money(decimal? amount) => amount.HasValue ? $"${amount.Value}" : "No disponible";
+    private static string Money(decimal? amount) => SaleHistoryFormat.Money(amount);
 
     private static string StatusLabel(SaleDisplayStatus status) => SaleService.GetDisplayStatusLabel(status);
 
     private static string OperatorLabel(SaleHistoryEntry entry) =>
         !string.IsNullOrWhiteSpace(entry.OperatorUsername) ? entry.OperatorUsername
         : entry.OperatorUserId.HasValue ? $"Usuario ID {entry.OperatorUserId}" : "Sin registro";
-
-    private static string EventLabel(SaleHistoryEventKind kind) => kind switch
-    {
-        SaleHistoryEventKind.Created => "Venta registrada",
-        SaleHistoryEventKind.Cancelled => "Venta anulada",
-        SaleHistoryEventKind.Refunded => "Devolución",
-        _ => "Evento"
-    };
-
-    private static string DiscountLabel(DiscountType type, decimal value, decimal? amount) => type switch
-    {
-        DiscountType.Percentage => $"{value}% ({Money(amount)})",
-        DiscountType.Fixed => $"${value} fijo ({Money(amount)})",
-        _ => "Sin descuento"
-    };
-
-    private static string PaymentLabel(PaymentMethod method) => method switch
-    {
-        PaymentMethod.Cash => "Efectivo",
-        PaymentMethod.DebitCard => "Tarjeta de débito",
-        PaymentMethod.CreditCard => "Tarjeta de crédito",
-        PaymentMethod.Transfer => "Transferencia",
-        PaymentMethod.MercadoPago => "Mercado Pago",
-        _ => "Otro"
-    };
 }

@@ -1,0 +1,38 @@
+@* Payments registered on one sale (read-only), for the sales-history detail. *@
+@using GastroApp.Models
+@using GastroApp.Shared.Pos
+
+@if (Payments.Count == 0)
+{
+    <p class="text-sm text-secondary">La venta no tiene pagos registrados.</p>
+}
+else
+{
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="Pagos de la venta">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th scope="col">Medio de pago</th>
+                    <th scope="col" class="col-num">Aplicado</th>
+                    <th scope="col" class="col-num">Recibido</th>
+                    <th scope="col" class="col-num">Vuelto</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var payment in Payments)
+                {
+                    <tr>
+                        <th scope="row">@PosFormat.PaymentLabel(payment.Method)</th>
+                        <td class="col-num fw-700">@PosFormat.Money(payment.Amount)</td>
+                        <td class="col-num">@(payment.ReceivedAmount.HasValue ? PosFormat.Money(payment.ReceivedAmount.Value) : "—")</td>
+                        <td class="col-num">@(payment.Change > 0m ? PosFormat.Money(payment.Change) : "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<SaleHistoryPayment> Payments { get; set; } = Array.Empty<SaleHistoryPayment>();
+}

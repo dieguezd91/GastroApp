@@ -1,3 +1,158 @@
-/* sales-history view styles, ported from prototypes/ui-ux/styles/views.css. */
+/* sales-history view styles (Historial de ventas, refund workspace, Resumen), ported from prototypes/ui-ux/styles/views.css. */
 @layer views {
+  /* Timeline (sale detail events) */
+  .timeline {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    border-inline-start: 2px solid var(--border-subtle);
+    padding-inline-start: var(--space-4);
+    margin-inline-start: var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .timeline__item {
+    position: relative;
+    overflow-wrap: anywhere;
+  }
+
+  .timeline__item::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: calc(-1 * var(--space-4) - 6px);
+    inset-block-start: 0.35rem;
+    inline-size: 10px;
+    block-size: 10px;
+    border-radius: var(--radius-full);
+    background-color: var(--brand-primary);
+    border: 2px solid var(--surface-card);
+  }
+
+  /* Filters card: a legacy Bootstrap .card leaks flex-direction into flex children, so lay it out explicitly. */
+  .card.sh-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .sh-row--selected th,
+  .sh-row--selected td {
+    background-color: var(--stone-50);
+  }
+
+  .sh-products {
+    max-inline-size: 18rem;
+    overflow-wrap: anywhere;
+  }
+
+  .sh-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  /* Sale detail dialog */
+  .sh-detail {
+    min-inline-size: 0;
+  }
+
+  .sh-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+    gap: var(--space-3);
+    margin: 0;
+  }
+
+  .sh-facts > div {
+    min-inline-size: 0;
+  }
+
+  .sh-facts dt {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+
+  .sh-facts dd {
+    margin: 0;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .sh-totals {
+    padding-block-start: var(--space-3);
+  }
+
+  .sh-detail-grid > * {
+    min-inline-size: 0;
+  }
+
+  @media (min-width: 64rem) {
+    .sh-detail-grid {
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    }
+  }
+
+  .card.sh-cancel {
+    border-color: var(--crimson-700);
+  }
+
+  /* Refund workspace */
+  .sh-qty {
+    max-inline-size: 6rem;
+  }
+
+  .sh-amount {
+    max-inline-size: 9rem;
+  }
+
+  .sh-total {
+    font-size: var(--text-lg);
+  }
+
+  /* Legacy Bootstrap .card leaks flex-direction: column; the assigned-amount strip is a row. */
+  .card.sh-assigned {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .sh-preview-lines {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .sh-preview-lines li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  /* Resumen del día */
+  .sum-cancel-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-3);
+  }
+
+  .sum-cancel-row .field {
+    flex: 1 1 18rem;
+    min-inline-size: 0;
+  }
+
+  .sum-row--net th,
+  .sum-row--net td {
+    background-color: var(--stone-50);
+  }
 }

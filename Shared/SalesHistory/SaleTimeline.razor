@@ -1,0 +1,33 @@
+@* Chronological events of one sale (created, refunds, cancellation), ported from the prototype's detail timeline.
+   Dates, users, reasons and amounts are shown exactly as recorded; missing data is said so, never invented. *@
+@using GastroApp.Models
+@using GastroApp.Shared.Pos
+
+<ol class="timeline" aria-label="Eventos de la venta">
+    @foreach (var evt in Events)
+    {
+        <li class="timeline__item">
+            <strong class="@(evt.Kind == SaleHistoryEventKind.Cancelled ? "text-danger" : null)">@EventLabel(evt.Kind)@(evt.Kind == SaleHistoryEventKind.Refunded ? $" #{evt.RefundId} ({SaleHistoryFormat.Money(evt.Amount)})" : "")</strong>
+            · @(evt.At.HasValue ? PosFormat.DateTimeText(evt.At.Value) : "Sin fecha registrada")
+            <div class="text-muted">
+                Por @(string.IsNullOrWhiteSpace(evt.Username) ? "Sin registro" : evt.Username)
+                @if (evt.Kind != SaleHistoryEventKind.Created)
+                {
+                    <span> · Motivo: @(string.IsNullOrWhiteSpace(evt.Reason) ? "Sin motivo registrado" : evt.Reason)</span>
+                }
+            </div>
+        </li>
+    }
+</ol>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<SaleHistoryEvent> Events { get; set; } = Array.Empty<SaleHistoryEvent>();
+
+    private static string EventLabel(SaleHistoryEventKind kind) => kind switch
+    {
+        SaleHistoryEventKind.Created => "Venta registrada",
+        SaleHistoryEventKind.Cancelled => "Venta anulada",
+        SaleHistoryEventKind.Refunded => "Devolución",
+        _ => "Evento"
+    };
+}

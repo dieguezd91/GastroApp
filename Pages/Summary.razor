@@ -1,6 +1,8 @@
 @page "/summary"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Cash
+@using GastroApp.Shared.Pos
 @inject SaleService SaleService
 @inject CashRegisterService CashService
 @inject AuthService AuthService
@@ -8,98 +10,154 @@
 
 <PageTitle>Resumen</PageTitle>
 
-<div class="page-container">
-    <h1>📊 Resumen del Día</h1>
-
-    <div class="summary-grid">
-        <div class="summary-card">
-            <div class="summary-icon">💰</div>
-            <h3>Total Vendido</h3>
-            <p class="summary-value">$@totalSales</p>
-            <p class="summary-detail">Ventas completadas de hoy, con descuentos aplicados; no resta devoluciones.</p>
-        </div>
-
-        <div class="summary-card">
-            <div class="summary-icon">🧾</div>
-            <h3>Cantidad de Ventas</h3>
-            <p class="summary-value">@salesCount</p>
-        </div>
-
-        <div class="summary-card">
-            <div class="summary-icon">⭐</div>
-            <h3>Producto Más Vendido</h3>
-            <p class="summary-value">@topProduct</p>
-            <p class="summary-detail">@topProductQty unidades</p>
-        </div>
-
-        @if (cashRegister != null && !cashRegister.IsOpen)
-        {
-            <div class="summary-card">
-                <div class="summary-icon">💵</div>
-                <h3>Estado de Caja</h3>
-                <p class="summary-detail">Inicial: $@cashRegister.InitialAmount</p>
-                <p class="summary-detail">Esperado en caja: $@cashRegister.ExpectedAmount</p>
-                <p class="summary-detail">Efectivo contado: $@cashRegister.FinalAmount</p>
-                <p class="summary-detail">Diferencia del cierre (no ventas):</p>
-                <p class="summary-value @(cashRegister.Difference >= 0 ? "positive" : "negative")">
-                    @(cashRegister.Difference >= 0 ? "+" : "")$@cashRegister.Difference
-                </p>
-            </div>
-        }
+<div class="page-header">
+    <div>
+        <h1>Resumen del día</h1>
+        <p class="page-header__subtitle">Cierre operativo de ventas, descuentos, anulaciones, devoluciones y estado de caja de la jornada actual.</p>
     </div>
+    <div class="page-header__actions">
+        <a href="/cash" class="btn"><Icon Name="cash" Size="17" /><span>Ir a caja</span></a>
+        <a href="/sales/history" class="btn"><Icon Name="receipt" Size="17" /><span>Ver historial completo</span></a>
+        <button type="button" class="btn" @onclick="GoHome">Volver al inicio</button>
+    </div>
+</div>
 
-    <section aria-label="Reporte de ventas de hoy">
-        <h2>Ventas, descuentos, anulaciones y devoluciones de hoy</h2>
-        <div style="overflow-x: auto;">
-            <table class="table">
-                <thead><tr><th>Concepto</th><th>Importe</th><th>Qué incluye</th></tr></thead>
+<div class="stack stack--lg">
+    <section class="grid-kpi" aria-label="Indicadores diarios">
+        <KpiCard Label="Total vendido" Value="@PosFormat.Money(totalSales)"
+                 Meta="@($"Ventas completadas de hoy, con descuentos aplicados; no resta devoluciones. Importe neto: {PosFormat.Money(report.NetTotal)}")" />
+        <KpiCard Label="Cantidad de ventas" Value="@salesCount.ToString()"
+                 Meta="@($"{report.CancelledCount} anulada(s) aparte")" />
+        <KpiCard Label="Producto más vendido" Value="@topProduct"
+                 Meta="@(topProductQty > 0 ? $"{topProductQty} unidades" : "—")" />
+        <KpiCard Label="Estado de caja" Value="@(cashRegister == null ? "Sin sesión" : cashRegister.IsOpen ? "Abierta" : "Cerrada")"
+                 Meta="@(cashRegister == null ? "—" : $"Sesión #{cashRegister.Id}")">
+            <StatusContent>
+                @if (cashRegister != null)
+                {
+                    <Badge Variant="@(cashRegister.IsOpen ? "ok" : "neutral")" Label="@(cashRegister.IsOpen ? "En curso" : "Cerrada")" />
+                }
+            </StatusContent>
+        </KpiCard>
+    </section>
+
+    @if (cashRegister != null && !cashRegister.IsOpen)
+    {
+        var difference = cashRegister.Difference;
+        var (differenceVariant, differenceIcon) = CashFormat.DifferenceBadge(difference);
+        <section class="card stack" aria-labelledby="sum-cash-close-title">
+            <div class="row-between">
+                <div>
+                    <h2 id="sum-cash-close-title" class="card__title">Resultado del cierre de caja · Sesión #@cashRegister.Id</h2>
+                    <p class="card__desc">Comparación final entre efectivo esperado y efectivo contado al cerrar. La diferencia del cierre no son ventas.</p>
+                </div>
+                <Badge Variant="@differenceVariant" Icon="@differenceIcon" Label="@(difference == 0m ? "Exacto" : difference > 0m ? $"Sobrante {CashFormat.SignedMoney(difference)}" : $"Faltante {CashFormat.SignedMoney(difference)}")" />
+            </div>
+            <div class="grid-kpi">
+                <KpiCard Label="Fondo inicial" Value="@PosFormat.Money(cashRegister.InitialAmount)" />
+                <KpiCard Label="Esperado en caja" Value="@PosFormat.Money(cashRegister.ExpectedAmount)" />
+                <KpiCard Label="Efectivo contado" Value="@PosFormat.Money(cashRegister.FinalAmount)" />
+                <KpiCard Label="Diferencia del cierre" Value="@(difference == 0m ? "Exacto" : CashFormat.SignedMoney(difference))" />
+            </div>
+        </section>
+    }
+
+    <section class="card stack" aria-labelledby="sum-table-title">
+        <h2 id="sum-table-title" class="card__title">Ventas, descuentos, anulaciones y devoluciones de hoy</h2>
+        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="sum-table-title">
+            <table class="data-table data-table--stack">
+                <thead>
+                    <tr>
+                        <th scope="col">Concepto</th>
+                        <th scope="col">Qué incluye</th>
+                        <th scope="col" class="col-num">Importe</th>
+                    </tr>
+                </thead>
                 <tbody>
-                    <tr><th scope="row">Ventas brutas</th><td>$@report.GrossSales</td><td>Precio de lista de las ventas completadas de hoy, antes de descuentos.</td></tr>
-                    <tr><th scope="row">Descuentos</th><td>$@report.Discounts</td><td>Descuentos de línea y de venta de esas mismas ventas.</td></tr>
-                    <tr><th scope="row">Anulaciones</th><td>$@report.CancelledTotal (@report.CancelledCount)</td><td>Importe final de las ventas de hoy anuladas; no están incluidas en las ventas brutas ni en el total vendido.</td></tr>
-                    <tr><th scope="row">Devoluciones</th><td>$@report.RefundedTotal (@report.RefundCount)</td><td>Dinero devuelto hoy, aunque la venta original sea de otro día. La venta sigue contando como cobrada.</td></tr>
+                    <tr>
+                        <th scope="row">Ventas brutas</th>
+                        <td data-label="Qué incluye" class="text-secondary">Precio de lista de las ventas completadas de hoy, antes de descuentos.</td>
+                        <td data-label="Importe" class="col-num">@PosFormat.Money(report.GrossSales)</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Descuentos</th>
+                        <td data-label="Qué incluye" class="text-secondary">Descuentos de línea y de venta de esas mismas ventas.</td>
+                        <td data-label="Importe" class="col-num text-warn">−@PosFormat.Money(report.Discounts)</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Devoluciones (@report.RefundCount)</th>
+                        <td data-label="Qué incluye" class="text-secondary">Dinero devuelto hoy, aunque la venta original sea de otro día. La venta sigue contando como cobrada.</td>
+                        <td data-label="Importe" class="col-num text-danger">−@PosFormat.Money(report.RefundedTotal)</td>
+                    </tr>
+                    <tr class="sum-row--net">
+                        <th scope="row">Importe neto</th>
+                        <td data-label="Qué incluye" class="text-secondary">Ventas brutas − descuentos − devoluciones de hoy.</td>
+                        <td data-label="Importe" class="col-num fw-700">@PosFormat.Money(report.NetTotal)</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Anulaciones (@report.CancelledCount)</th>
+                        <td data-label="Qué incluye" class="text-secondary">Importe final de las ventas de hoy anuladas; no están incluidas en las ventas brutas ni en el total vendido.</td>
+                        <td data-label="Importe" class="col-num text-muted">@PosFormat.Money(report.CancelledTotal)</td>
+                    </tr>
                 </tbody>
-                <tfoot>
-                    <tr><th scope="row">Importe neto</th><td>$@report.NetTotal</td><td>Ventas brutas − descuentos − devoluciones de hoy.</td></tr>
-                </tfoot>
             </table>
         </div>
     </section>
 
-    <section aria-label="Cancelar venta de hoy">
-        <h2>Cancelar venta de hoy</h2>
+    <section class="card stack" aria-labelledby="quick-cancel-title">
+        <div>
+            <h2 id="quick-cancel-title" class="card__title">Cancelar venta de hoy</h2>
+            <p class="card__desc">Solo disponible para ventas completadas de hoy. Las ventas con devoluciones registradas no pueden anularse.</p>
+        </div>
+
         @if (todaySales.Count == 0)
         {
-            <p>No hay ventas completadas hoy.</p>
+            <Banner Variant="info">No hay ventas completadas hoy.</Banner>
         }
         else
         {
-            <label for="sale-to-cancel">Venta completada</label>
-            <select id="sale-to-cancel" class="form-control" @bind="selectedSaleId">
-                <option value="0">Seleccione una venta</option>
-                @foreach (var sale in todaySales)
-                {
-                    <option value="@sale.Id">#@sale.Id — @sale.Date.ToString("HH:mm") — $@sale.Total</option>
-                }
-            </select>
-            <label for="cancellation-reason">Motivo de cancelación</label>
-            <textarea id="cancellation-reason" class="form-control" @bind="cancellationReason"></textarea>
-            <button class="btn btn-danger" @onclick="CancelSelectedSale">Cancelar venta</button>
+            <div class="sum-cancel-row">
+                <div class="field">
+                    <label class="field__label" for="sale-to-cancel">Venta completada</label>
+                    <select id="sale-to-cancel" class="select" @bind="selectedSaleId">
+                        <option value="0">Seleccione una venta</option>
+                        @foreach (var sale in todaySales)
+                        {
+                            <option value="@sale.Id">#@sale.Id — @sale.Date.ToString("HH:mm") — @PosFormat.Money(sale.Total)</option>
+                        }
+                    </select>
+                </div>
+                <button type="button" class="btn btn--danger-outline" @onclick="RequestCancel">Anular venta seleccionada</button>
+            </div>
         }
-        @if (!string.IsNullOrEmpty(cancellationError))
+        @if (!string.IsNullOrEmpty(cancellationError) && !confirmingCancel)
         {
-            <p role="alert">@cancellationError</p>
-        }
-        @if (!string.IsNullOrEmpty(cancellationSuccess))
-        {
-            <p role="status">@cancellationSuccess</p>
+            <Banner Variant="danger">@cancellationError</Banner>
         }
     </section>
-
-    <div class="summary-actions">
-        <button class="btn btn-primary" @onclick="GoHome">Volver al Inicio</button>
-    </div>
 </div>
+
+<ModalDialog @ref="cancelDialog" Title="@($"Anular venta #{selectedSaleId}")" LightDismiss="false" OnClosed="HandleCancelClosed">
+    <ChildContent>
+        <div class="stack">
+            <p class="text-sm text-secondary">La venta quedará marcada como cancelada y se repondrá el stock consumido.</p>
+            @if (!string.IsNullOrEmpty(cancellationError))
+            {
+                <Banner Variant="danger">@cancellationError</Banner>
+            }
+            <div class="field">
+                <label class="field__label" for="cancellation-reason">Motivo de cancelación <span class="field__req" aria-hidden="true">*</span></label>
+                <textarea id="cancellation-reason" class="textarea" rows="3" @bind="cancellationReason" @bind:event="oninput"></textarea>
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button value="cancel" class="btn">No anular</button>
+        <button type="button" class="btn btn--danger" @onclick="ConfirmCancelAsync">Confirmar anulación</button>
+    </Footer>
+</ModalDialog>
+
+<Toast @ref="toast" />
 
 @code {
     private decimal totalSales;
@@ -113,6 +171,9 @@
     private string? cancellationReason;
     private string? cancellationError;
     private string? cancellationSuccess;
+    private bool confirmingCancel;
+    private ModalDialog? cancelDialog;
+    private Toast? toast;
 
     protected override async Task OnInitializedAsync()
     {
@@ -142,6 +203,47 @@
         topProduct = top.Name;
         topProductQty = top.Quantity;
         cashRegister = CashService.GetCurrent();
+    }
+
+    // Opens the confirmation dialog after the same selection check the cancellation itself repeats.
+    private async Task RequestCancel()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return;
+        }
+        cancellationError = null;
+        cancellationSuccess = null;
+        if (selectedSaleId == 0 || !SaleService.GetToday().Any(s => s.Id == selectedSaleId))
+        {
+            cancellationError = "Seleccione una venta completada de hoy.";
+            return;
+        }
+        confirmingCancel = true;
+        if (cancelDialog != null) await cancelDialog.ShowAsync();
+    }
+
+    private async Task ConfirmCancelAsync()
+    {
+        var cancelledId = selectedSaleId;
+        CancelSelectedSale();
+        if (cancellationSuccess == null) return;
+        confirmingCancel = false;
+        if (cancelDialog != null) await cancelDialog.CloseAsync("done");
+        toast?.Show($"Venta #{cancelledId} cancelada; stock restaurado.", "ok");
+    }
+
+    private Task HandleCancelClosed(string returnValue)
+    {
+        confirmingCancel = false;
+        if (returnValue != "done") cancellationError = null;
+        return Task.CompletedTask;
     }
 
     private void CancelSelectedSale()

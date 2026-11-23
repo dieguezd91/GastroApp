@@ -1,0 +1,51 @@
+@* Products of one sale (read-only) with the sale-level totals, for the sales-history detail. *@
+@using GastroApp.Models
+@using GastroApp.Shared.Pos
+
+@if (Detail.Lines.Count == 0)
+{
+    <p class="text-sm text-secondary">La venta no tiene productos registrados.</p>
+}
+else
+{
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="Productos de la venta">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th scope="col">Producto</th>
+                    <th scope="col" class="col-num">Precio</th>
+                    <th scope="col" class="col-num">Cant.</th>
+                    <th scope="col" class="col-num">Desc. de línea</th>
+                    <th scope="col" class="col-num">Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var line in Detail.Lines)
+                {
+                    <tr>
+                        <th scope="row">
+                            @line.ProductName
+                            @if (!string.IsNullOrWhiteSpace(line.Notes))
+                            {
+                                <div class="text-xs text-muted fw-600">Obs.: @line.Notes</div>
+                            }
+                        </th>
+                        <td class="col-num">@PosFormat.Money(line.Price)</td>
+                        <td class="col-num">@line.Quantity</td>
+                        <td class="col-num">@(line.DiscountType == DiscountType.None ? "—" : SaleHistoryFormat.DiscountLabel(line.DiscountType, line.DiscountValue, line.DiscountAmount))</td>
+                        <td class="col-num fw-700">@SaleHistoryFormat.Money(line.Subtotal)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+<div class="stack stack--sm sh-totals">
+    <div class="summary-row"><span class="text-secondary">Subtotal</span><span class="tnum">@SaleHistoryFormat.Money(Detail.Subtotal)</span></div>
+    <div class="summary-row"><span class="text-secondary">Descuento de la venta</span><span class="tnum">@SaleHistoryFormat.DiscountLabel(Detail.SaleDiscountType, Detail.SaleDiscountValue, Detail.DiscountAmount)</span></div>
+    <div class="summary-row summary-row--total"><span>Total</span><span class="tnum">@SaleHistoryFormat.Money(Detail.Total)</span></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public SaleHistoryDetail Detail { get; set; } = null!;
+}
