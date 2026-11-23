@@ -29,7 +29,7 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 | T10 | S6, S7 | worker: Recetas workspace | 347a0d5 |
 | T11 | S5, S6, S7 | worker: Compras tabs (Facturas workspace + Proveedores) | 4bda9c3 |
 | T12 | S6, S7 | worker: Historial de ventas (refund workspace) + Resumen | e5a9f27 |
-| T13 | all | gentle-ai-verify over the branch; docs (`README.md`, `Docs/Architecture/`) | — |
+| T13 | all | gentle-ai-verify over the branch; docs (`README.md`, `Docs/Architecture/`) | 68e5c5b, deb1e29 |
 
 ## Log
 - L1: "vamos a implementar estos cambios en la UI" (the changes in `prototypes/ui-ux/`).
@@ -48,3 +48,4 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 - L14: T10 done (347a0d5). Preview = RecipeService.CalculateCosts on a scratch Recipe copy (mutates only the copy, no save). Kept as before: duplicate ingredient lines; RecalculateCost calls CalculateCosts then Update (second pass), so the variation badge ends green after a manual recalculate (pre-existing follow-up).
 - L15: T11 done (4bda9c3). Invoice lines typed in a compatible non-base unit are stored converted to the ingredient unit (500 gr @ 0.1 -> 0.5 kg @ 100) because RecipeService reads the last invoice price per base unit. Invoice/supplier deletes ask confirmation; supplier delete warns invoices become Sin proveedor. Parent: NavMenu active state for tab sub-routes fixed with Shared/SectionNavLink (commit before T11).
 - L16: T12 done (e5a9f27). Kept from HEAD: filters apply on Aplicar filtros, refund default destination Merma, refundSuccess text format (pinned). Added: Sugerir reparto (fills per-method amounts; service still enforces exact sum), Summary cancel confirm dialog.
+- L17: T13 done. Docs 68e5c5b. Independent verify: S1-S10 met (browser, HEAD vs origin/main). Fixed deb1e29: employee on /summary crashed with NullReferenceException (pre-existing on main). No deterministic harness for it: rendering needs a live circuit with an employee session (prerender is unauthenticated); checked by build + Summary harness pins. Advisories left: receipt shows cash received/change rounded to cents while the input accepts 3 decimals; topbar badge polls every 5 s; Plus Jakarta Sans loads from Google Fonts; NotFound text in English; template leftovers /counter, /fetchdata, SurveyPrompt. Full suite: all verify-*.ps1 pass except pre-existing verify-payment-summary (stale csproj hash).
