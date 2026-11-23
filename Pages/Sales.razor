@@ -29,7 +29,7 @@
                 <Badge Variant="danger" Icon="alertOctagon" Label="Caja cerrada" />
             }
         </div>
-        <p class="page-header__subtitle">Tocá o hacé clic en los productos para sumarlos al pedido. El stock de recetas se valida al confirmar el cobro.</p>
+        <p class="page-header__subtitle">Tocá o hacé clic en los productos para sumarlos al pedido. Los productos sin stock de receta quedan bloqueados; el stock se vuelve a validar al confirmar el cobro.</p>
     </div>
 </div>
 
@@ -174,12 +174,25 @@ else
         categories = CategoryService.GetAll();
     }
 
-    // Seam for stock availability (S8, T4): today every product is available and the atomic checkout
-    // validation is the only stock check. T4 returns blocked tiles (with the missing ingredient) from here.
-    private TileAvailability AvailabilityOf(Product product) => TileAvailability.Available;
+    // S8: a product whose recipe cannot cover one more unit (counting what the cart already reserves) is blocked
+    // and names the missing ingredient. The atomic checkout validation remains the second line of defense.
+    private TileAvailability AvailabilityOf(Product product)
+    {
+        var availability = SaleService.GetAvailability(currentSale.Items, product);
+        if (!availability.IsBlocked) return TileAvailability.Available;
 
-    // Seam for stock availability (S8, T4): maximum units of the line's product the cart may hold; null = no cap.
-    private int? MaxQuantityOf(SaleItem item) => null;
+        var ingredient = availability.LimitingIngredient;
+        var reason = ingredient is null ? "No hay stock suficiente para una unidad más."
+            : availability.InvalidRecipe ? $"La receta tiene una cantidad inválida de {ingredient}."
+            : availability.ReservedByCart ? $"El carrito ya reserva todo el {ingredient} disponible."
+            : $"Falta {ingredient}: no alcanza para una unidad más.";
+        return availability.ReservedByCart && !availability.InvalidRecipe
+            ? new TileAvailability(IsBlocked: true, Reason: reason, BadgeLabel: "Máximo en carrito", BadgeVariant: "warn")
+            : new TileAvailability(IsBlocked: true, Reason: reason, BadgeLabel: "Sin stock", BadgeVariant: "danger");
+    }
+
+    // S8: maximum units of the line's product the cart may hold after the other lines reserve theirs; null = no cap.
+    private int? MaxQuantityOf(SaleItem item) => SaleService.GetMaxQuantity(currentSale.Items, item);
 
     private string CategoryNameOf(Product product) =>
         categories.FirstOrDefault(c => c.Id == product.CategoryId)?.Name ?? "Sin categoría";
@@ -200,6 +213,13 @@ else
     private void AddToCart(Product product)
     {
         if (!product.IsActive) return;
+
+        var availability = AvailabilityOf(product);
+        if (availability.IsBlocked)
+        {
+            ShowBlockedReason(availability.Reason ?? "Producto no disponible.");
+            return;
+        }
 
         var existingItem = currentSale.Items.FirstOrDefault(i => i.ProductId == product.Id);
 
@@ -296,7 +316,7 @@ else
         {
             var max = MaxQuantityOf(candidate);
             if (max.HasValue && candidate.Quantity > max.Value)
-                return $"No hay stock suficiente para {candidate.ProductName}.";
+                return $"No hay stock suficiente para {candidate.ProductName}: máximo disponible {max.Value} u.";
 
             var lineValidation = SaleService.ValidateDiscount(candidate.DiscountType,
                 candidate.DiscountValue, candidate.GrossSubtotal, $"El descuento de {candidate.ProductName}");

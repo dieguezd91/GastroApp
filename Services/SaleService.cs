@@ -361,6 +361,83 @@ public class SaleService
         }
     }
 
+    // ---- POS availability (S8): read-only; built on RecipeRequirements so it cannot drift from checkout ----
+
+    /// <summary>
+    /// How many more units of <paramref name="product"/> fit in the recipe stock once the cart's lines are reserved.
+    /// Products without a matching recipe are unlimited. Checkout still validates atomically (<see cref="ValidateStock"/>).
+    /// </summary>
+    public ProductAvailability GetAvailability(IReadOnlyList<SaleItem> cart, Product product) =>
+        CapacityFor(product.Name, (cart ?? Array.Empty<SaleItem>()).Where(i => i != null));
+
+    /// <summary>
+    /// Largest quantity <paramref name="item"/> may have: what is left after the OTHER cart lines reserve their stock.
+    /// The cart line(s) of the same product (same reference or ProductId) are ignored, so a copy being edited
+    /// is capped like the line it replaces. Null = no cap (no matching recipe).
+    /// </summary>
+    public int? GetMaxQuantity(IReadOnlyList<SaleItem> cart, SaleItem item)
+    {
+        var others = (cart ?? Array.Empty<SaleItem>())
+            .Where(i => i != null && !ReferenceEquals(i, item) && i.ProductId != item.ProductId);
+        return CapacityFor(item.ProductName, others).MaxAdditionalUnits;
+    }
+
+    private ProductAvailability CapacityFor(string productName, IEnumerable<SaleItem> reservingLines)
+    {
+        if (_recipeService == null || _ingredientService == null)
+            return ProductAvailability.Unlimited;
+
+        try
+        {
+            // Per-unit need of the product and what the cart reserves, both through the checkout's own rules.
+            var perUnit = new List<(Ingredient Ingredient, decimal Quantity)>();
+            foreach (var (_, ingredient, quantity) in RecipeRequirements(new[] { new SaleItem { ProductName = productName, Quantity = 1 } }))
+            {
+                var index = perUnit.FindIndex(p => p.Ingredient.Id == ingredient.Id);
+                if (index < 0) perUnit.Add((ingredient, quantity));
+                else perUnit[index] = (ingredient, checked(perUnit[index].Quantity + quantity));
+            }
+            if (perUnit.Count == 0)
+                return ProductAvailability.Unlimited;
+
+            var reserved = new Dictionary<int, decimal>();
+            foreach (var (_, ingredient, quantity) in RecipeRequirements(reservingLines))
+                reserved[ingredient.Id] = checked(reserved.GetValueOrDefault(ingredient.Id) + quantity);
+
+            int? max = null;
+            ProductAvailability? limiting = null;
+            foreach (var (ingredient, quantity) in perUnit)
+            {
+                var held = reserved.GetValueOrDefault(ingredient.Id);
+                ProductAvailability candidate;
+                if (quantity <= 0m)
+                {
+                    // Checkout rejects non-positive recipe quantities, so the product can never be sold.
+                    candidate = new ProductAvailability(0, ingredient.Name, held > 0m, InvalidRecipe: true);
+                }
+                else
+                {
+                    var free = ingredient.CurrentStock - held;
+                    var units = free <= 0m ? 0m : Math.Floor(free / quantity);
+                    var fits = (int)Math.Min(int.MaxValue, units);
+                    while (fits > 0 && held + (decimal)fits * quantity > ingredient.CurrentStock)
+                        fits--; // checkout's rule is the authority: never report a count it would reject
+                    candidate = new ProductAvailability(fits, ingredient.Name, held > 0m);
+                }
+                if (max == null || candidate.MaxAdditionalUnits < max)
+                {
+                    max = candidate.MaxAdditionalUnits;
+                    limiting = candidate;
+                }
+            }
+            return limiting!;
+        }
+        catch (OverflowException)
+        {
+            return new ProductAvailability(0);
+        }
+    }
+
     private IngredientService RequireIngredientService() =>
         _ingredientService ?? throw new InvalidOperationException("El servicio de ingredientes no está disponible.");
 
@@ -741,4 +818,16 @@ public class SaleService
 
         return productSales != null ? (productSales.Name, productSales.Quantity) : ("Ninguno", 0);
     }
+}
+
+/// <summary>
+/// Stock left for a product in the POS. <see cref="MaxAdditionalUnits"/> null = unlimited (no matching recipe);
+/// 0 = blocked. <see cref="LimitingIngredient"/> is the tightest ingredient, <see cref="ReservedByCart"/> says
+/// whether the cart already holds part of it, and <see cref="InvalidRecipe"/> flags a non-positive recipe quantity.
+/// </summary>
+public sealed record ProductAvailability(int? MaxAdditionalUnits, string? LimitingIngredient = null,
+    bool ReservedByCart = false, bool InvalidRecipe = false)
+{
+    public static ProductAvailability Unlimited { get; } = new((int?)null);
+    public bool IsBlocked => MaxAdditionalUnits == 0;
 }
