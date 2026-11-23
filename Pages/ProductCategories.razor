@@ -1,7 +1,9 @@
 @page "/product-categories"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Catalog
 @inject ProductCategoryService CategoryService
+@inject ProductService ProductService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
@@ -9,57 +11,96 @@
 
 @if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
 {
-    <div class="page-container">
-        <div class="page-header">
-            <h1>📦 Categorías de productos</h1>
-            <button class="btn btn-primary" @onclick="ShowAddForm">+ Nueva Categoría</button>
-        </div>
-
-        @if (!string.IsNullOrEmpty(errorMessage))
-        {
-            <div class="alert alert-danger" role="alert">@errorMessage</div>
-        }
-
-        @if (showForm)
-        {
-            <div class="form-card">
-                <h3>@(editingCategory.Id == 0 ? "Nueva Categoría" : "Editar Categoría")</h3>
-                <div class="form-group">
-                    <label for="category-name">Nombre</label>
-                    <input id="category-name" type="text" @bind="editingCategory.Name" class="form-control" placeholder="Ej: Bebidas" />
-                </div>
-                <div class="form-actions">
-                    <button class="btn btn-primary" @onclick="SaveCategory">Guardar</button>
-                    <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
-                </div>
-            </div>
-        }
-
-        <p>Para eliminar una categoría, primero quitá o cambiá su asignación en los productos.</p>
-        <div class="products-list">
-            @foreach (var category in categories)
+    <CatalogView ActiveTab="CatalogTab.Categories" ProductCount="products.Count" CategoryCount="categories.Count">
+        <HeaderActions>
+            <button type="button" class="btn btn--primary" @onclick="ShowAddForm">
+                <Icon Name="plus" Size="17" />
+                <span>Nueva categoría</span>
+            </button>
+        </HeaderActions>
+        <ChildContent>
+            @if (!string.IsNullOrEmpty(errorMessage))
             {
-                <div class="product-card">
-                    <div class="product-info"><h3>@category.Name</h3></div>
-                    <div class="product-actions">
-                        <button class="btn btn-small" aria-label="Editar categoría" @onclick="() => EditCategory(category)">✏️</button>
-                        <button class="btn btn-small btn-danger" aria-label="Eliminar categoría" @onclick="() => DeleteCategory(category.Id)">🗑️</button>
+                <Banner Variant="danger">@errorMessage</Banner>
+            }
+
+            <p class="text-sm text-secondary">Para eliminar una categoría, primero quitá o cambiá su asignación en los productos.</p>
+
+            @if (categories.Count == 0)
+            {
+                <div class="empty-state">
+                    <div class="empty-state__icon"><Icon Name="tag" Size="24" /></div>
+                    <div class="stack stack--sm">
+                        <h3>No hay categorías</h3>
+                        <p class="text-sm text-secondary">Creá la primera para agrupar tus productos.</p>
+                    </div>
+                    <div class="mt-2">
+                        <button type="button" class="btn btn--primary" @onclick="ShowAddForm">Crear categoría</button>
                     </div>
                 </div>
             }
-        </div>
-        @if (categories.Count == 0)
-        {
-            <p class="empty-state">No hay categorías. Creá la primera!</p>
-        }
-    </div>
+            else
+            {
+                <div class="table-wrapper" tabindex="0" role="region" aria-label="Tabla de categorías">
+                    <table class="data-table data-table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Categoría</th>
+                                <th scope="col" class="col-num">Productos asignados</th>
+                                <th scope="col" class="col-actions">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var category in categories)
+                            {
+                                <tr @key="category.Id">
+                                    <th scope="row">@category.Name</th>
+                                    <td data-label="Productos" class="col-num">@products.Count(p => p.CategoryId == category.Id)</td>
+                                    <td class="col-actions">
+                                        <div class="flex-wrap-gap catalog-actions">
+                                            <button type="button" class="btn btn--sm" aria-label="@($"Editar categoría {category.Name}")" @onclick="() => EditCategory(category)">Editar</button>
+                                            <button type="button" class="btn btn--danger-outline btn--sm" aria-label="@($"Eliminar categoría {category.Name}")" @onclick="() => DeleteCategory(category.Id)">Eliminar</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </ChildContent>
+    </CatalogView>
+
+    <ModalDialog @ref="formDialog" Title="@(editingCategory.Id == 0 ? "Nueva categoría" : "Editar categoría")" LightDismiss="false" OnClosed="HandleFormClosed">
+        <ChildContent>
+            <form id="category-form" class="stack catalog-dialog" novalidate @onsubmit="SaveCategory">
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <Banner Variant="danger">@formError</Banner>
+                }
+                <div class="field">
+                    <label class="field__label" for="category-name">Nombre <span class="field__req" aria-hidden="true">*</span></label>
+                    <input id="category-name" type="text" class="input" required autocomplete="off" placeholder="Ej: Bebidas" @bind="editingCategory.Name" />
+                </div>
+            </form>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn">Cancelar</button>
+            <button type="submit" form="category-form" class="btn btn--primary">Guardar</button>
+        </Footer>
+    </ModalDialog>
+
+    <Toast @ref="toast" />
 }
 
 @code {
     private List<ProductCategory> categories = new();
+    private List<Product> products = new();
     private ProductCategory editingCategory = new();
-    private bool showForm;
     private string errorMessage = string.Empty;
+    private string formError = string.Empty;
+    private ModalDialog? formDialog;
+    private Toast? toast;
 
     protected override void OnInitialized()
     {
@@ -83,46 +124,59 @@
         return true;
     }
 
-    private void LoadCategories() => categories = CategoryService.GetAll();
+    private void LoadCategories()
+    {
+        categories = CategoryService.GetAll();
+        products = ProductService.GetAll();
+    }
 
-    private void ShowAddForm()
+    private async Task ShowAddForm()
     {
         if (!EnsureAdmin()) return;
         editingCategory = new ProductCategory();
         errorMessage = string.Empty;
-        showForm = true;
+        formError = string.Empty;
+        await OpenFormAsync();
     }
 
-    private void EditCategory(ProductCategory category)
+    private async Task EditCategory(ProductCategory category)
     {
         if (!EnsureAdmin()) return;
         editingCategory = new ProductCategory { Id = category.Id, Name = category.Name };
         errorMessage = string.Empty;
-        showForm = true;
+        formError = string.Empty;
+        await OpenFormAsync();
     }
 
-    private void SaveCategory()
+    private Task OpenFormAsync() => formDialog is null ? Task.CompletedTask : formDialog.ShowAsync();
+
+    private async Task SaveCategory()
     {
         if (!EnsureAdmin()) return;
-        errorMessage = string.Empty;
+        formError = string.Empty;
+        var creating = editingCategory.Id == 0;
         try
         {
-            if (editingCategory.Id == 0)
+            if (creating)
                 CategoryService.Add(editingCategory);
             else
                 CategoryService.Update(editingCategory);
-
-            LoadCategories();
-            CancelEdit();
         }
         catch (ArgumentException ex)
         {
-            errorMessage = ex.Message;
+            formError = ex.Message;
+            return;
         }
         catch (InvalidOperationException ex)
         {
-            errorMessage = ex.Message;
+            formError = ex.Message;
+            return;
         }
+
+        errorMessage = string.Empty;
+        LoadCategories();
+        if (formDialog is not null) await formDialog.CloseAsync("saved");
+        toast?.Show(creating ? "Categoría creada." : "Categoría actualizada.");
     }
 
     private void DeleteCategory(int id)
@@ -131,9 +185,10 @@
         errorMessage = string.Empty;
         try
         {
+            var name = categories.FirstOrDefault(c => c.Id == id)?.Name;
             CategoryService.Delete(id);
             LoadCategories();
-            if (editingCategory.Id == id) CancelEdit();
+            if (name is not null) toast?.Show($"Categoría «{name}» eliminada.");
         }
         catch (InvalidOperationException ex)
         {
@@ -141,10 +196,9 @@
         }
     }
 
-    private void CancelEdit()
+    private void HandleFormClosed(string _)
     {
-        showForm = false;
         editingCategory = new ProductCategory();
-        errorMessage = string.Empty;
+        formError = string.Empty;
     }
 }

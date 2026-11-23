@@ -1,3 +1,31 @@
 /* catalog view styles, ported from prototypes/ui-ux/styles/views.css. */
 @layer views {
+  /* Legacy Bootstrap `.card` is a column flexbox and its direction leaks through the layers: keep the toolbar a row. */
+  .catalog-toolbar {
+    flex-direction: row;
+  }
+
+  /* Status / margin filter next to the search box. */
+  .catalog-filter {
+    flex: 0 1 13rem;
+  }
+
+  /* Row actions stay on one line in the table and wrap in the stacked (narrow) layout. */
+  .catalog-actions {
+    justify-content: flex-end;
+  }
+
+  /* Recipe cost drift warning under the product name (seam for S9 / ProductCostDrift). */
+  .catalog-drift {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-block-start: var(--space-2);
+  }
+
+  .catalog-drift__sync {
+    min-block-size: 1.75rem;
+    padding: 0.15rem 0.55rem;
+  }
 }

@@ -1,0 +1,20 @@
+@* Seam for S9 (task T8): the drift warning + one-click sync that sits under the product name in the catalog row.
+   It renders nothing until the page passes RecipeCost (the last recipe-calculated unit cost) and OnSync, so the
+   Products page can adopt it without touching the row layout. The drift rule itself belongs to the service (T8). *@
+@if (RecipeCost is { } recipeCost)
+{
+    <div class="catalog-drift">
+        <span class="text-xs text-warn fw-600">Receta: @CatalogFormat.Money(recipeCost)</span>
+        <button type="button" class="btn btn--sm catalog-drift__sync" aria-label="@($"Sincronizar costo de {ProductName} con la receta")"
+                @onclick="OnSync">Sincronizar</button>
+    </div>
+}
+
+@code {
+    [Parameter] public string ProductName { get; set; } = string.Empty;
+
+    /// <summary>Unit cost from the product's recipe; null (default) hides the warning.</summary>
+    [Parameter] public decimal? RecipeCost { get; set; }
+
+    [Parameter] public EventCallback OnSync { get; set; }
+}

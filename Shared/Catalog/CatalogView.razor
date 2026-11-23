@@ -1,0 +1,88 @@
+@* Unified catalog shell (prototype catalog.js): page header, accessible Productos / Categorías tabs and the tab panel.
+   Each tab keeps its own route (/products, /product-categories): selecting a tab navigates in-circuit (no reload) and
+   the page behind the active tab supplies the header action and the panel content. Arrow keys, Home and End move
+   between tabs (roving tabindex); after a tab-driven navigation the new page puts focus back on its selected tab. *@
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div>
+        <h1>Productos y categorías</h1>
+        <p class="page-header__subtitle">Controlá precios de venta, márgenes y disponibilidad en el POS, y organizá el catálogo en categorías.</p>
+    </div>
+    <div class="page-header__actions">@HeaderActions</div>
+</div>
+
+<div class="tablist" role="tablist" aria-label="Secciones del catálogo">
+    <button type="button" id="catalog-tab-products" role="tab" class="tab" @ref="productsTab"
+            aria-selected="@(IsProducts ? "true" : "false")" aria-controls="@(IsProducts ? PanelId : null)"
+            tabindex="@(IsProducts ? 0 : -1)"
+            @onclick="() => Select(CatalogTab.Products)" @onkeydown="HandleKeyDown">
+        <Icon Name="products" Size="16" />
+        <span>Productos (@ProductCount)</span>
+    </button>
+    <button type="button" id="catalog-tab-categories" role="tab" class="tab" @ref="categoriesTab"
+            aria-selected="@(IsProducts ? "false" : "true")" aria-controls="@(IsProducts ? null : PanelId)"
+            tabindex="@(IsProducts ? -1 : 0)"
+            @onclick="() => Select(CatalogTab.Categories)" @onkeydown="HandleKeyDown">
+        <Icon Name="tag" Size="16" />
+        <span>Categorías (@CategoryCount)</span>
+    </button>
+</div>
+
+<div id="@PanelId" role="tabpanel" class="stack" aria-labelledby="@(IsProducts ? "catalog-tab-products" : "catalog-tab-categories")">
+    @ChildContent
+</div>
+
+@code {
+    private const string PanelId = "catalog-panel";
+    private const string FocusTabState = "catalog-focus-tab";
+
+    private ElementReference productsTab;
+    private ElementReference categoriesTab;
+
+    [Parameter, EditorRequired] public CatalogTab ActiveTab { get; set; }
+
+    [Parameter] public int ProductCount { get; set; }
+
+    [Parameter] public int CategoryCount { get; set; }
+
+    /// <summary>Primary action of the active tab (e.g. "Nuevo producto").</summary>
+    [Parameter] public RenderFragment? HeaderActions { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool IsProducts => ActiveTab == CatalogTab.Products;
+
+    private static string RouteOf(CatalogTab tab) => tab == CatalogTab.Products ? "/products" : "/product-categories";
+
+    private void Select(CatalogTab tab)
+    {
+        if (tab == ActiveTab) return;
+        // The tab strip is re-created by the destination page; the history state tells it to restore focus.
+        Navigation.NavigateTo(RouteOf(tab), new NavigationOptions { HistoryEntryState = FocusTabState });
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "ArrowRight":
+            case "End":
+                Select(CatalogTab.Categories);
+                break;
+            case "ArrowLeft":
+            case "Home":
+                Select(CatalogTab.Products);
+                break;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Navigation.HistoryEntryState != FocusTabState) return;
+        try { await (IsProducts ? productsTab : categoriesTab).FocusAsync(); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+    }
+}

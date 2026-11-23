@@ -822,7 +822,7 @@
     box-shadow: var(--shadow-lg);
     inline-size: min(38rem, calc(100dvw - 1.5rem));
     /* Overrides the legacy Bootstrap `.modal { height: 100% }` still loaded in the legacy layer. */
-    block-size: auto;
+    block-size: fit-content;
     max-block-size: min(88dvh, 48rem);
     margin: auto;
   }

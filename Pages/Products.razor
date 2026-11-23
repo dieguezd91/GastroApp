@@ -1,6 +1,7 @@
 @page "/products"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Catalog
 @inject ProductService ProductService
 @inject ProductCategoryService CategoryService
 @inject AuthService AuthService
@@ -8,99 +9,203 @@
 
 <PageTitle>Productos</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
-        <h1>📦 Productos</h1>
-        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Producto</button>
-    </div>
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    var visible = FilteredProducts();
+    var lowMarginCount = products.Count(p => p.IsActive && CatalogFormat.IsLowMargin(p));
 
-    @if (!string.IsNullOrEmpty(errorMessage))
-    {
-        <div class="alert alert-danger" role="alert">@errorMessage</div>
-    }
+    <CatalogView ActiveTab="CatalogTab.Products" ProductCount="products.Count" CategoryCount="categories.Count">
+        <HeaderActions>
+            <button type="button" class="btn btn--primary" @onclick="ShowAddForm">
+                <Icon Name="plus" Size="17" />
+                <span>Nuevo producto</span>
+            </button>
+        </HeaderActions>
+        <ChildContent>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <Banner Variant="danger">@errorMessage</Banner>
+            }
 
-    @if (showForm)
-    {
-        <div class="form-card">
-            <h3>@(editingProduct.Id == 0 ? "Nuevo Producto" : "Editar Producto")</h3>
+            @if (lowMarginCount > 0)
+            {
+                <Banner Variant="warn" Title="@($"{lowMarginCount} producto(s) activo(s) con margen menor al {CatalogFormat.LowMarginThresholdPct:0}%")">
+                    <ChildContent>Revisá los costos o ajustá el precio de venta para sostener la rentabilidad.</ChildContent>
+                    <Actions>
+                        <button type="button" class="btn btn--sm" @onclick='() => statusFilter = "low-margin"'>Ver solo margen bajo</button>
+                        <a href="/recipes" class="btn btn--sm">Revisar recetas</a>
+                    </Actions>
+                </Banner>
+            }
 
-            <div class="form-group">
-                <label>Nombre</label>
-                <input type="text" @bind="editingProduct.Name" class="form-control" placeholder="Ej: Café" />
-            </div>
+            <search class="card card--compact toolbar catalog-toolbar">
+                <div class="search-wrap">
+                    <span class="search-wrap__icon"><Icon Name="search" Size="17" /></span>
+                    <label for="catalog-search" class="visually-hidden">Buscar producto</label>
+                    <input id="catalog-search" type="search" class="input input--compact" autocomplete="off"
+                           placeholder="Buscar producto por nombre…" @bind="searchText" @bind:event="oninput" />
+                </div>
+                <div class="field catalog-filter">
+                    <label class="field__label" for="catalog-status">Estado / Margen</label>
+                    <select id="catalog-status" class="select select--compact" @bind="statusFilter">
+                        <option value="all">Todos</option>
+                        <option value="active">Solo activos</option>
+                        <option value="inactive">Solo inactivos</option>
+                        <option value="low-margin">Margen bajo (&lt; @CatalogFormat.LowMarginThresholdPct.ToString("0")%)</option>
+                    </select>
+                </div>
+            </search>
 
-            <div class="form-group">
-                <label>Precio de Venta</label>
-                <input type="number" @bind="editingProduct.Price" class="form-control" placeholder="150" step="0.01" />
-            </div>
+            @if (visible.Count == 0)
+            {
+                <div class="empty-state">
+                    <div class="empty-state__icon"><Icon Name="products" Size="24" /></div>
+                    <div class="stack stack--sm">
+                        @if (products.Count == 0)
+                        {
+                            <h3>No hay productos</h3>
+                            <p class="text-sm text-secondary">Creá el primero para empezar a venderlo desde el POS.</p>
+                        }
+                        else
+                        {
+                            <h3>No encontramos productos</h3>
+                            <p class="text-sm text-secondary">Probá limpiando la búsqueda o los filtros.</p>
+                        }
+                    </div>
+                    <div class="mt-2">
+                        @if (products.Count == 0)
+                        {
+                            <button type="button" class="btn btn--primary" @onclick="ShowAddForm">Crear producto</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn" @onclick="ClearFilters">Limpiar filtros</button>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="table-wrapper" tabindex="0" role="region" aria-label="Tabla de productos">
+                    <table class="data-table data-table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Producto</th>
+                                <th scope="col">Categoría</th>
+                                <th scope="col" class="col-num">Precio / Costo</th>
+                                <th scope="col">Margen</th>
+                                <th scope="col" class="col-actions">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var product in visible)
+                            {
+                                var health = CatalogFormat.MarginHealth(product);
+                                <tr @key="product.Id">
+                                    <th scope="row">
+                                        <div class="flex-wrap-gap">
+                                            <span>@product.Name</span>
+                                            @if (!product.IsActive)
+                                            {
+                                                <Badge Variant="neutral" Label="Inactivo" />
+                                            }
+                                        </div>
+                                        <ProductCostDrift ProductName="@product.Name" />
+                                    </th>
+                                    <td data-label="Categoría">@CategoryName(product)</td>
+                                    <td data-label="Precio / Costo" class="col-num">
+                                        <div class="fw-700">@CatalogFormat.Money(product.Price)</div>
+                                        <div class="text-xs text-muted">@(product.Cost.HasValue ? $"Costo {CatalogFormat.Money(product.Cost.Value)}" : "Sin costo")</div>
+                                    </td>
+                                    <td data-label="Margen"><Badge Variant="@health.Variant" Label="@health.Label" /></td>
+                                    <td class="col-actions">
+                                        <div class="flex-wrap-gap catalog-actions">
+                                            <button type="button" class="btn btn--sm" aria-label="@($"Editar {product.Name}")" @onclick="() => EditProduct(product)">Editar</button>
+                                            <button type="button" class="btn btn--ghost btn--sm" aria-label="@($"{(product.IsActive ? "Pausar" : "Activar")} {product.Name}")"
+                                                    @onclick="() => ToggleActive(product)">@(product.IsActive ? "Pausar" : "Activar")</button>
+                                            <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Eliminar {product.Name}")" @onclick="() => ConfirmDelete(product)">
+                                                <Icon Name="trash" Size="15" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </ChildContent>
+    </CatalogView>
 
-            <div class="form-group">
-                <label>Costo (opcional)</label>
-                <input type="number" @bind="editingProduct.Cost" class="form-control" placeholder="50" step="0.01" />
-            </div>
-
-            <div class="form-group">
-                <label for="product-category">Categoría (opcional)</label>
-                <select id="product-category" @bind="editingProduct.CategoryId" class="form-control">
-                    <option value="">Sin categoría</option>
-                    @foreach (var category in categories)
-                    {
-                        <option value="@category.Id">@category.Name</option>
-                    }
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label for="product-active">
+    <ModalDialog @ref="formDialog" Title="@(editingProduct.Id == 0 ? "Nuevo producto" : $"Editar producto · {editingProduct.Name}")"
+                 Subtitle="El margen se calcula como (precio − costo) / precio × 100." LightDismiss="false" OnClosed="HandleFormClosed">
+        <ChildContent>
+            <form id="product-form" class="stack catalog-dialog" novalidate @onsubmit="SaveProduct">
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <Banner Variant="danger">@formError</Banner>
+                }
+                <div class="field">
+                    <label class="field__label" for="product-name">Nombre <span class="field__req" aria-hidden="true">*</span></label>
+                    <input id="product-name" type="text" class="input" required autocomplete="off" placeholder="Ej: Café" @bind="editingProduct.Name" />
+                </div>
+                <div class="form-grid">
+                    <div class="field">
+                        <label class="field__label" for="product-price">Precio de venta ($) <span class="field__req" aria-hidden="true">*</span></label>
+                        <input id="product-price" type="number" class="input tnum" required step="0.01" placeholder="150" @bind="editingProduct.Price" />
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="product-cost">Costo (opcional)</label>
+                        <input id="product-cost" type="number" class="input tnum" step="0.01" placeholder="50" @bind="editingProduct.Cost" />
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="product-category">Categoría (opcional)</label>
+                    <select id="product-category" class="select" @bind="editingProduct.CategoryId">
+                        <option value="">Sin categoría</option>
+                        @foreach (var category in categories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </select>
+                </div>
+                <label class="check-field" for="product-active">
                     <input id="product-active" type="checkbox" @bind="editingProduct.IsActive" />
-                    Activo (disponible para la venta)
+                    <span>Activo (disponible para la venta)</span>
                 </label>
-            </div>
+            </form>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn">Cancelar</button>
+            <button type="submit" form="product-form" class="btn btn--primary">@(editingProduct.Id == 0 ? "Crear producto" : "Guardar cambios")</button>
+        </Footer>
+    </ModalDialog>
 
-            <div class="form-actions">
-                <button class="btn btn-primary" @onclick="SaveProduct">Guardar</button>
-                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
-            </div>
-        </div>
-    }
+    <ModalDialog @ref="deleteDialog" Title="@($"¿Eliminar «{pendingDelete?.Name}»?")" Size="md" OnClosed="HandleDeleteClosed">
+        <ChildContent>
+            <p class="catalog-dialog">El producto desaparecerá del catálogo actual. Las ventas históricas conservan su nombre y precio.</p>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn" autofocus>Cancelar</button>
+            <button type="button" class="btn btn--danger" @onclick="() => DeleteProduct(pendingDelete?.Id ?? 0)">Eliminar producto</button>
+        </Footer>
+    </ModalDialog>
 
-    <div class="products-list">
-        @foreach (var product in products)
-        {
-            <div class="product-card">
-                <div class="product-info">
-                    <h3>@product.Name</h3>
-                    <p>Estado: @(product.IsActive ? "Activo" : "Inactivo")</p>
-                    <p>Categoría: @(categories.FirstOrDefault(c => c.Id == product.CategoryId)?.Name ?? "Sin categoría")</p>
-                    <p class="price">$@product.Price</p>
-                    @if (product.Cost.HasValue)
-                    {
-                        <p class="cost">Costo: $@product.Cost</p>
-                        <div class="margin-indicator" style="background-color: @product.MarginColor">
-                            Margen: @product.Margin.ToString("F1")%
-                        </div>
-                    }
-                </div>
-                <div class="product-actions">
-                    <button class="btn btn-small" @onclick="() => EditProduct(product)">✏️</button>
-                    <button class="btn btn-small btn-danger" @onclick="() => DeleteProduct(product.Id)">🗑️</button>
-                </div>
-            </div>
-        }
-    </div>
-
-    @if (products.Count == 0)
-    {
-        <p class="empty-state">No hay productos. Creá el primero!</p>
-    }
-</div>
+    <Toast @ref="toast" />
+}
 
 @code {
     private List<Product> products = new();
     private List<ProductCategory> categories = new();
     private Product editingProduct = new();
-    private bool showForm = false;
+    private Product? pendingDelete;
     private string errorMessage = string.Empty;
+    private string formError = string.Empty;
+    private string searchText = string.Empty;
+    private string statusFilter = "all";
+    private ModalDialog? formDialog;
+    private ModalDialog? deleteDialog;
+    private Toast? toast;
 
     protected override async Task OnInitializedAsync()
     {
@@ -131,20 +236,45 @@
         categories = CategoryService.GetAll();
     }
 
-    private void ShowAddForm()
+    private string CategoryName(Product product) =>
+        categories.FirstOrDefault(c => c.Id == product.CategoryId)?.Name ?? "Sin categoría";
+
+    private List<Product> FilteredProducts()
     {
-        if (!EnsureAdmin()) return;
-        categories = CategoryService.GetAll();
-        errorMessage = string.Empty;
-        editingProduct = new Product();
-        showForm = true;
+        var query = searchText.Trim();
+        return products.Where(p =>
+            (query.Length == 0 || p.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+            && statusFilter switch
+            {
+                "active" => p.IsActive,
+                "inactive" => !p.IsActive,
+                "low-margin" => CatalogFormat.IsLowMargin(p),
+                _ => true
+            }).ToList();
     }
 
-    private void EditProduct(Product product)
+    private void ClearFilters()
+    {
+        searchText = string.Empty;
+        statusFilter = "all";
+    }
+
+    private async Task ShowAddForm()
     {
         if (!EnsureAdmin()) return;
         categories = CategoryService.GetAll();
         errorMessage = string.Empty;
+        formError = string.Empty;
+        editingProduct = new Product();
+        await OpenFormAsync();
+    }
+
+    private async Task EditProduct(Product product)
+    {
+        if (!EnsureAdmin()) return;
+        categories = CategoryService.GetAll();
+        errorMessage = string.Empty;
+        formError = string.Empty;
         editingProduct = new Product
         {
             Id = product.Id,
@@ -154,19 +284,30 @@
             CategoryId = product.CategoryId,
             IsActive = product.IsActive
         };
-        showForm = true;
+        await OpenFormAsync();
     }
 
-    private void SaveProduct()
+    private Task OpenFormAsync() => formDialog is null ? Task.CompletedTask : formDialog.ShowAsync();
+
+    private async Task SaveProduct()
     {
         if (!EnsureAdmin()) return;
-        if (string.IsNullOrWhiteSpace(editingProduct.Name) || editingProduct.Price <= 0)
+        if (string.IsNullOrWhiteSpace(editingProduct.Name))
+        {
+            formError = "Ingresá un nombre para el producto.";
             return;
+        }
+        if (editingProduct.Price <= 0)
+        {
+            formError = "Ingresá un precio mayor a cero.";
+            return;
+        }
 
-        errorMessage = string.Empty;
+        formError = string.Empty;
+        var creating = editingProduct.Id == 0;
         try
         {
-            if (editingProduct.Id == 0)
+            if (creating)
             {
                 ProductService.Add(editingProduct);
             }
@@ -174,28 +315,70 @@
             {
                 ProductService.Update(editingProduct);
             }
+        }
+        catch (ArgumentException ex)
+        {
+            formError = ex.Message;
+            categories = CategoryService.GetAll();
+            return;
+        }
 
-            LoadProducts();
-            CancelEdit();
+        errorMessage = string.Empty;
+        LoadProducts();
+        if (formDialog is not null) await formDialog.CloseAsync("saved");
+        toast?.Show(creating ? "Producto creado." : "Producto actualizado.");
+    }
+
+    private void ToggleActive(Product product)
+    {
+        if (!EnsureAdmin()) return;
+        errorMessage = string.Empty;
+        // Same service call as saving the edit form with only IsActive changed.
+        var updated = new Product
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Price = product.Price,
+            Cost = product.Cost,
+            CategoryId = product.CategoryId,
+            IsActive = !product.IsActive
+        };
+        try
+        {
+            ProductService.Update(updated);
         }
         catch (ArgumentException ex)
         {
             errorMessage = ex.Message;
-            categories = CategoryService.GetAll();
+            return;
         }
+
+        LoadProducts();
+        toast?.Show(updated.IsActive ? $"«{updated.Name}» activo: disponible en el POS." : $"«{updated.Name}» pausado: ya no se vende en el POS.");
     }
 
-    private void DeleteProduct(int id)
+    private async Task ConfirmDelete(Product product)
     {
         if (!EnsureAdmin()) return;
-        ProductService.Delete(id);
-        LoadProducts();
+        pendingDelete = product;
+        if (deleteDialog is not null) await deleteDialog.ShowAsync();
     }
 
-    private void CancelEdit()
+    private async Task DeleteProduct(int id)
     {
-        showForm = false;
-        editingProduct = new Product();
-        errorMessage = string.Empty;
+        if (!EnsureAdmin()) return;
+        var name = ProductService.GetById(id)?.Name;
+        ProductService.Delete(id);
+        LoadProducts();
+        if (deleteDialog is not null) await deleteDialog.CloseAsync("deleted");
+        if (name is not null) toast?.Show($"Producto «{name}» eliminado.");
     }
+
+    private void HandleFormClosed(string _)
+    {
+        editingProduct = new Product();
+        formError = string.Empty;
+    }
+
+    private void HandleDeleteClosed(string _) => pendingDelete = null;
 }
