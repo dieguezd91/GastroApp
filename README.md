@@ -295,6 +295,12 @@ docker run -p 8080:8080 gastroapp
 
 Then open `http://localhost:8080`. The container starts from the `data.json` committed in the repository; changes made inside the container are lost when the container is recreated.
 
+The Dockerfile restores with only `GastroApp.csproj` copied. Since .NET 10 the Blazor script (`_framework/blazor.server.js`) is a static web asset that restore only pulls in when it sees `.razor` files, so the project sets `RequiresAspNetWebAssets`. To check that the published output still contains the script without Docker, run:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-publish-assets.ps1
+```
+
 ## Current Constraints
 
 The current implementation has several known architectural limitations:
