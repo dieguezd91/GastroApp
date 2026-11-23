@@ -10,6 +10,9 @@
 
 <PageTitle>Resumen</PageTitle>
 
+@* Employees are redirected in OnInitializedAsync before the report loads; render nothing until it does. *@
+@if (report is not null)
+{
 <div class="page-header">
     <div>
         <h1>Resumen del día</h1>
@@ -158,10 +161,11 @@
 </ModalDialog>
 
 <Toast @ref="toast" />
+}
 
 @code {
     private decimal totalSales;
-    private SalesReport report = null!;
+    private SalesReport? report;
     private int salesCount;
     private string topProduct = "Ninguno";
     private int topProductQty;
