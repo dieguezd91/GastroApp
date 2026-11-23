@@ -57,14 +57,14 @@
             <p class="nav-group__title">Catálogo e inventario</p>
             <ul class="nav-list">
                 <li>
-                    <NavLink class="nav-link" href="products">
+                    <SectionNavLink class="nav-link" href="products" AlsoMatch="@CatalogRoutes">
                         <span class="nav-link__main"><Icon Name="products" /><span>Productos y categorías</span></span>
-                    </NavLink>
+                    </SectionNavLink>
                 </li>
                 <li>
-                    <NavLink class="nav-link" href="ingredients">
+                    <SectionNavLink class="nav-link" href="ingredients" AlsoMatch="@InventoryRoutes">
                         <span class="nav-link__main"><Icon Name="ingredients" /><span>Ingredientes y stock</span></span>
-                    </NavLink>
+                    </SectionNavLink>
                 </li>
                 <li>
                     <NavLink class="nav-link" href="recipes">
@@ -72,9 +72,9 @@
                     </NavLink>
                 </li>
                 <li>
-                    <NavLink class="nav-link" href="invoices">
+                    <SectionNavLink class="nav-link" href="invoices" AlsoMatch="@PurchasingRoutes">
                         <span class="nav-link__main"><Icon Name="suppliers" /><span>Proveedores y facturas</span></span>
-                    </NavLink>
+                    </SectionNavLink>
                 </li>
             </ul>
         </div>
@@ -95,6 +95,11 @@
 }
 
 @code {
+    // Tab sub-routes that belong to a sidebar entry (S5).
+    private static readonly string[] CatalogRoutes = ["product-categories"];
+    private static readonly string[] InventoryRoutes = ["stock/count"];
+    private static readonly string[] PurchasingRoutes = ["suppliers"];
+
     private bool disposed;
 
     private string Initials
