@@ -1,152 +1,111 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">
-            <span class="brand-icon">🍽️</span>
-            <span class="brand-text">GastroApp</span>
-        </a>
-        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-    </div>
-</div>
-
-<div class="@NavMenuCssClass nav-scrollable" @onclick="ToggleNavMenu">
-    <nav class="flex-column">
-        @if (AuthService.IsAuthenticated)
-        {
-            <div class="user-info px-3">
-                <span class="oi oi-person" aria-hidden="true"></span>
-                <div class="user-details">
-                    <strong>@AuthService.CurrentUser?.Username</strong>
-                    <small>@AuthService.CurrentUser?.Role</small>
-                </div>
-            </div>
-        }
-
-        <div class="nav-section">
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                    <span class="oi oi-home" aria-hidden="true"></span> Dashboard
-                </NavLink>
-            </div>
-        </div>
-
-        @if (AuthService.IsAuthenticated)
-        {
-            <!-- SECCIÓN VENTAS -->
-            <div class="nav-section">
-                <div class="nav-section-title">VENTAS</div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link nav-link-primary" href="sales" Match="NavLinkMatch.All">
-                        <span class="oi oi-cart" aria-hidden="true"></span> Vender
-                    </NavLink>
-                </div>
-                @if (AuthService.IsInRole(UserRole.Admin))
-                {
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="cash" Match="NavLinkMatch.All">
-                            <span class="oi oi-dollar" aria-hidden="true"></span> Caja
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="cash/history">
-                            <span class="oi oi-list" aria-hidden="true"></span> Historial de cajas
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="sales/history">
-                            <span class="oi oi-document" aria-hidden="true"></span> Historial de ventas
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="summary">
-                            <span class="oi oi-bar-chart" aria-hidden="true"></span> Resumen
-                        </NavLink>
-                    </div>
-                }
-            </div>
-
-            @if (AuthService.IsInRole(UserRole.Admin))
-            {
-                <!-- SECCIÓN COSTOS -->
-                <div class="nav-section">
-                    <div class="nav-section-title">COSTOS</div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="ingredients">
-                            <span class="oi oi-droplet" aria-hidden="true"></span> Ingredientes
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="stock/count">
-                            <span class="oi oi-clipboard" aria-hidden="true"></span> Conteo de stock
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="recipes">
-                            <span class="oi oi-book" aria-hidden="true"></span> Recetas
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="suppliers">
-                            <span class="oi oi-truck" aria-hidden="true"></span> Proveedores
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="invoices">
-                            <span class="oi oi-document" aria-hidden="true"></span> Facturas
-                        </NavLink>
-                    </div>
-                </div>
-
-                <!-- SECCIÓN PRODUCTOS -->
-                <div class="nav-section">
-                    <div class="nav-section-title">PRODUCTOS</div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="products">
-                            <span class="oi oi-box" aria-hidden="true"></span> Gestionar
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="product-categories">
-                            <span class="oi oi-tags" aria-hidden="true"></span> Categorías
-                        </NavLink>
-                    </div>
-                </div>
-            }
-
-            <!-- LOGOUT -->
-            <div class="nav-section nav-section-bottom">
-                <div class="nav-item px-3">
-                    <button class="nav-link nav-link-logout" @onclick="HandleLogout">
-                        <span class="oi oi-account-logout" aria-hidden="true"></span> Cerrar Sesión
-                    </button>
-                </div>
-            </div>
-        }
-        else
-        {
-            <div class="nav-section">
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="login">
-                        <span class="oi oi-account-login" aria-hidden="true"></span> Iniciar Sesión
-                    </NavLink>
-                </div>
-            </div>
-        }
-    </nav>
-</div>
-
 @using GastroApp.Services
 @using GastroApp.Models
 @implements IDisposable
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
+@* Role-grouped navigation (docs: prototypes/ui-ux/docs/NAVIGATION_MAP.md). Rendered twice by MainLayout:
+   in the persistent sidebar (>= 72rem) and inside the <dialog> drawer below it.
+   Reportes and Configuración are intentionally absent (proposals, not implemented). *@
+@if (AuthService.IsAuthenticated)
+{
+    <div class="nav-group">
+        <p class="nav-group__title">Operación diaria</p>
+        <ul class="nav-list">
+            <li>
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="nav-link__main"><Icon Name="dashboard" /><span>@(AuthService.IsInRole(UserRole.Admin) ? "Panel operativo" : "Inicio")</span></span>
+                </NavLink>
+            </li>
+            <li>
+                <NavLink class="nav-link" href="sales" Match="NavLinkMatch.All">
+                    <span class="nav-link__main"><Icon Name="pos" /><span>Vender (POS)</span></span>
+                </NavLink>
+            </li>
+        </ul>
+    </div>
+
+    @if (AuthService.IsInRole(UserRole.Admin))
+    {
+        <div class="nav-group">
+            <p class="nav-group__title">Caja y ventas</p>
+            <ul class="nav-list">
+                <li>
+                    <NavLink class="nav-link" href="cash" Match="NavLinkMatch.All">
+                        <span class="nav-link__main"><Icon Name="cash" /><span>Caja diaria</span></span>
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink class="nav-link" href="cash/history">
+                        <span class="nav-link__main"><Icon Name="history" /><span>Historial de cajas</span></span>
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink class="nav-link" href="sales/history">
+                        <span class="nav-link__main"><Icon Name="receipt" /><span>Historial de ventas</span></span>
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink class="nav-link" href="summary">
+                        <span class="nav-link__main"><Icon Name="summary" /><span>Resumen del día</span></span>
+                    </NavLink>
+                </li>
+            </ul>
+        </div>
+
+        <div class="nav-group">
+            <p class="nav-group__title">Catálogo e inventario</p>
+            <ul class="nav-list">
+                <li>
+                    <NavLink class="nav-link" href="products">
+                        <span class="nav-link__main"><Icon Name="products" /><span>Productos y categorías</span></span>
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink class="nav-link" href="ingredients">
+                        <span class="nav-link__main"><Icon Name="ingredients" /><span>Ingredientes y stock</span></span>
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink class="nav-link" href="recipes">
+                        <span class="nav-link__main"><Icon Name="recipes" /><span>Recetas y costos</span></span>
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink class="nav-link" href="invoices">
+                        <span class="nav-link__main"><Icon Name="suppliers" /><span>Proveedores y facturas</span></span>
+                    </NavLink>
+                </li>
+            </ul>
+        </div>
+    }
+
+    <div class="sidebar__footer">
+        <div class="user-pill">
+            <span class="user-pill__avatar" aria-hidden="true">@Initials</span>
+            <span class="user-pill__meta">
+                <span class="user-pill__name">@AuthService.CurrentUser?.Username</span>
+                <span class="user-pill__role">@(AuthService.IsInRole(UserRole.Admin) ? "Administrador" : "Empleado")</span>
+            </span>
+        </div>
+        <button type="button" class="nav-link" @onclick="HandleLogout">
+            <span class="nav-link__main"><Icon Name="logout" /><span>Cerrar sesión</span></span>
+        </button>
+    </div>
+}
+
 @code {
-    private bool collapseNavMenu = true;
     private bool disposed;
 
-    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+    private string Initials
+    {
+        get
+        {
+            var name = AuthService.CurrentUser?.Username?.Trim();
+            if (string.IsNullOrEmpty(name)) return "US";
+            return name.Length == 1 ? name.ToUpperInvariant() : name[..2].ToUpperInvariant();
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -162,11 +121,6 @@
     {
         disposed = true;
         AuthService.OnAuthStateChanged -= HandleAuthStateChanged;
-    }
-
-    private void ToggleNavMenu()
-    {
-        collapseNavMenu = !collapseNavMenu;
     }
 
     private void HandleLogout()

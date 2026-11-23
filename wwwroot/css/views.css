@@ -1,0 +1,86 @@
+/* View-specific styles ported from prototypes/ui-ux/styles/views.css.
+   Only the screens already migrated live here; later tasks append their views. */
+@layer views {
+  /* Login View */
+  .login-stage {
+    min-block-size: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: var(--space-4);
+  }
+
+  .login-card {
+    inline-size: min(28rem, 100%);
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    padding: var(--space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .password-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .password-wrap .input {
+    padding-inline-end: 3.2rem;
+  }
+
+  .password-wrap__toggle {
+    position: absolute;
+    inset-inline-end: 0.35rem;
+    min-inline-size: 2.35rem;
+    min-block-size: 2.35rem;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Single-card status screens (Acceso denegado) */
+  .status-stage {
+    min-block-size: min(60dvh, 100%);
+    display: grid;
+    place-items: center;
+    padding: var(--space-4);
+  }
+
+  .status-card {
+    inline-size: min(36rem, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+}
+
+@layer utilities {
+  .text-muted { color: var(--text-muted); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-danger { color: var(--crimson-700); }
+  .text-ok { color: var(--emerald-800); }
+  .text-warn { color: var(--amber-800); }
+  .text-xs { font-size: var(--text-xs); }
+  .text-sm { font-size: var(--text-sm); }
+  .fw-600 { font-weight: 600; }
+  .fw-700 { font-weight: 700; }
+  .mt-2 { margin-block-start: var(--space-2); }
+  .mt-3 { margin-block-start: var(--space-3); }
+  .mt-4 { margin-block-start: var(--space-4); }
+  .mb-3 { margin-block-end: var(--space-3); }
+  .mb-4 { margin-block-end: var(--space-4); }
+  .flex-wrap-gap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+}

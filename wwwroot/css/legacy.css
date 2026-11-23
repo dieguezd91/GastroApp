@@ -1,0 +1,8 @@
+/* Cascade layer order for the whole app (declared first so every later sheet slots into it).
+   `legacy` holds Bootstrap and the pre-redesign site.css; it has the LOWEST priority so the
+   design system (base..utilities) wins while screens are migrated one by one. Remove the
+   Bootstrap/site.css imports (and this layer) once the last screen is migrated. */
+@layer legacy, base, theme, layout, components, compat, views, utilities;
+
+@import url('bootstrap/bootstrap.min.css') layer(legacy);
+@import url('site.css') layer(legacy);

@@ -1,0 +1,43 @@
+@* Inline alert banner (.banner--ok|warn|danger|info|proposal). Danger banners are announced (role="alert"). *@
+<div class="banner banner--@Variant" role="@Role">
+    <div class="banner__body">
+        <span class="banner__icon"><Icon Name="@IconName" Size="20" /></span>
+        <div>
+            @if (!string.IsNullOrEmpty(Title))
+            {
+                <p class="banner__title">@Title</p>
+            }
+            @if (ChildContent is not null)
+            {
+                <p>@ChildContent</p>
+            }
+        </div>
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="flex-wrap-gap">@Actions</div>
+    }
+</div>
+
+@code {
+    /// <summary>ok | warn | danger | info | proposal</summary>
+    [Parameter] public string Variant { get; set; } = "info";
+
+    [Parameter] public string? Title { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional action buttons rendered at the end of the banner.</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private string? Role => Variant == "danger" ? "alert" : null;
+
+    private string IconName => Variant switch
+    {
+        "ok" => "checkCircle",
+        "warn" => "alertTriangle",
+        "danger" => "alertOctagon",
+        "proposal" => "sparkles",
+        _ => "info"
+    };
+}

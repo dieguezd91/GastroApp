@@ -1,0 +1,53 @@
+@* Topbar cash-register status. CashRegisterService raises no change events, so the badge
+   re-reads the current register on a short timer; only this component re-renders. *@
+@implements IDisposable
+@using GastroApp.Services
+@inject CashRegisterService CashService
+
+@if (openRegisterId is int id)
+{
+    <Badge Variant="ok" Icon="checkCircle" Label="@($"Caja #{id} abierta")" />
+}
+else
+{
+    <Badge Variant="danger" Icon="alertOctagon" Label="Caja cerrada" />
+}
+
+@code {
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
+
+    private int? openRegisterId;
+    private Timer? timer;
+    private bool disposed;
+
+    protected override void OnInitialized()
+    {
+        openRegisterId = ReadOpenRegisterId();
+        timer = new Timer(_ => Refresh(), null, RefreshInterval, RefreshInterval);
+    }
+
+    private int? ReadOpenRegisterId()
+    {
+        var current = CashService.GetCurrent();
+        return current is { IsOpen: true } ? current.Id : null;
+    }
+
+    private void Refresh()
+    {
+        if (disposed) return;
+        _ = InvokeAsync(() =>
+        {
+            if (disposed) return;
+            var latest = ReadOpenRegisterId();
+            if (latest == openRegisterId) return;
+            openRegisterId = latest;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        timer?.Dispose();
+    }
+}

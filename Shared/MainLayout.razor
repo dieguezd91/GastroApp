@@ -1,50 +1,170 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @implements IDisposable
+@implements IAsyncDisposable
+@using GastroApp.Models
 @using GastroApp.Services
 @inject AuthService AuthService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>GastroApp</PageTitle>
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
+<a href="@SkipLinkHref" class="skip-link visually-hidden">Saltar al contenido principal</a>
+
+@if (AuthService.IsAuthenticated)
+{
+    var isAdmin = AuthService.IsInRole(UserRole.Admin);
+    var route = GetRouteInfo(isAdmin);
+
+    <div class="app-shell">
+        <aside class="sidebar" aria-label="Barra lateral">
+            <div class="sidebar__inner">
+                <a class="brand" href="">
+                    <span class="brand__mark" aria-hidden="true"><Icon Name="utensils" Size="20" /></span>
+                    <span class="brand__text">
+                        <span class="brand__name">GastroApp</span>
+                    </span>
+                </a>
+                <nav class="sidebar__nav" aria-label="Menú principal">
+                    <NavMenu />
+                </nav>
+            </div>
+        </aside>
+
+        <div class="app-workspace">
+            <header class="topbar">
+                <div class="topbar__left">
+                    <button type="button" @ref="drawerOpenButton" class="topbar__menu-btn"
+                            aria-label="Abrir menú de navegación" aria-expanded="false" aria-controls="nav-drawer">
+                        <Icon Name="menu" Size="20" />
+                    </button>
+                    <div class="topbar__title-wrap">
+                        @if (!string.IsNullOrEmpty(route.Crumb))
+                        {
+                            <span class="topbar__crumb">@route.Crumb</span>
+                        }
+                        <span class="fw-700 text-sm">@route.Title</span>
+                    </div>
+                </div>
+
+                <div class="topbar__right">
+                    <CashStatusBadge />
+                    <Badge Variant="@(isAdmin ? "info" : "neutral")" Label="@(isAdmin ? "Administrador" : "Empleado")" />
+                </div>
+            </header>
+
+            <main class="main-content" id="main-content" tabindex="-1">
+                @Body
+            </main>
+        </div>
     </div>
 
-    <main>
-        <div class="top-row px-4">
-            @if (AuthService.IsAuthenticated)
-            {
-                <div class="user-display">
-                    <span class="oi oi-person"></span>
-                    <strong>@AuthService.CurrentUser?.Username</strong>
-                    <span class="user-role">(@AuthService.CurrentUser?.Role)</span>
-                    <button class="btn btn-sm btn-link" @onclick="HandleLogout">Cerrar Sesión</button>
+    <dialog id="nav-drawer" @ref="drawerDialog" class="drawer" aria-label="Menú de navegación">
+        <div class="drawer-scroller">
+            <div class="drawer-sheet">
+                <div class="drawer-sheet__head">
+                    <div class="brand brand--plain">
+                        <span class="brand__mark" aria-hidden="true"><Icon Name="utensils" Size="20" /></span>
+                        <span class="brand__text">
+                            <span class="brand__name">GastroApp</span>
+                        </span>
+                    </div>
+                    <button type="button" @ref="drawerCloseButton" data-drawer-close class="drawer-sheet__close"
+                            aria-label="Cerrar menú" autofocus>
+                        <Icon Name="close" />
+                    </button>
                 </div>
-            }
-            else
-            {
-                <a href="/login">Iniciar Sesión</a>
-            }
+                <nav class="sidebar__nav" aria-label="Menú principal">
+                    <NavMenu />
+                </nav>
+            </div>
         </div>
-
-        <article class="content px-4">
+    </dialog>
+}
+else
+{
+    <div class="app-shell--auth">
+        <main id="main-content" tabindex="-1">
             @Body
-        </article>
-    </main>
-</div>
+        </main>
+    </div>
+}
 
 @code {
+    private readonly record struct RouteInfo(string Title, string Crumb);
+
+    private ElementReference drawerDialog;
+    private ElementReference drawerOpenButton;
+    private ElementReference drawerCloseButton;
+    private IJSObjectReference? shellModule;
+    private bool drawerBound;
     private bool disposed;
+
+    // <base href="/"> would turn a bare "#main-content" into "/#main-content" and leave the page.
+    private string SkipLinkHref
+    {
+        get
+        {
+            var uri = Navigation.Uri;
+            var hash = uri.IndexOf('#');
+            return (hash >= 0 ? uri[..hash] : uri) + "#main-content";
+        }
+    }
 
     protected override void OnInitialized()
     {
         AuthService.OnAuthStateChanged += HandleAuthStateChanged;
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            // The drawer element is gone after logout; bind a fresh one on the next login.
+            drawerBound = false;
+            return;
+        }
+
+        if (drawerBound || disposed) return;
+        drawerBound = true;
+        try
+        {
+            shellModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/shell.js");
+            await shellModule.InvokeVoidAsync("initDrawer", drawerDialog, drawerOpenButton, drawerCloseButton);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; nothing to bind.
+        }
+    }
+
     private void HandleAuthStateChanged()
     {
         if (!disposed) _ = InvokeAsync(() => { if (!disposed) StateHasChanged(); });
+    }
+
+    // Topbar title/crumb for the current URL. Tabbed screens (later tasks) keep their group title.
+    private RouteInfo GetRouteInfo(bool isAdmin)
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var cut = path.IndexOfAny(new[] { '?', '#' });
+        if (cut >= 0) path = path[..cut];
+        path = path.Trim('/');
+
+        bool Is(string prefix) => path == prefix || path.StartsWith(prefix + "/", StringComparison.Ordinal);
+
+        if (path.Length == 0) return new(isAdmin ? "Panel operativo" : "Inicio", "Operación diaria");
+        if (Is("sales/history")) return new("Historial de ventas", "Caja y ventas");
+        if (Is("sales")) return new("Punto de Venta", "Operación diaria");
+        if (Is("cash/history")) return new("Historial de cajas", "Caja y ventas");
+        if (Is("cash")) return new("Caja diaria", "Caja y ventas");
+        if (Is("summary")) return new("Resumen del día", "Caja y ventas");
+        if (Is("products") || Is("product-categories")) return new("Productos y categorías", "Catálogo e inventario");
+        if (Is("ingredients") || Is("stock")) return new("Ingredientes y stock", "Catálogo e inventario");
+        if (Is("recipes")) return new("Recetas y costos", "Catálogo e inventario");
+        if (Is("invoices") || Is("suppliers")) return new("Proveedores y facturas", "Catálogo e inventario");
+        if (Is("unauthorized")) return new("Acceso denegado", "Acceso");
+        return new("GastroApp", string.Empty);
     }
 
     public void Dispose()
@@ -53,9 +173,18 @@
         AuthService.OnAuthStateChanged -= HandleAuthStateChanged;
     }
 
-    private void HandleLogout()
+    public async ValueTask DisposeAsync()
     {
-        AuthService.Logout();
-        Navigation.NavigateTo("/login");
+        Dispose();
+        if (shellModule is null) return;
+        try
+        {
+            await shellModule.InvokeVoidAsync("disposeDrawer");
+            await shellModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit closed first; the browser already dropped the module.
+        }
     }
 }

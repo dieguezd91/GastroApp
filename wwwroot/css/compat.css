@@ -1,0 +1,66 @@
+/* Bridge for screens that have not been migrated yet: maps the old Bootstrap/site.css button
+   variants onto the design-system look. Delete this file when no page uses these classes. */
+@layer compat {
+  .btn-primary,
+  .btn-success,
+  .btn-danger {
+    color: #ffffff;
+  }
+
+  .btn-primary {
+    background-color: var(--brand-primary);
+    border-color: var(--brand-primary);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--brand-primary-hover);
+    border-color: var(--brand-primary-hover);
+    color: #ffffff;
+  }
+
+  .btn-success {
+    background-color: var(--action-collect);
+    border-color: var(--action-collect);
+  }
+
+  .btn-success:hover:not(:disabled) {
+    background-color: var(--action-collect-hover);
+    border-color: var(--action-collect-hover);
+    color: #ffffff;
+  }
+
+  .btn-danger {
+    background-color: var(--crimson-600);
+    border-color: var(--crimson-600);
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    background-color: var(--crimson-700);
+    border-color: var(--crimson-700);
+    color: #ffffff;
+  }
+
+  .btn-link {
+    border-color: transparent;
+    background-color: transparent;
+    color: var(--brand-primary);
+  }
+
+  .btn-small,
+  .btn-sm {
+    min-block-size: 2.25rem;
+    padding: 0.35rem var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  .btn-large {
+    min-block-size: 3.125rem;
+    padding: 0.65rem var(--space-5);
+    font-size: var(--text-base);
+    font-weight: 700;
+  }
+
+  .btn-block {
+    inline-size: 100%;
+  }
+}

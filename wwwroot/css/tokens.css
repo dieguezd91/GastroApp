@@ -1,0 +1,163 @@
+@layer base, theme, layout, components, views, utilities;
+
+@layer theme {
+  :root {
+    color-scheme: light;
+
+    /* Tier 1 — Palette primitives ("Bistro Craft") */
+    --stone-50: #faf9f6;
+    --stone-100: #f5f3ee;
+    --stone-200: #ebe8e0;
+    --stone-300: #dbd6cb;
+    --stone-400: #b8b2a5;
+    --stone-500: #727973;
+    --stone-600: #555d57;
+    --stone-700: #3d443f;
+    --stone-800: #242a26;
+    --stone-900: #161b18;
+    --stone-950: #0f1311;
+
+    --ember-50: #fdf1ec;
+    --ember-100: #fadfd4;
+    --ember-600: #b84a27;
+    --ember-700: #993b1d;
+    --ember-800: #7c2e15;
+
+    --emerald-50: #e8f6ee;
+    --emerald-100: #cdebd9;
+    --emerald-600: #14704b;
+    --emerald-700: #0f5a3c;
+    --emerald-800: #0b472f;
+
+    --amber-50: #fef6e4;
+    --amber-100: #fde7b8;
+    --amber-700: #9a5308;
+    --amber-800: #7c4206;
+
+    --crimson-50: #fdecec;
+    --crimson-100: #fbd3d3;
+    --crimson-600: #c42323;
+    --crimson-700: #9f1b1b;
+
+    --cobalt-50: #edf3ff;
+    --cobalt-700: #1d4ed8;
+
+    --violet-50: #f4efff;
+    --violet-200: #d8c8fb;
+    --violet-700: #5b21b6;
+
+    /* Tier 2 — Semantic surface & text tokens (WCAG 2.2 AA >= 4.5:1 text, >= 3:1 UI) */
+    --surface-canvas: var(--stone-100);
+    --surface-card: #ffffff;
+    --surface-subtle: var(--stone-200);
+    --surface-elevated: #ffffff;
+    --surface-sidebar: var(--stone-900);
+    --surface-sidebar-hover: var(--stone-800);
+    --surface-sidebar-active: #27322c;
+
+    --text-primary: var(--stone-900);
+    --text-secondary: var(--stone-700);
+    --text-muted: var(--stone-600);
+    --text-inverse: #f7f6f2;
+    --text-inverse-muted: #c2c9c4;
+
+    --border-subtle: var(--stone-300);
+    --border-strong: var(--stone-400);
+    --border-control: var(--stone-500);
+    --border-sidebar: #2b342f;
+
+    /* Tier 2 — Interactive accents */
+    --brand-primary: var(--ember-600);
+    --brand-primary-hover: var(--ember-700);
+    --brand-primary-soft: var(--ember-50);
+    --brand-primary-ink: var(--ember-800);
+
+    --action-collect: var(--emerald-600);
+    --action-collect-hover: var(--emerald-700);
+    --action-collect-soft: var(--emerald-50);
+
+    /* Tier 2 — Semantic status */
+    --status-ok-bg: var(--emerald-50);
+    --status-ok-ink: var(--emerald-800);
+    --status-ok-border: var(--emerald-600);
+
+    --status-warn-bg: var(--amber-50);
+    --status-warn-ink: var(--amber-800);
+    --status-warn-border: var(--amber-700);
+
+    --status-danger-bg: var(--crimson-50);
+    --status-danger-ink: var(--crimson-700);
+    --status-danger-border: var(--crimson-600);
+
+    --status-info-bg: var(--cobalt-50);
+    --status-info-ink: var(--cobalt-700);
+    --status-info-border: var(--cobalt-700);
+
+    --status-proposal-bg: var(--violet-50);
+    --status-proposal-ink: var(--violet-700);
+    --status-proposal-border: var(--violet-700);
+
+    /* Tier 3 — Typography */
+    --font-sans: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Menlo, Consolas, monospace;
+
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: clamp(1.1875rem, 1.05rem + 0.5vw, 1.375rem);
+    --text-2xl: clamp(1.375rem, 1.15rem + 0.9vw, 1.75rem);
+    --text-kpi: clamp(1.375rem, 1.15rem + 0.8vw, 1.875rem);
+
+    --leading-tight: 1.25;
+    --leading-normal: 1.5;
+
+    /* Tier 3 — Spacing, Radii, Elevation */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+
+    --radius-sm: 0.375rem;
+    --radius-md: 0.625rem;
+    --radius-lg: 0.875rem;
+    --radius-full: 9999px;
+
+    --shadow-xs: 0 1px 2px rgb(22 27 24 / 0.05);
+    --shadow-sm: 0 2px 6px rgb(22 27 24 / 0.07), 0 1px 2px rgb(22 27 24 / 0.04);
+    --shadow-md: 0 10px 24px rgb(22 27 24 / 0.12), 0 2px 6px rgb(22 27 24 / 0.06);
+    --shadow-lg: 0 20px 44px rgb(22 27 24 / 0.2);
+
+    /* Tier 3 — Layout & Interaction */
+    --sidebar-width: 15rem;
+    --topbar-height: 3.5rem;
+    --target-size: 24px;
+    --control-height: 2.75rem;
+    --focus-ring-color: #0b57d0;
+    --focus-ring-width: 3px;
+    --focus-ring-offset: 2px;
+
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --duration-fast: 140ms;
+    --duration-normal: 220ms;
+  }
+
+  @media (pointer: coarse) {
+    :root {
+      --target-size: 44px;
+      --control-height: 3rem;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :root {
+      --border-subtle: CanvasText;
+      --border-strong: CanvasText;
+      --border-control: ButtonBorder;
+      --focus-ring-color: Highlight;
+    }
+  }
+}

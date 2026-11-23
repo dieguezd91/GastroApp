@@ -1,0 +1,19 @@
+@* Semantic status badge (.badge--ok|warn|danger|info|neutral|proposal).
+   Never rely on colour alone: always pass a Label and, when useful, an Icon. *@
+<span class="badge badge--@Variant">
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <Icon Name="@Icon" Size="14" />
+    }
+    <span>@Label</span>
+</span>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>ok | warn | danger | info | neutral | proposal</summary>
+    [Parameter] public string Variant { get; set; } = "neutral";
+
+    /// <summary>Optional <see cref="Icon"/> name.</summary>
+    [Parameter] public string? Icon { get; set; }
+}
