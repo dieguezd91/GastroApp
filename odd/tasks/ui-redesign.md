@@ -18,8 +18,8 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 | ID | Specs | Route | Commit |
 | --- | --- | --- | --- |
 | T1 | S2, S3, S4, S7 | worker: design system CSS + icons in `wwwroot/`, `_Host.cshtml`, `MainLayout`/`NavMenu` shell, topbar, drawer; Login + Acceso denegado | 799aea3 |
-| T2 | S6, S7 | worker: Dashboard (`/`) | — |
-| T3 | S6, S7 | worker: POS UI (`/sales`): catalog, cart, line dialog, checkout with mixed payments | — |
+| T2 | S6, S7 | worker: Dashboard (`/`) | b25dade |
+| T3 | S6, S7 | worker: POS UI (`/sales`): catalog, cart, line dialog, checkout with mixed payments | 76a2227 |
 | T4 | S8 | worker: POS stock availability (service + UI) + `scripts/verify-pos-availability.ps1` | — |
 | T5 | S10 | worker: post-checkout receipt | — |
 | T6 | S6, S7 | worker: Caja + Historial de cajas | — |
@@ -36,3 +36,5 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 - L2: user decisions: alcance "Toda la app, por fases (recomendado)"; propuestas "Dejarlas afuera (recomendado)"; navegación "Unificar en pestañas (recomendado)"; comportamiento (bloqueo de stock en POS, sincronizar costo receta→producto, comprobante post-cobro) "Sí, incluirlas".
 - L3: parent decision: work on `feat/ui-redesign`, not `main`, because every push to `main` redeploys the tester's Render instance.
 - L4: T1 done (799aea3, hash recorded 1eb0491). Per-view CSS slots `wwwroot/css/views/<view>.css` added (8ab76c4) so parallel workers own disjoint files; parallel workers do not commit or edit this document, the parent does. Known pre-existing failure: `scripts/verify-payment-summary.ps1` pins a csproj hash that no commit since 7a173fd matches (not caused by this branch). `scripts/verify-stock-count.ps1` fails one nav check ("Conteo de stock" link) by design of the new menu; T9 updates it. Slice boundary: T1 alone exceeds ~400 lines (CSS port); publish shape decided at delivery.
+- L5: T2 done (b25dade). Adapted: recipe variation shows only the >=30% flag (RecipeService overwrites LastCalculatedCost, so old->new cost is not recoverable); employee KPI counts ingredients out of stock (per-product availability arrives with T4); greeting uses Username (no full name in User).
+- L6: T3 done (76a2227). Seams: Sales.razor AvailabilityOf(Product) -> TileAvailability and MaxQuantityOf(SaleItem) -> int? (T4); OnSaleCompleted(Sale) + lastCompletedSale (T5). Shared components: ModalDialog (Title, Subtitle, Size, LightDismiss, ChildContent, Footer, OnClosed; ShowAsync/CloseAsync), Toast (Show(message, variant ok|warn|danger, durationMs)), KpiCard. Cash received now defaults to the amount (Exacto), per prototype.
