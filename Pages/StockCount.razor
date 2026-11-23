@@ -3,223 +3,321 @@
 @using System.Globalization
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Inventory
 @using StockCountRecord = GastroApp.Models.StockCount
 @inject StockCountService StockCountService
 @inject IngredientService IngredientService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
-<PageTitle>Conteo de stock</PageTitle>
+<PageTitle>Conteo físico de stock</PageTitle>
 
-<div class="page-container">
-    <h1>📋 Conteo de stock</h1>
-
-    @if (successMessage != null)
-    {
-        <p class="text-success" role="status">@successMessage</p>
-    }
-    @if (errorMessage != null)
-    {
-        <p class="text-danger" role="alert">@errorMessage</p>
-    }
-
-    @if (CountId.HasValue)
-    {
-        <p><a href="/stock/count">← Volver al conteo de stock</a></p>
-        <div class="form-card" role="region" aria-label="Detalle del conteo">
-            @if (detail == null)
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    <InventoryView ActiveTab="InventoryTab.Count" AlertCount="alertCount">
+        <ChildContent>
+            @if (successMessage != null)
             {
-                <h3>Conteo #@CountId</h3>
-                <p role="alert">@(detailMessage ?? "No se pudo cargar el conteo.")</p>
+                <Banner Variant="ok">@successMessage</Banner>
+            }
+
+            @if (CountId.HasValue)
+            {
+                <section class="card stack" role="region" aria-label="Detalle del conteo">
+                    <div>
+                        <button type="button" class="btn btn--ghost btn--sm" @onclick="CloseDetail">← Volver al conteo físico</button>
+                    </div>
+                    @if (detail == null)
+                    {
+                        <h2 class="card__title">Conteo #@CountId</h2>
+                        <Banner Variant="danger">@(detailMessage ?? "No se pudo cargar el conteo.")</Banner>
+                    }
+                    else
+                    {
+                        <div>
+                            <h2 class="card__title">Conteo #@detail.Id</h2>
+                            <p class="card__desc">@detail.Date.ToString("dd/MM/yyyy HH:mm") · Notas: @(string.IsNullOrWhiteSpace(detail.Notes) ? "Sin notas" : detail.Notes)</p>
+                        </div>
+                        <div class="grid-kpi">
+                            <KpiCard Label="Responsable" Value="@detail.Username" Meta="@($"ID {detail.UserId}")" />
+                            <KpiCard Label="Ingredientes contados" Value="@detail.Lines.Count.ToString()" />
+                            <KpiCard Label="Con diferencia (ajustados)" Value="@detail.AdjustedLineCount.ToString()" />
+                        </div>
+                        <div class="table-wrapper" tabindex="0" role="region" aria-label="Detalle del conteo físico">
+                            <table class="data-table data-table--stack">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Ingrediente</th>
+                                        <th scope="col" class="col-num">Stock registrado</th>
+                                        <th scope="col" class="col-num">Stock contado</th>
+                                        <th scope="col" class="col-num">Diferencia</th>
+                                        <th scope="col">Resultado</th>
+                                        <th scope="col">Motivo</th>
+                                        <th scope="col" class="col-actions">Movimientos</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in detail.Lines)
+                                    {
+                                        <tr @key="line.IngredientId">
+                                            <th scope="row">@line.IngredientName</th>
+                                            <td data-label="Registrado" class="col-num">@InventoryFormat.Qty(line.ExpectedStock, line.Unit)</td>
+                                            <td data-label="Contado" class="col-num fw-700">@InventoryFormat.Qty(line.CountedStock, line.Unit)</td>
+                                            <td data-label="Diferencia" class="col-num">@Signed(line.Difference) @line.Unit</td>
+                                            <td data-label="Resultado"><Badge Variant="@DifferenceVariant(line.Difference)" Label="@StockCountLabels.GetLabel(line.Difference)" /></td>
+                                            <td data-label="Motivo">@(string.IsNullOrWhiteSpace(line.Reason) ? "—" : line.Reason)</td>
+                                            <td class="col-actions"><a class="btn btn--ghost btn--sm" href="/ingredients/@line.IngredientId/movements">Ver movimientos</a></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
             }
             else
             {
-                <h3>Conteo #@detail.Id</h3>
-                <p>Fecha: @detail.Date.ToString("dd/MM/yyyy HH:mm")</p>
-                <p>Responsable: @detail.Username (ID @detail.UserId)</p>
-                <p>Notas: @(string.IsNullOrWhiteSpace(detail.Notes) ? "Sin notas" : detail.Notes)</p>
-                <p>Ingredientes contados: @detail.Lines.Count. Con diferencia (ajustados): @detail.AdjustedLineCount.</p>
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead>
-                            <tr><th>Ingrediente</th><th>Unidad</th><th>Stock registrado</th><th>Stock contado</th><th>Diferencia</th><th>Resultado</th><th>Motivo</th><th>Movimientos</th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var line in detail.Lines)
-                            {
-                                <tr @key="line.IngredientId">
-                                    <td>@line.IngredientName</td>
-                                    <td>@line.Unit</td>
-                                    <td>@line.ExpectedStock</td>
-                                    <td>@line.CountedStock</td>
-                                    <td>@Signed(line.Difference)</td>
-                                    <td><strong>@StockCountLabels.GetLabel(line.Difference)</strong></td>
-                                    <td>@(string.IsNullOrWhiteSpace(line.Reason) ? "—" : line.Reason)</td>
-                                    <td><a href="/ingredients/@line.IngredientId/movements">Ver movimientos</a></td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </div>
-    }
-    else
-    {
-        <p>Compare el stock registrado con lo que hay físicamente. Nada cambia hasta que confirme el conteo; cada diferencia queda registrada con su motivo y responsable.</p>
+                <section class="card stack" aria-labelledby="count-title">
+                    <div>
+                        <h2 id="count-title" class="card__title">Nuevo conteo físico de stock</h2>
+                        <p class="card__desc">Compare el stock registrado con lo que hay físicamente. Nada cambia hasta que confirme el conteo; cada diferencia queda registrada con su motivo y responsable.</p>
+                    </div>
 
-        <div class="form-card">
-            <h3>1. Elegir ingredientes</h3>
-            <div class="form-group">
-                <label for="count-name-filter">Filtrar por nombre</label>
-                <input id="count-name-filter" type="text" @bind="nameFilter" @bind:event="oninput" class="form-control" placeholder="Ej: Harina" />
-            </div>
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" @bind="onlyLowStock" />
-                    Solo con stock bajo (stock menor o igual al mínimo)
-                </label>
-            </div>
-            <div class="form-actions">
-                <button class="btn btn-secondary" @onclick="SelectAllActive">Seleccionar todos los activos</button>
-                <button class="btn btn-secondary" @onclick="SelectVisible">Seleccionar los visibles</button>
-                <button class="btn btn-secondary" @onclick="ClearSelection">Limpiar selección</button>
-            </div>
+                    <nav aria-label="Progreso del conteo físico">
+                        <ol class="stepper">
+                            <li class="stepper__item @(Step > 1 ? "stepper__item--done" : null)" aria-current="@(Step == 1 ? "step" : null)">1. Elegir ingredientes</li>
+                            <li class="stepper__item @(Step > 2 ? "stepper__item--done" : null)" aria-current="@(Step == 2 ? "step" : null)">2. Ingresar lo contado</li>
+                            <li class="stepper__item" aria-current="@(Step == 3 ? "step" : null)">3. Revisar diferencias y confirmar</li>
+                        </ol>
+                    </nav>
 
-            <h3>2. Ingresar lo contado</h3>
-            @if (VisibleRows.Count == 0)
-            {
-                <p class="empty-state">No hay ingredientes para mostrar con este filtro.</p>
-            }
-            else
-            {
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead>
-                            <tr><th>Contar</th><th>Ingrediente</th><th>Stock registrado</th><th>Stock contado</th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in VisibleRows)
-                            {
-                                <tr @key="row.Id">
-                                    <td><input type="checkbox" @bind="row.Selected" @bind:after="Invalidate" aria-label="Contar @row.Name" /></td>
-                                    <td>
-                                        @row.Name
-                                        @if (!row.IsActive)
-                                        {
-                                            <span class="badge-inactive">Inactivo</span>
-                                        }
-                                        @if (row.Stock < 0m)
-                                        {
-                                            <span class="text-danger" role="alert">⚠ Stock negativo registrado. Un conteo permite regularizarlo.</span>
-                                        }
-                                    </td>
-                                    <td>@row.Stock @row.Unit</td>
-                                    <td>
-                                        <input type="text" inputmode="decimal" @bind="row.Counted" @bind:after="Invalidate" class="form-control-small"
-                                               disabled="@(!row.Selected)" aria-label="Stock contado de @row.Name" placeholder="@row.Unit" />
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-            <div class="form-actions">
-                <button class="btn btn-primary" @onclick="Compare">Comparar</button>
-            </div>
-        </div>
+                    @if (Step == 1)
+                    {
+                        var visible = VisibleRows;
+                        var selectedCount = rows.Count(r => r.Selected);
+                        <div class="stack">
+                            <div class="toolbar">
+                                <div class="search-wrap">
+                                    <span class="search-wrap__icon"><Icon Name="search" Size="16" /></span>
+                                    <label for="count-name-filter" class="visually-hidden">Filtrar por nombre</label>
+                                    <input id="count-name-filter" type="search" class="input input--compact" autocomplete="off" placeholder="Filtrar por nombre. Ej: Harina"
+                                           @bind="nameFilter" @bind:event="oninput" />
+                                </div>
+                                <label class="check-field" for="count-only-low">
+                                    <input id="count-only-low" type="checkbox" @bind="onlyLowStock" />
+                                    <span>Solo con stock bajo (stock menor o igual al mínimo)</span>
+                                </label>
+                            </div>
+                            <div class="flex-wrap-gap">
+                                <button type="button" class="btn btn--sm" @onclick="SelectAllActive">Seleccionar todos los activos</button>
+                                <button type="button" class="btn btn--sm" @onclick="SelectVisible">Seleccionar los visibles</button>
+                                <button type="button" class="btn btn--ghost btn--sm" @onclick="ClearSelection">Limpiar selección</button>
+                            </div>
 
-        @if (preview != null)
-        {
-            <div class="form-card" role="region" aria-label="Comparación del conteo">
-                <h3>3. Revisar diferencias</h3>
-                <p>Con diferencia: @preview.AdjustedLineCount de @preview.Lines.Count. Cada diferencia necesita un motivo.</p>
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead>
-                            <tr><th>Ingrediente</th><th>Registrado</th><th>Contado</th><th>Diferencia</th><th>Resultado</th><th>Motivo</th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var line in preview.Lines)
+                            @if (visible.Count == 0)
                             {
-                                <tr @key="line.IngredientId">
-                                    <td>
-                                        @line.IngredientName
-                                        @if (line.HasNegativeStock)
-                                        {
-                                            <span class="text-danger">⚠ Stock negativo registrado</span>
-                                        }
-                                    </td>
-                                    <td>@line.ExpectedStock @line.Unit</td>
-                                    <td>@line.CountedStock @line.Unit</td>
-                                    <td>@Signed(line.Difference) @line.Unit</td>
-                                    <td><strong>@StockCountLabels.GetLabel(line.Kind)</strong></td>
-                                    <td>
-                                        @if (line.Difference != 0m)
-                                        {
-                                            <input type="text" @bind="reasons[line.IngredientId]" class="form-control-small" placeholder="Motivo (obligatorio)"
-                                                   aria-label="Motivo de la diferencia de @line.IngredientName" />
-                                        }
-                                        else
-                                        {
-                                            <span>No requiere motivo</span>
-                                        }
-                                    </td>
-                                </tr>
+                                <div class="empty-state">
+                                    <div class="empty-state__icon"><Icon Name="search" Size="24" /></div>
+                                    <div class="stack stack--sm">
+                                        <h3>No hay ingredientes para mostrar con este filtro</h3>
+                                        <p class="text-sm text-secondary">Probá limpiando la búsqueda o el filtro de stock bajo.</p>
+                                    </div>
+                                </div>
                             }
-                        </tbody>
-                    </table>
-                </div>
-                <div class="form-group">
-                    <label for="count-notes">Notas (opcional)</label>
-                    <input id="count-notes" type="text" @bind="notes" class="form-control" />
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" @bind="confirmChecked" />
-                        Confirmo las diferencias y que el stock registrado se ajuste a lo contado
-                    </label>
-                </div>
-                <div class="form-actions">
-                    <button class="btn btn-success" @onclick="Confirm">Confirmar conteo</button>
-                    <button class="btn btn-secondary" @onclick="Invalidate">Descartar comparación</button>
-                </div>
-            </div>
-        }
+                            else
+                            {
+                                <div class="count-picker">
+                                    @foreach (var row in visible)
+                                    {
+                                        <label class="check-field card card--compact count-option" @key="row.Id">
+                                            <input type="checkbox" @bind="row.Selected" @bind:after="Invalidate" />
+                                            <span>
+                                                <strong>@row.Name</strong>
+                                                @if (!row.IsActive)
+                                                {
+                                                    <Badge Variant="neutral" Label="Inactivo" />
+                                                }
+                                                <span class="text-xs text-muted count-option__meta">Registrado: @InventoryFormat.Qty(row.Stock, row.Unit)</span>
+                                                @if (row.Stock < 0m)
+                                                {
+                                                    <span class="text-xs text-danger fw-700 count-option__meta">⚠ Stock negativo registrado. Un conteo permite regularizarlo.</span>
+                                                }
+                                            </span>
+                                        </label>
+                                    }
+                                </div>
+                            }
 
-        <div class="form-card">
-            <h3>Conteos anteriores</h3>
-            @if (history == null || history.Count == 0)
-            {
-                <p class="empty-state">Todavía no se registraron conteos.</p>
-            }
-            else
-            {
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead>
-                            <tr><th>Conteo</th><th>Fecha</th><th>Responsable</th><th>Ingredientes</th><th>Con diferencia</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var entry in history)
+                            @if (errorMessage != null)
                             {
-                                <tr @key="entry.Id">
-                                    <td>#@entry.Id</td>
-                                    <td>@entry.Date.ToString("dd/MM/yyyy HH:mm")</td>
-                                    <td>@entry.Username</td>
-                                    <td>@entry.Lines.Count</td>
-                                    <td>@entry.AdjustedLineCount</td>
-                                    <td><button class="btn btn-small" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
-                                </tr>
+                                <Banner Variant="danger">@errorMessage</Banner>
                             }
-                        </tbody>
-                    </table>
-                </div>
+                            <div class="flex-wrap-gap">
+                                <button type="button" class="btn btn--primary" @onclick="ContinueToQuantities" disabled="@(selectedCount == 0)">Continuar (@selectedCount seleccionados)</button>
+                            </div>
+                        </div>
+                    }
+                    else if (Step == 2)
+                    {
+                        <form class="stack" novalidate @onsubmit="Compare">
+                            <div class="table-wrapper" tabindex="0" role="region" aria-label="Carga de cantidades contadas">
+                                <table class="data-table data-table--stack">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Ingrediente</th>
+                                            <th scope="col" class="col-num">Stock registrado</th>
+                                            <th scope="col">Stock contado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in rows.Where(r => r.Selected))
+                                        {
+                                            <tr @key="row.Id">
+                                                <th scope="row">
+                                                    @row.Name
+                                                    @if (!row.IsActive)
+                                                    {
+                                                        <Badge Variant="neutral" Label="Inactivo" />
+                                                    }
+                                                </th>
+                                                <td data-label="Registrado" class="col-num">@InventoryFormat.Qty(row.Stock, row.Unit)</td>
+                                                <td data-label="Contado">
+                                                    <input type="text" inputmode="decimal" class="input input--compact tnum count-input" autocomplete="off"
+                                                           placeholder="@row.Unit" aria-label="Stock contado de @row.Name"
+                                                           @bind="row.Counted" @bind:after="Invalidate" />
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            @if (errorMessage != null)
+                            {
+                                <Banner Variant="danger">@errorMessage</Banner>
+                            }
+                            <div class="flex-wrap-gap">
+                                <button type="button" class="btn" @onclick="BackToSelection">Volver</button>
+                                <button type="submit" class="btn btn--primary">Comparar diferencias</button>
+                            </div>
+                        </form>
+                    }
+                    else if (preview != null)
+                    {
+                        <div class="stack" role="region" aria-label="Comparación del conteo">
+                            <p class="text-sm text-secondary">Con diferencia: @preview.AdjustedLineCount de @preview.Lines.Count. Cada diferencia necesita un motivo.</p>
+                            <div class="table-wrapper" tabindex="0" role="region" aria-label="Revisión de diferencias del conteo">
+                                <table class="data-table data-table--stack">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Ingrediente</th>
+                                            <th scope="col" class="col-num">Registrado</th>
+                                            <th scope="col" class="col-num">Contado</th>
+                                            <th scope="col" class="col-num">Diferencia</th>
+                                            <th scope="col">Resultado</th>
+                                            <th scope="col">Motivo (obligatorio si difiere)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var line in preview.Lines)
+                                        {
+                                            <tr @key="line.IngredientId">
+                                                <th scope="row">
+                                                    <div>@line.IngredientName</div>
+                                                    @if (line.HasNegativeStock)
+                                                    {
+                                                        <div class="text-xs text-danger fw-700">⚠ Stock negativo registrado</div>
+                                                    }
+                                                </th>
+                                                <td data-label="Registrado" class="col-num">@InventoryFormat.Qty(line.ExpectedStock, line.Unit)</td>
+                                                <td data-label="Contado" class="col-num fw-700">@InventoryFormat.Qty(line.CountedStock, line.Unit)</td>
+                                                <td data-label="Diferencia" class="col-num">@Signed(line.Difference) @line.Unit</td>
+                                                <td data-label="Resultado"><Badge Variant="@DifferenceVariant(line.Difference)" Label="@StockCountLabels.GetLabel(line.Kind)" /></td>
+                                                <td data-label="Motivo">
+                                                    @if (line.Difference != 0m)
+                                                    {
+                                                        <input type="text" class="input input--compact" autocomplete="off" placeholder="Motivo (obligatorio)"
+                                                               aria-label="Motivo de la diferencia de @line.IngredientName" @bind="reasons[line.IngredientId]" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-xs text-muted">No requiere motivo</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="field">
+                                <label class="field__label" for="count-notes">Notas (opcional)</label>
+                                <input id="count-notes" type="text" class="input" autocomplete="off" placeholder="Ej: control previo al turno noche" @bind="notes" />
+                            </div>
+                            <label class="check-field" for="count-confirm">
+                                <input id="count-confirm" type="checkbox" @bind="confirmChecked" />
+                                <span>Confirmo las diferencias y que el stock registrado se ajuste a lo contado</span>
+                            </label>
+                            @if (errorMessage != null)
+                            {
+                                <Banner Variant="danger">@errorMessage</Banner>
+                            }
+                            <div class="flex-wrap-gap">
+                                <button type="button" class="btn" @onclick="Invalidate">Volver a editar cantidades</button>
+                                <button type="button" class="btn btn--collect" @onclick="Confirm">
+                                    <Icon Name="checkCircle" Size="17" />
+                                    <span>Confirmar conteo</span>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </section>
+
+                <section class="card stack" aria-labelledby="past-counts-title">
+                    <h2 id="past-counts-title" class="card__title">Conteos anteriores@(history is { Count: > 0 } ? $" ({history.Count})" : string.Empty)</h2>
+                    @if (history == null || history.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <div class="empty-state__icon"><Icon Name="clipboard" Size="24" /></div>
+                            <div class="stack stack--sm">
+                                <h3>Todavía no se registraron conteos</h3>
+                                <p class="text-sm text-secondary">Cuando confirmes un conteo, vas a poder revisar su detalle acá.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="past-counts-title">
+                            <table class="data-table data-table--stack">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Conteo</th>
+                                        <th scope="col">Fecha</th>
+                                        <th scope="col">Responsable</th>
+                                        <th scope="col" class="col-num">Ingredientes</th>
+                                        <th scope="col" class="col-num">Con diferencia</th>
+                                        <th scope="col" class="col-actions">Detalle</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var entry in history)
+                                    {
+                                        <tr @key="entry.Id">
+                                            <th scope="row">#@entry.Id</th>
+                                            <td data-label="Fecha">@entry.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td data-label="Responsable">@entry.Username</td>
+                                            <td data-label="Ingredientes" class="col-num">@entry.Lines.Count</td>
+                                            <td data-label="Con diferencia" class="col-num">@entry.AdjustedLineCount</td>
+                                            <td class="col-actions"><button type="button" class="btn btn--sm" aria-label="@($"Ver detalle del conteo #{entry.Id}")" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
             }
-        </div>
-    }
-</div>
+        </ChildContent>
+    </InventoryView>
+}
 
 @code {
     [Parameter] public int? CountId { get; set; }
@@ -248,8 +346,13 @@
     private string? errorMessage;
     private string? successMessage;
     private string? detailMessage;
+    // True while the operator types the counted quantities (step 2); the comparison (step 3) is `preview`.
+    private bool enteringQuantities;
+    private int alertCount;
 
     private List<CountRow> VisibleRows => rows.Where(IsVisible).ToList();
+
+    private int Step => preview != null ? 3 : enteringQuantities ? 2 : 1;
 
     private bool IsVisible(CountRow row) =>
         (string.IsNullOrWhiteSpace(nameFilter) || row.Name.Contains(nameFilter.Trim(), StringComparison.CurrentCultureIgnoreCase))
@@ -262,6 +365,7 @@
         if (rows.Count == 0) LoadRows();
         LoadHistory();
         LoadDetail();
+        alertCount = IngredientService.GetStockAlerts().Count;
     }
 
     private bool EnsureAdmin()
@@ -339,6 +443,28 @@
         preview = null;
         reasons = new Dictionary<int, string>();
         confirmChecked = false;
+    }
+
+    // Step 1 -> 2: at least one ingredient must be selected.
+    private void ContinueToQuantities()
+    {
+        if (!EnsureAdmin()) return;
+        ClearFeedback();
+        if (!rows.Any(r => r.Selected))
+        {
+            errorMessage = "Seleccione al menos un ingrediente para contar.";
+            return;
+        }
+        enteringQuantities = true;
+    }
+
+    // Step 2 -> 1: the selection can be changed again; typed quantities are kept.
+    private void BackToSelection()
+    {
+        if (!EnsureAdmin()) return;
+        ClearFeedback();
+        Invalidate();
+        enteringQuantities = false;
     }
 
     private bool TryReadSelection(out List<StockCountLineInput> lines)
@@ -422,11 +548,13 @@
             var count = StockCountService.Confirm(request, AuthService.CurrentUser);
             successMessage = $"Conteo #{count.Id} registrado. Ajustes aplicados: {count.AdjustedLineCount}.";
             preview = null;
+            enteringQuantities = false;
             reasons = new Dictionary<int, string>();
             confirmChecked = false;
             notes = string.Empty;
             LoadRows();
             LoadHistory();
+            alertCount = IngredientService.GetStockAlerts().Count;
             Navigation.NavigateTo($"/stock/count/{count.Id}");
         }
         catch (UnauthorizedAccessException ex)
@@ -457,6 +585,8 @@
         if (!EnsureAdmin()) return;
         Navigation.NavigateTo("/stock/count");
     }
+
+    private static string DifferenceVariant(decimal difference) => difference < 0m ? "danger" : difference > 0m ? "info" : "ok";
 
     private static string Signed(decimal value) => value > 0m ? $"+{value}" : value.ToString(CultureInfo.CurrentCulture);
 }

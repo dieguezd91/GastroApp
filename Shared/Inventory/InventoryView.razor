@@ -1,0 +1,106 @@
+@* Unified inventory shell (prototype inventory.js): page header, accessible Stock y alertas / Movimientos / Conteo físico tabs
+   and the tab panel. Each tab keeps its own route (/ingredients, /ingredients/movements, /stock/count): selecting a tab
+   navigates in-circuit (no reload) and the page behind the active tab supplies the header action and the panel content.
+   Arrow keys, Home and End move between tabs (roving tabindex); after a tab-driven navigation the new page puts focus
+   back on its selected tab. *@
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div>
+        <div class="page-header__title-row">
+            <h1>Ingredientes e inventario</h1>
+            @if (AlertCount > 0)
+            {
+                <Badge Variant="danger" Icon="alertTriangle" Label="@($"{AlertCount} alerta(s)")" />
+            }
+            else
+            {
+                <Badge Variant="ok" Icon="checkCircle" Label="Stock saludable" />
+            }
+        </div>
+        <p class="page-header__subtitle">Gestioná stock actual, alertas con cobertura a 7 días, ajustes auditados, mermas, historial y conteos físicos.</p>
+    </div>
+    <div class="page-header__actions">
+        <a href="/invoices" class="btn">
+            <Icon Name="suppliers" Size="17" />
+            <span>Cargar factura de compra</span>
+        </a>
+        @HeaderActions
+    </div>
+</div>
+
+<div class="tablist" role="tablist" aria-label="Secciones de inventario">
+    @foreach (var tab in Tabs)
+    {
+        var selected = tab.Tab == ActiveTab;
+        var target = tab.Tab;
+        <button type="button" id="@TabId(target)" role="tab" class="tab" @key="target" @ref="tabRefs[(int)target]"
+                aria-selected="@(selected ? "true" : "false")" aria-controls="@(selected ? PanelId : null)"
+                tabindex="@(selected ? 0 : -1)"
+                @onclick="() => Select(target)" @onkeydown="HandleKeyDown">
+            <Icon Name="@tab.Icon" Size="16" />
+            <span>@tab.Label</span>
+        </button>
+    }
+</div>
+
+<div id="@PanelId" role="tabpanel" class="stack stack--lg" aria-labelledby="@TabId(ActiveTab)">
+    @ChildContent
+</div>
+
+@code {
+    private const string PanelId = "inventory-panel";
+    private const string FocusTabState = "inventory-focus-tab";
+
+    private static readonly (InventoryTab Tab, string Label, string Icon)[] Tabs =
+    {
+        (InventoryTab.Stock, "Stock y alertas", "ingredients"),
+        (InventoryTab.Movements, "Movimientos", "history"),
+        (InventoryTab.Count, "Conteo físico", "clipboard")
+    };
+
+    private readonly ElementReference[] tabRefs = new ElementReference[Tabs.Length];
+
+    [Parameter, EditorRequired] public InventoryTab ActiveTab { get; set; }
+
+    /// <summary>Ingredients that are out of stock or below their minimum (header badge).</summary>
+    [Parameter] public int AlertCount { get; set; }
+
+    /// <summary>Primary action of the active tab (e.g. "Nuevo ingrediente").</summary>
+    [Parameter] public RenderFragment? HeaderActions { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private static string TabId(InventoryTab tab) => $"inventory-tab-{tab.ToString().ToLowerInvariant()}";
+
+    private void Select(InventoryTab tab)
+    {
+        if (tab == ActiveTab) return;
+        // The tab strip is re-created by the destination page; the history state tells it to restore focus.
+        Navigation.NavigateTo(InventoryFormat.RouteOf(tab), new NavigationOptions { HistoryEntryState = FocusTabState });
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs args)
+    {
+        var last = Tabs.Length - 1;
+        var index = (int)ActiveTab;
+        var next = args.Key switch
+        {
+            "ArrowRight" => index == last ? 0 : index + 1,
+            "ArrowLeft" => index == 0 ? last : index - 1,
+            "Home" => 0,
+            "End" => last,
+            _ => index
+        };
+        if (next != index) Select(Tabs[next].Tab);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Navigation.HistoryEntryState != FocusTabState) return;
+        try { await tabRefs[(int)ActiveTab].FocusAsync(); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+    }
+}

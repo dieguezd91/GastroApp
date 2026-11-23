@@ -377,10 +377,14 @@ if (pageType != null)
     var pageSource = Src("Pages/StockCount.razor"); var navSource = Src("Shared/NavMenu.razor"); var program = Src("Program.cs");
     Check(pageSource.Contains("@page \"/stock/count\"") && pageSource.Contains("@page \"/stock/count/{CountId:int}\""), "page routes");
     Check(pageSource.Contains("/ingredients/") && pageSource.Contains("/movements") && pageSource.Contains("StockCountLabels.GetLabel(line.Difference)") && pageSource.Contains("StockCountLabels.GetLabel(line.Kind)") && !pageSource.Contains("forceLoad"), "page links to the movements of each ingredient, labels differences with words and never forces a reload");
-    var costosAt = navSource.IndexOf("COSTOS", StringComparison.Ordinal);
-    var linkAt = navSource.IndexOf("href=\"stock/count\"", StringComparison.Ordinal);
-    var logoutAt = navSource.IndexOf("<!-- LOGOUT -->", StringComparison.Ordinal);
-    Check(costosAt > 0 && linkAt > costosAt && linkAt < logoutAt && navSource.Contains("Conteo de stock") && navSource.LastIndexOf("IsInRole(UserRole.Admin)", linkAt, StringComparison.Ordinal) > 0, "NavMenu has the admin-only Conteo de stock link");
+    // The menu has one admin-only entry to /ingredients ("Ingredientes y stock"); the count is its "Conteo f\u00edsico" tab.
+    var linkAt = navSource.IndexOf("href=\"ingredients\"", StringComparison.Ordinal);
+    var logoutAt = navSource.IndexOf("sidebar__footer", StringComparison.Ordinal);
+    var inventorySource = Src("Shared/Inventory/InventoryView.razor"); var inventorySupport = Src("Shared/Inventory/InventorySupport.cs");
+    Check(linkAt > 0 && linkAt < logoutAt && navSource.Contains("Ingredientes y stock") && navSource.LastIndexOf("IsInRole(UserRole.Admin)", linkAt, StringComparison.Ordinal) > 0
+        && navSource.IndexOf("href=\"stock/count\"", StringComparison.Ordinal) < 0, "NavMenu has the admin-only Ingredientes y stock entry to /ingredients (no separate count link)");
+    Check(pageSource.Contains("InventoryTab.Count") && inventorySource.Contains("Conteo f\u00edsico") && inventorySupport.Contains("CountRoute = \"/stock/count\"") && inventorySupport.Contains("InventoryTab.Count => CountRoute"),
+        "/stock/count opens the Conteo f\u00edsico tab of the inventory view");
     Check(program.Contains("AddSingleton<StockCountService>()"), "StockCountService is registered as a singleton");
 }
 

@@ -1,300 +1,341 @@
 @page "/ingredients"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Inventory
 @inject IngredientService IngredientService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
-<PageTitle>Ingredientes</PageTitle>
+<PageTitle>Ingredientes y stock</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
-        <h1>🥕 Ingredientes</h1>
-        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Ingrediente</button>
-    </div>
-
-    @if (successMessage != null)
-    {
-        <p class="text-success" role="status">@successMessage</p>
-    }
-
-    <section class="form-card stock-alerts" aria-label="Alertas de stock">
-        <h3>Alertas de stock</h3>
-        @if (alerts == null || alerts.Count == 0)
-        {
-            <p class="text-muted">Sin alertas de stock: ningún ingrediente activo está agotado ni bajo su mínimo.</p>
-        }
-        else
-        {
-            <div style="overflow-x: auto;">
-                <table class="table">
-                    <thead>
-                        <tr><th>Ingrediente</th><th>Estado</th><th>Stock</th><th>Mínimo</th><th>Cobertura estimada (consumo de @alerts[0].Days días)</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var alert in alerts)
-                        {
-                            <tr>
-                                <td><a href="/ingredients/@alert.IngredientId/movements">@alert.Name</a></td>
-                                <td>
-                                    @(alert.Level == StockAlertLevel.OutOfStock ? "Agotado" : "Bajo mínimo")
-                                    @if (alert.IsNegative)
-                                    {
-                                        <span class="stock-warning" role="alert">Stock negativo: requiere ajuste</span>
-                                    }
-                                </td>
-                                <td>@alert.CurrentStock @alert.Unit</td>
-                                <td>@alert.MinStock @alert.Unit</td>
-                                <td>@CoverageText(alert)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-    </section>
-
-    @if (showForm)
-    {
-        <div class="form-card">
-            <h3>@(editingIngredient.Id == 0 ? "Nuevo Ingrediente" : "Editar Ingrediente")</h3>
-
-            <div class="form-group">
-                <label>Nombre</label>
-                <input type="text" @bind="editingIngredient.Name" class="form-control" placeholder="Ej: Harina" />
-            </div>
-
-            <div class="form-group">
-                <label>Unidad de Medida</label>
-                <select @bind="editingIngredient.Unit" class="form-control" disabled="@(!CanChangeUnit())">
-                    <option value="kg">Kilogramo (kg)</option>
-                    <option value="lt">Litro (lt)</option>
-                    <option value="unidad">Unidad</option>
-                    <option value="gr">Gramo (gr)</option>
-                    <option value="ml">Mililitro (ml)</option>
-                </select>
-                @if (!CanChangeUnit())
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    <InventoryView ActiveTab="InventoryTab.Stock" AlertCount="alerts?.Count ?? 0">
+        <HeaderActions>
+            <button type="button" class="btn btn--primary" @onclick="ShowAddForm">
+                <Icon Name="plus" Size="17" />
+                <span>Nuevo ingrediente</span>
+            </button>
+        </HeaderActions>
+        <ChildContent>
+            <section class="card stack stock-alerts" aria-labelledby="stock-alerts-heading">
+                <div>
+                    <h2 id="stock-alerts-heading" class="card__title">Alertas de stock@(alerts is { Count: > 0 } ? $" ({alerts.Count})" : string.Empty)</h2>
+                    <p class="card__desc">Ingredientes activos agotados o por debajo del mínimo configurado, con cobertura estimada según el consumo reciente.</p>
+                </div>
+                @if (alerts == null || alerts.Count == 0)
                 {
-                    <small class="text-muted">La unidad no puede cambiarse porque el ingrediente tiene stock o movimientos.</small>
+                    <Banner Variant="ok">Sin alertas de stock: ningún ingrediente activo está agotado ni bajo su mínimo.</Banner>
                 }
-            </div>
+                else
+                {
+                    <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="stock-alerts-heading">
+                        <table class="data-table data-table--stack">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Ingrediente</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col" class="col-num">Stock actual</th>
+                                    <th scope="col" class="col-num">Mínimo</th>
+                                    <th scope="col">Cobertura estimada (consumo de @alerts[0].Days días)</th>
+                                    <th scope="col" class="col-actions">Acción rápida</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var alert in alerts)
+                                {
+                                    <tr @key="alert.IngredientId">
+                                        <th scope="row"><a href="/ingredients/@alert.IngredientId/movements">@alert.Name</a></th>
+                                        <td data-label="Estado">
+                                            @if (alert.Level == StockAlertLevel.OutOfStock)
+                                            {
+                                                <Badge Variant="danger" Icon="alertOctagon" Label="Agotado" />
+                                            }
+                                            else
+                                            {
+                                                <Badge Variant="warn" Icon="alertTriangle" Label="Bajo mínimo" />
+                                            }
+                                            @if (alert.IsNegative)
+                                            {
+                                                <span class="stock-warning text-xs text-danger fw-700" role="alert">Stock negativo: requiere ajuste</span>
+                                            }
+                                        </td>
+                                        <td data-label="Actual" class="col-num fw-700">@InventoryFormat.Qty(alert.CurrentStock, alert.Unit)</td>
+                                        <td data-label="Mínimo" class="col-num">@InventoryFormat.Qty(alert.MinStock, alert.Unit)</td>
+                                        <td data-label="Cobertura">@CoverageText(alert)</td>
+                                        <td class="col-actions">
+                                            <button type="button" class="btn btn--primary btn--sm" aria-label="@($"Ajustar stock de {alert.Name}")"
+                                                    @onclick="() => AdjustFromAlert(alert.IngredientId)">Ajustar stock</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
 
-            @if (editingIngredient.Id == 0)
-            {
-                <div class="form-group">
-                    <label>Stock inicial</label>
-                    <input type="number" @bind="editingIngredient.CurrentStock" class="form-control" placeholder="0" step="0.01" />
+            <section class="card stack" aria-labelledby="all-ingredients-heading">
+                <div>
+                    <h2 id="all-ingredients-heading" class="card__title">Listado de ingredientes (@ingredients.Count)</h2>
+                    <p class="card__desc">Cada ajuste manual o merma queda auditado en el libro de movimientos.</p>
                 </div>
-            }
-            else
-            {
-                <div class="form-group">
-                    <label>Stock actual</label>
-                    <p class="form-readonly">@LiveStock(editingIngredient.Id) @editingIngredient.Unit</p>
-                    <small class="text-muted">El stock solo cambia con «Ajustar stock», «Registrar merma», compras, ventas o conteos, y queda en el historial.</small>
+
+                @if (ingredients.Count == 0)
+                {
+                    <div class="empty-state">
+                        <div class="empty-state__icon"><Icon Name="ingredients" Size="24" /></div>
+                        <div class="stack stack--sm">
+                            <h3>No hay ingredientes</h3>
+                            <p class="text-sm text-secondary">Creá el primero para controlar recetas y stock.</p>
+                        </div>
+                        <button type="button" class="btn btn--primary" @onclick="ShowAddForm">Crear ingrediente</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="all-ingredients-heading">
+                        <table class="data-table data-table--stack">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Ingrediente</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col" class="col-num">Stock actual</th>
+                                    <th scope="col" class="col-num">Mínimo</th>
+                                    <th scope="col" class="col-num">Último precio</th>
+                                    <th scope="col" class="col-actions">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var ingredient in ingredients)
+                                {
+                                    var status = InventoryFormat.StatusOf(ingredient);
+                                    var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
+                                    <tr @key="ingredient.Id">
+                                        <th scope="row">
+                                            <div>@ingredient.Name</div>
+                                            @if (ingredient.CurrentStock < 0)
+                                            {
+                                                <div class="stock-warning text-xs text-danger fw-700" role="alert">Stock negativo: requiere ajuste</div>
+                                            }
+                                            @if (deleteErrorId == ingredient.Id && deleteError != null)
+                                            {
+                                                <div class="text-xs text-danger fw-700" role="alert">@deleteError</div>
+                                            }
+                                        </th>
+                                        <td data-label="Estado">
+                                            @if (ingredient.IsActive)
+                                            {
+                                                <Badge Variant="@status.Variant" Icon="@status.Icon" Label="@status.Label" />
+                                            }
+                                            else
+                                            {
+                                                <Badge Variant="neutral" Label="Inactivo" />
+                                            }
+                                        </td>
+                                        <td data-label="Stock actual" class="col-num fw-700">@InventoryFormat.Qty(ingredient.CurrentStock, ingredient.Unit)</td>
+                                        <td data-label="Mínimo" class="col-num">@InventoryFormat.Qty(ingredient.MinStock, ingredient.Unit)</td>
+                                        <td data-label="Último precio" class="col-num">
+                                            @if (lastPrice.HasValue)
+                                            {
+                                                @($"{InventoryFormat.Money(lastPrice.Value)} / {ingredient.Unit}")
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">Sin precio registrado</span>
+                                            }
+                                        </td>
+                                        <td class="col-actions">
+                                            <div class="flex-wrap-gap inventory-actions">
+                                                <button type="button" class="btn btn--sm" aria-label="@($"Ajustar stock de {ingredient.Name}")" title="Ajustar stock"
+                                                        @onclick="() => ShowStockAdjust(ingredient)">Ajustar</button>
+                                                <button type="button" class="btn btn--sm" aria-label="@($"Registrar merma de {ingredient.Name}")" title="Registrar merma"
+                                                        @onclick="() => ShowWaste(ingredient)">Merma</button>
+                                                <a class="btn btn--ghost btn--sm" href="/ingredients/@ingredient.Id/movements" aria-label="@($"Historial de movimientos de {ingredient.Name}")" title="Historial de movimientos">Historial</a>
+                                                <button type="button" class="btn btn--ghost btn--sm" aria-label="@($"Editar {ingredient.Name}")" title="Editar"
+                                                        @onclick="() => EditIngredient(ingredient)">Editar</button>
+                                                <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Eliminar {ingredient.Name}")" title="Eliminar"
+                                                        @onclick="() => ConfirmDelete(ingredient)">
+                                                    <Icon Name="trash" Size="15" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        </ChildContent>
+    </InventoryView>
+
+    <ModalDialog @ref="formDialog" Title="@(editingIngredient.Id == 0 ? "Nuevo ingrediente" : $"Editar ingrediente · {editingIngredient.Name}")"
+                 LightDismiss="false" OnClosed="HandleFormClosed">
+        <ChildContent>
+            <form id="ingredient-form" class="stack" novalidate @onsubmit="SubmitIngredientAsync">
+                @if (formError != null)
+                {
+                    <Banner Variant="danger">@formError</Banner>
+                }
+                <div class="field">
+                    <label class="field__label" for="ingredient-name">Nombre <span class="field__req" aria-hidden="true">*</span></label>
+                    <input id="ingredient-name" type="text" class="input" required autocomplete="off" placeholder="Ej: Harina" @bind="editingIngredient.Name" />
                 </div>
-            }
-
-            <div class="form-group">
-                <label>Stock Mínimo (Alerta)</label>
-                <input type="number" @bind="editingIngredient.MinStock" class="form-control" placeholder="0" step="0.01" />
-            </div>
-
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" @bind="editingIngredient.IsActive" />
-                    Activo
+                <div class="form-grid">
+                    <div class="field">
+                        <label class="field__label" for="ingredient-unit">Unidad de medida</label>
+                        <select id="ingredient-unit" class="select" @bind="editingIngredient.Unit" disabled="@(!CanChangeUnit())">
+                            <option value="kg">Kilogramo (kg)</option>
+                            <option value="lt">Litro (lt)</option>
+                            <option value="unidad">Unidad</option>
+                            <option value="gr">Gramo (gr)</option>
+                            <option value="ml">Mililitro (ml)</option>
+                        </select>
+                        @if (!CanChangeUnit())
+                        {
+                            <span class="field__hint">La unidad no puede cambiarse porque el ingrediente tiene stock o movimientos.</span>
+                        }
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="ingredient-min">Stock mínimo (alerta)</label>
+                        <input id="ingredient-min" type="number" class="input tnum" step="any" placeholder="0" @bind="editingIngredient.MinStock" />
+                    </div>
+                </div>
+                @if (editingIngredient.Id == 0)
+                {
+                    <div class="field">
+                        <label class="field__label" for="ingredient-initial">Stock inicial</label>
+                        <input id="ingredient-initial" type="number" class="input tnum" step="any" placeholder="0" @bind="editingIngredient.CurrentStock" />
+                    </div>
+                }
+                else
+                {
+                    <div class="field">
+                        <span class="field__label">Stock actual</span>
+                        <p class="fw-700">@InventoryFormat.Qty(LiveStock(editingIngredient.Id), editingIngredient.Unit)</p>
+                        <span class="field__hint">El stock solo cambia con «Ajustar stock», «Registrar merma», compras, ventas o conteos, y queda en el historial.</span>
+                    </div>
+                }
+                <label class="check-field" for="ingredient-active">
+                    <input id="ingredient-active" type="checkbox" @bind="editingIngredient.IsActive" />
+                    <span>Activo (disponible para nuevas recetas y alertas)</span>
                 </label>
-            </div>
+            </form>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn">Cancelar</button>
+            <button type="submit" form="ingredient-form" class="btn btn--primary">Guardar</button>
+        </Footer>
+    </ModalDialog>
 
-            @if (formError != null)
+    <ModalDialog @ref="adjustDialog" Title="@($"Ajustar stock · {AdjustTarget?.Name}")"
+                 Subtitle="@(AdjustTarget == null ? null : $"Stock actual: {InventoryFormat.Qty(AdjustTarget.CurrentStock, AdjustTarget.Unit)} · Mínimo: {InventoryFormat.Qty(AdjustTarget.MinStock, AdjustTarget.Unit)}")"
+                 LightDismiss="false" OnClosed="HandleAdjustClosed">
+        <ChildContent>
+            @if (AdjustTarget is { } target)
             {
-                <p class="text-danger" role="alert">@formError</p>
-            }
-
-            <div class="form-actions">
-                <button class="btn btn-primary" @onclick="SaveIngredient">Guardar</button>
-                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
-            </div>
-        </div>
-    }
-
-    <div class="products-list">
-        @foreach (var ingredient in ingredients)
-        {
-            <div class="product-card @(!ingredient.IsActive ? "inactive" : "")">
-                <div class="product-info">
-                    <h3>
-                        @ingredient.Name
-                        <span class="stock-indicator stock-@ingredient.StockIndicator">
-                            @(ingredient.StockIndicator == "green" ? "🟢" : ingredient.StockIndicator == "yellow" ? "🟡" : "🔴")
-                        </span>
-                        @if (!ingredient.IsActive)
-                        {
-                            <span class="badge-inactive">Inactivo</span>
-                        }
-                    </h3>
-                    <p class="cost">Unidad: @ingredient.Unit</p>
-                    <p class="stock-info">
-                        <strong>Stock: @ingredient.CurrentStock @ingredient.Unit</strong>
-                        @if (ingredient.MinStock > 0)
-                        {
-                            <span class="text-muted"> (Mín: @ingredient.MinStock)</span>
-                        }
-                    </p>
-                    @if (ingredient.CurrentStock < 0)
+                var difference = GetAdjustDifference();
+                <form id="adjust-form" class="stack" novalidate @onsubmit="SubmitAdjustAsync">
+                    @if (adjustError != null)
                     {
-                        <p class="stock-warning" role="alert">⚠️ Stock negativo: requiere ajuste</p>
+                        <Banner Variant="danger">@adjustError</Banner>
                     }
-                    @{
-                        var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
-                    }
-                    @if (lastPrice.HasValue)
-                    {
-                        <p class="price">Último precio: $@lastPrice.Value</p>
-                    }
-                    else
-                    {
-                        <p class="cost">Sin precio registrado</p>
-                    }
-
-                    @if (deleteErrorId == ingredient.Id && deleteError != null)
-                    {
-                        <p class="text-danger" role="alert">@deleteError</p>
-                    }
-
-                    @if (adjustIngredientId == ingredient.Id)
-                    {
-                        <div class="stock-dialog" role="dialog" aria-label="Ajustar stock">
-                            <h4>Ajustar stock</h4>
-                            <p>Stock actual: <strong>@ingredient.CurrentStock @ingredient.Unit</strong></p>
-                            <div class="form-group">
-                                <label>Nuevo stock (@ingredient.Unit)</label>
-                                <input type="number" @bind="adjustNewStock" @bind:event="oninput" class="form-control" placeholder="Nuevo stock" step="0.01" />
-                            </div>
-                            @{
-                                var difference = GetAdjustDifference();
-                            }
+                    <div class="field">
+                        <label class="field__label" for="adjust-new">Nuevo stock (@target.Unit) <span class="field__req" aria-hidden="true">*</span></label>
+                        <input id="adjust-new" type="number" class="input tnum" step="any" placeholder="Nuevo stock" autofocus
+                               @bind="adjustNewStock" @bind:event="oninput" />
+                    </div>
+                    <div class="card card--compact card--subtle stack stack--sm" aria-live="polite">
+                        <div class="row-between">
+                            <span class="text-sm text-secondary">Diferencia resultante</span>
                             @if (difference.HasValue)
                             {
-                                <p class="stock-difference">Diferencia: <strong>@SignedAmount(difference.Value) @ingredient.Unit</strong> (el stock quedará en @adjustNewStock @ingredient.Unit)</p>
+                                <strong class="tnum stock-difference @DifferenceClass(difference.Value)">@SignedAmount(difference.Value) @target.Unit</strong>
                             }
-                            <div class="form-group">
-                                <label>Motivo (obligatorio)</label>
-                                <input type="text" @bind="adjustReason" class="form-control" placeholder="Ej: conteo rápido, diferencia detectada" />
-                            </div>
-                            <div class="form-group">
-                                <label>
-                                    <input type="checkbox" @bind="adjustConfirmed" />
-                                    Confirmo el ajuste de stock
-                                </label>
-                            </div>
-                            @if (adjustError != null)
+                            else
                             {
-                                <p class="text-danger" role="alert">@adjustError</p>
+                                <span class="text-sm text-muted">Indicá el nuevo stock</span>
                             }
-                            <div class="form-actions">
-                                <button class="btn btn-small btn-success" @onclick="SaveStockAdjustment">Confirmar ajuste</button>
-                                <button class="btn btn-small" @onclick="CancelStockAdjustment">Cancelar</button>
-                            </div>
                         </div>
-                    }
+                        @if (difference.HasValue)
+                        {
+                            <span class="text-xs text-muted">El stock quedará en @InventoryFormat.Qty(adjustNewStock!.Value, target.Unit)</span>
+                        }
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="adjust-reason">Motivo del ajuste (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+                        <input id="adjust-reason" type="text" class="input" autocomplete="off" placeholder="Ej: conteo rápido, diferencia detectada" @bind="adjustReason" />
+                    </div>
+                    <label class="check-field" for="adjust-confirm">
+                        <input id="adjust-confirm" type="checkbox" @bind="adjustConfirmed" />
+                        <span>Confirmo el ajuste de stock</span>
+                    </label>
+                </form>
+            }
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn">Cancelar</button>
+            <button type="submit" form="adjust-form" class="btn btn--primary">Confirmar ajuste</button>
+        </Footer>
+    </ModalDialog>
 
-                    @if (wasteIngredientId == ingredient.Id)
+    <ModalDialog @ref="wasteDialog" Title="@($"Registrar merma · {WasteTarget?.Name}")"
+                 Subtitle="@(WasteTarget == null ? null : $"Disponible: {InventoryFormat.Qty(WasteTarget.CurrentStock, WasteTarget.Unit)}")"
+                 LightDismiss="false" OnClosed="HandleWasteClosed">
+        <ChildContent>
+            @if (WasteTarget is { } target)
+            {
+                <form id="waste-form" class="stack" novalidate @onsubmit="SubmitWasteAsync">
+                    @if (wasteError != null)
                     {
-                        <div class="stock-dialog" role="dialog" aria-label="Registrar merma">
-                            <h4>Registrar merma</h4>
-                            <p>Stock actual: <strong>@ingredient.CurrentStock @ingredient.Unit</strong></p>
-                            <div class="form-group">
-                                <label>Cantidad perdida (@ingredient.Unit)</label>
-                                <input type="number" @bind="wasteQuantity" class="form-control" placeholder="Cantidad" step="0.01" />
-                            </div>
-                            <div class="form-group">
-                                <label>Categoría</label>
-                                <select @bind="wasteCategory" class="form-control">
-                                    <option value="">Seleccionar...</option>
-                                    @foreach (var category in Enum.GetValues<WasteCategory>())
-                                    {
-                                        <option value="@category">@StockMovementLabels.GetLabel(category)</option>
-                                    }
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Motivo (obligatorio)</label>
-                                <input type="text" @bind="wasteReason" class="form-control" placeholder="Ej: bolsa vencida, se cayó" />
-                            </div>
-                            <div class="form-group">
-                                <label>
-                                    <input type="checkbox" @bind="wasteConfirmed" />
-                                    Confirmo la merma
-                                </label>
-                            </div>
-                            @if (wasteError != null)
-                            {
-                                <p class="text-danger" role="alert">@wasteError</p>
-                            }
-                            <div class="form-actions">
-                                <button class="btn btn-small btn-success" @onclick="SaveWaste">Confirmar merma</button>
-                                <button class="btn btn-small" @onclick="CancelWaste">Cancelar</button>
-                            </div>
-                        </div>
+                        <Banner Variant="danger">@wasteError</Banner>
                     }
-                </div>
-                <div class="product-actions">
-                    <a class="btn btn-small" href="/ingredients/@ingredient.Id/movements" title="Historial de movimientos">📜 Historial</a>
-                    <button class="btn btn-small" @onclick="() => ShowStockAdjust(ingredient)" title="Ajustar stock">📦 Ajustar stock</button>
-                    <button class="btn btn-small" @onclick="() => ShowWaste(ingredient)" title="Registrar merma">🗑 Registrar merma</button>
-                    <button class="btn btn-small" @onclick="() => EditIngredient(ingredient)" title="Editar">✏️</button>
-                    <button class="btn btn-small btn-danger" @onclick="() => DeleteIngredient(ingredient.Id)" title="Eliminar">🗑️</button>
-                </div>
-            </div>
-        }
-    </div>
+                    <div class="form-grid">
+                        <div class="field">
+                            <label class="field__label" for="waste-qty">Cantidad perdida (@target.Unit) <span class="field__req" aria-hidden="true">*</span></label>
+                            <input id="waste-qty" type="number" class="input tnum" step="any" placeholder="Cantidad" autofocus @bind="wasteQuantity" />
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="waste-category">Categoría <span class="field__req" aria-hidden="true">*</span></label>
+                            <select id="waste-category" class="select" @bind="wasteCategory">
+                                <option value="">Seleccionar...</option>
+                                @foreach (var category in Enum.GetValues<WasteCategory>())
+                                {
+                                    <option value="@category">@StockMovementLabels.GetLabel(category)</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="waste-reason">Motivo (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+                        <input id="waste-reason" type="text" class="input" autocomplete="off" placeholder="Ej: bolsa vencida, se cayó" @bind="wasteReason" />
+                    </div>
+                    <label class="check-field" for="waste-confirm">
+                        <input id="waste-confirm" type="checkbox" @bind="wasteConfirmed" />
+                        <span>Confirmo la merma</span>
+                    </label>
+                </form>
+            }
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn">Cancelar</button>
+            <button type="submit" form="waste-form" class="btn btn--danger">Confirmar merma</button>
+        </Footer>
+    </ModalDialog>
 
-    @if (ingredients.Count == 0)
-    {
-        <p class="empty-state">No hay ingredientes. Creá el primero!</p>
-    }
-</div>
+    <ModalDialog @ref="deleteDialog" Title="@($"¿Eliminar «{pendingDelete?.Name}»?")" OnClosed="HandleDeleteClosed">
+        <ChildContent>
+            <p>Solo se pueden eliminar ingredientes sin movimientos, recetas ni facturas asociadas. Si los tiene, desactivalo en lugar de eliminarlo.</p>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn" autofocus>Cancelar</button>
+            <button type="button" class="btn btn--danger" @onclick="ConfirmDeleteAsync">Eliminar ingrediente</button>
+        </Footer>
+    </ModalDialog>
 
-<style>
-    .inactive {
-        opacity: 0.6;
-    }
-
-    .badge-inactive {
-        background: #dc3545;
-        color: white;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.8rem;
-        margin-left: 0.5rem;
-    }
-
-    .stock-indicator {
-        font-size: 1.2rem;
-        margin-left: 0.5rem;
-    }
-
-    .stock-info {
-        margin: 0.5rem 0;
-        font-size: 0.95rem;
-    }
-
-    .text-muted {
-        color: #6c757d;
-        font-size: 0.85rem;
-    }
-
-    .btn-success {
-        background: #28a745;
-        color: white;
-    }
-
-    .btn-success:hover {
-        background: #218838;
-    }
-</style>
+    <Toast @ref="toast" />
+}
 
 @code {
     private List<Ingredient> ingredients = new();
@@ -304,8 +345,9 @@
     private string? formError;
     private string? deleteError;
     private int deleteErrorId = 0;
-    // Result of the last stock operation (adjustment or waste).
+    // Result of the last stock operation (adjustment or waste); also announced through the toast.
     private string? successMessage;
+    private Ingredient? pendingDelete;
 
     // "Ajustar stock" dialog: the ingredient being adjusted (0 = closed).
     private int adjustIngredientId = 0;
@@ -321,6 +363,16 @@
     private string? wasteReason;
     private bool wasteConfirmed;
     private string? wasteError;
+
+    private ModalDialog? formDialog;
+    private ModalDialog? adjustDialog;
+    private ModalDialog? wasteDialog;
+    private ModalDialog? deleteDialog;
+    private Toast? toast;
+
+    private Ingredient? AdjustTarget => adjustIngredientId == 0 ? null : IngredientService.GetById(adjustIngredientId);
+
+    private Ingredient? WasteTarget => wasteIngredientId == 0 ? null : IngredientService.GetById(wasteIngredientId);
 
     protected override async Task OnInitializedAsync()
     {
@@ -363,6 +415,9 @@
 
     private static string SignedAmount(decimal value) => value.ToString("+0.####;-0.####;0");
 
+    private static string DifferenceClass(decimal difference) =>
+        difference > 0m ? "text-ok" : difference < 0m ? "text-danger" : "text-muted";
+
     private static string CoverageText(StockAlert alert)
     {
         if (alert.RecentConsumption <= 0m) return "Sin consumo reciente";
@@ -370,15 +425,18 @@
         return $"{alert.CoverageDays.Value:0.#} días (consumo {alert.RecentConsumption / alert.Days:0.##} {alert.Unit}/día)";
     }
 
-    private void ShowAddForm()
+    // ---- Alta / edición ----
+
+    private async Task ShowAddForm()
     {
         if (!EnsureAdmin()) return;
         formError = null;
         editingIngredient = new Ingredient();
         showForm = true;
+        if (formDialog is not null) await formDialog.ShowAsync();
     }
 
-    private void EditIngredient(Ingredient ingredient)
+    private async Task EditIngredient(Ingredient ingredient)
     {
         if (!EnsureAdmin()) return;
         formError = null;
@@ -392,6 +450,7 @@
             MinStock = ingredient.MinStock
         };
         showForm = true;
+        if (formDialog is not null) await formDialog.ShowAsync();
     }
 
     private void SaveIngredient()
@@ -403,9 +462,10 @@
             return;
         }
 
+        var creating = editingIngredient.Id == 0;
         try
         {
-            if (editingIngredient.Id == 0)
+            if (creating)
             {
                 IngredientService.Add(editingIngredient, AuthService.CurrentUser);
             }
@@ -420,8 +480,16 @@
             return;
         }
 
+        var name = editingIngredient.Name;
         LoadIngredients();
         CancelEdit();
+        toast?.Show(creating ? $"Ingrediente «{name}» creado." : $"Ingrediente «{name}» actualizado.");
+    }
+
+    private async Task SubmitIngredientAsync()
+    {
+        SaveIngredient();
+        if (!showForm && formDialog is not null) await formDialog.CloseAsync("saved");
     }
 
     private void CancelEdit()
@@ -432,11 +500,26 @@
         editingIngredient = new Ingredient();
     }
 
+    private void HandleFormClosed(string _)
+    {
+        if (showForm) CancelEdit();
+    }
+
+    // ---- Eliminar ----
+
+    private async Task ConfirmDelete(Ingredient ingredient)
+    {
+        if (!EnsureAdmin()) return;
+        pendingDelete = ingredient;
+        if (deleteDialog is not null) await deleteDialog.ShowAsync();
+    }
+
     private void DeleteIngredient(int id)
     {
         if (!EnsureAdmin()) return;
         deleteError = null;
         deleteErrorId = 0;
+        var name = IngredientService.GetById(id)?.Name;
         try
         {
             IngredientService.Delete(id);
@@ -451,16 +534,32 @@
             return;
         }
         LoadIngredients();
+        if (name != null) toast?.Show($"Ingrediente «{name}» eliminado.");
     }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (pendingDelete is not null) DeleteIngredient(pendingDelete.Id);
+        if (deleteDialog is not null) await deleteDialog.CloseAsync("deleted");
+    }
+
+    private void HandleDeleteClosed(string _) => pendingDelete = null;
 
     // ---- Ajustar stock (S6): new stock, mandatory reason, difference preview and confirmation ----
 
-    private void ShowStockAdjust(Ingredient ingredient)
+    private async Task ShowStockAdjust(Ingredient ingredient)
     {
         if (!EnsureAdmin()) return;
         ResetDialogs();
         successMessage = null;
         adjustIngredientId = ingredient.Id;
+        if (adjustDialog is not null) await adjustDialog.ShowAsync();
+    }
+
+    private async Task AdjustFromAlert(int ingredientId)
+    {
+        var ingredient = ingredients.FirstOrDefault(i => i.Id == ingredientId);
+        if (ingredient is not null) await ShowStockAdjust(ingredient);
     }
 
     // Difference between the typed stock and the live stock, or null while nothing valid is typed.
@@ -502,6 +601,13 @@
         ResetDialogs();
         successMessage = $"Stock de {name} ajustado a {movement.ResultingStock} {movement.Unit} ({SignedAmount(movement.Quantity)}).";
         LoadIngredients();
+        toast?.Show(successMessage);
+    }
+
+    private async Task SubmitAdjustAsync()
+    {
+        SaveStockAdjustment();
+        if (adjustIngredientId == 0 && adjustDialog is not null) await adjustDialog.CloseAsync("saved");
     }
 
     private void CancelStockAdjustment()
@@ -510,14 +616,20 @@
         ResetDialogs();
     }
 
+    private void HandleAdjustClosed(string _)
+    {
+        if (adjustIngredientId != 0) CancelStockAdjustment();
+    }
+
     // ---- Registrar merma (S8): quantity, category, mandatory reason and confirmation ----
 
-    private void ShowWaste(Ingredient ingredient)
+    private async Task ShowWaste(Ingredient ingredient)
     {
         if (!EnsureAdmin()) return;
         ResetDialogs();
         successMessage = null;
         wasteIngredientId = ingredient.Id;
+        if (wasteDialog is not null) await wasteDialog.ShowAsync();
     }
 
     private void SaveWaste()
@@ -555,12 +667,24 @@
         ResetDialogs();
         successMessage = $"Merma de {-movement.Quantity} {movement.Unit} de {name} registrada; stock actual {movement.ResultingStock} {movement.Unit}.";
         LoadIngredients();
+        toast?.Show(successMessage, "warn");
+    }
+
+    private async Task SubmitWasteAsync()
+    {
+        SaveWaste();
+        if (wasteIngredientId == 0 && wasteDialog is not null) await wasteDialog.CloseAsync("saved");
     }
 
     private void CancelWaste()
     {
         if (!EnsureAdmin()) return;
         ResetDialogs();
+    }
+
+    private void HandleWasteClosed(string _)
+    {
+        if (wasteIngredientId != 0) CancelWaste();
     }
 
     private void ResetDialogs()
