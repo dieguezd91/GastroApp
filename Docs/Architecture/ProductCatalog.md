@@ -32,11 +32,22 @@ This is not a transactional store. Save/load exceptions are caught and logged by
 
 - `/product-categories` exposes category creation, listing, renaming, and deletion with Spanish validation feedback from the service.
 - Its initialization and CRUD callbacks check circuit-scoped `AuthService`: unauthenticated users redirect to `/login`, and non-admin users redirect to `/unauthorized`, without forced reload.
-- The category navigation link appears in the admin-only **PRODUCTOS** section.
+- Categories are the second tab of the unified catalog view (**Productos y categorías**, routes `/products` and `/product-categories`); the sidebar entry stays active on both. See [UserInterface.md](UserInterface.md#tabbed-views).
 - `/products` checks current Admin permissions at initialization and again before form/CRUD actions. Its form supports assigning/changing a category or selecting **Sin categoría** to remove the assignment; the list displays the category name or **Sin categoría**. Category choices refresh when loading products or opening a form, and after an invalid assignment error.
+- Product deletion asks for confirmation in a dialog before calling `ProductService.Delete`. Saving with a blank name or a price of zero or less shows an inline banner (**Ingresá un nombre para el producto.** / **Ingresá un precio mayor a cero.**) instead of returning silently; service errors (for example an unknown category) use the same banner.
 - The product form exposes an **Activo (disponible para la venta)** checkbox for creation and editing; new forms start active. The list shows **Activo** or **Inactivo**. Editing copies `IsActive` into the separate form model, and `ProductService.Update()` copies it back before saving.
 
 These are application-level component checks, not ASP.NET authorization policies or authorization inside the catalog services. [Authentication.md](Authentication.md) defines circuit-isolated identity, live role/stale-user checks and circuit-preserving navigation; catalog business data remains shared.
+
+## Recipe cost sync
+
+`Product.Cost` is entered manually and can drift from the recipe cost. `ProductService` offers a read-only check and a one-click sync; the link between product and recipe is the **exact product name** (`Recipe.Name == Product.Name`, ordinal, first match: case and spaces count), the same contract as stock consumption.
+
+- `GetRecipeCostDrift(product)` returns `RecipeCostDrift(RecipeCost, ProductCost, HasDrift)` or `null` when there is no matching recipe or the recipe has no calculated positive `UnitCost`. `RecipeCost` is `Recipe.UnitCost` (total cost / yield, i.e. cost **per portion**). `HasDrift` is true when the product has no saved cost or the two figures differ at **cent precision** (rounded away from zero to two decimals).
+- `SyncCostFromRecipe(productId, actor)` sets **only** `Product.Cost` to that unit cost and saves once. It throws `InvalidOperationException` (`El producto no existe.` / `El producto no tiene una receta con costo calculado.`) leaving state untouched, and rejects a non-live-Admin actor through `RequireLiveAdmin` when an actor is given.
+- `/products` shows the warning **Costo desfasado** (saved cost versus recipe cost) under the product name with **Sincronizar costo** and a note that the match is by exact name; nothing renders when there is no drift. Nothing is synchronized automatically, and recipe costs are never written back from the product.
+
+Verify with `scripts/verify-recipe-cost-sync.ps1` (scratch fixture; covers the drift rule, cent precision, sync rejections without mutation, persistence and the page wiring).
 
 ## Point of sale boundary
 
@@ -50,6 +61,7 @@ These are application-level component checks, not ASP.NET authorization policies
 - Direct edits are parsed before assigning `SaleItem.Quantity`. Blank, noninteger, out-of-range, zero, and negative input is rejected with Spanish feedback, retaining the previous quantity and restoring its displayed value. Increment at `int.MaxValue` is rejected rather than overflowing. Valid cart mutations clear stale validation feedback; rejected edits preserve the valid cart. Subtotals and totals remain derived from the existing `SaleItem`/`Sale` properties.
 - `SaleService.ValidateStock()` first rejects empty carts, missing products, inactive products, and nonpositive quantities. `SaleItem.Quantity` is an integer, so fractional quantities cannot be represented. Eligibility checks resolve each line's `ProductId` against the current catalog, even if the product was deactivated or deleted after being carted, and run even without stock services.
 - After eligibility checks, the existing recipe-name-based stock validation runs unchanged. `SaleService.Add()` repeats the same validation and throws `InvalidOperationException` on failure before assigning a sale ID/date, registering the sale, or deducting stock. Calling `Add()` directly cannot bypass eligibility or the existing stock checks. The POS's existing pre-check displays validation feedback without clearing the cart.
+- Before checkout the POS also blocks products whose recipe stock cannot cover one more unit, counting what the cart already reserves (`SaleService.GetAvailability` / `GetMaxQuantity`, see [Sales.md](Sales.md#pos-availability-stock-pre-block)). Blocked tiles are `aria-disabled` and name the missing ingredient; the filters above are unaffected.
 - Sale lines retain their existing product ID, name, price, and quantity; categories do not alter sale history or the existing name-based product-to-recipe stock linkage.
 
 Category options are loaded on POS initialization. There is no catalog change notification subscription or automatic cross-circuit refresh; navigating back to the page reloads its options. Product references remain shared through the existing service behavior.

@@ -27,7 +27,11 @@ Callers pass the circuit user as `actor`; manual commands (`AdjustStock`, `Regis
 
 ## Atomic sale deduction
 
-`SaleService.Add` aggregates the requirement per ingredient across all lines, validates it as one batch and only then commits, so a sale never leaves a partial deduction. Cancellation restores the reliable consumption snapshot and a refund with disposition *Restock* returns the proportional quantity, both as movements linked to the sale (and refund). A *Waste* disposition changes no stock. An invoice is the goods reception: each applicable item becomes an `InvoiceReceipt` movement linked to the invoice, in the ingredient unit (gr/kg and ml/lt converted); deleting an invoice keeps stock and movements. See [Sales.md](Sales.md#checkout-ordering-and-persistence).
+`SaleService.Add` aggregates the requirement per ingredient across all lines, validates it as one batch and only then commits, so a sale never leaves a partial deduction. Cancellation restores the reliable consumption snapshot and a refund with disposition *Restock* returns the proportional quantity, both as movements linked to the sale (and refund). A *Waste* disposition changes no stock. An invoice is the goods reception: each applicable item becomes an `InvoiceReceipt` movement linked to the invoice, in the ingredient unit (gr/kg and ml/lt converted); deleting an invoice keeps stock and movements. The purchasing UI additionally stores each invoice line already converted (see [Purchasing invoice lines](#purchasing-invoice-lines)). See [Sales.md](Sales.md#checkout-ordering-and-persistence).
+
+## Purchasing invoice lines
+
+`/invoices` (the **Facturas** tab of the purchasing view, see [UserInterface.md](UserInterface.md#tabbed-views)) lets the Admin type a line in any unit compatible with the ingredient (gr/kg for weight, ml/lt for volume; an ingredient in `unidad` only offers `unidad`). `PurchasingFormat.BuildItem` stores the line **in the ingredient's own unit**, converting both quantity and unit price: 500 gr at 0.1 → 0.5 kg at 100 per kg. This matters because `RecipeService` reads the last invoice price through `InvoiceService.GetLastPriceForIngredient` as a price **per ingredient base unit**; a line stored in another unit would corrupt recipe costing. A line typed in the base unit is stored as typed. `InvoiceService.Add` and the `InvoiceReceipt` movements are unchanged; they simply receive lines already in the ingredient unit. Invoice and supplier deletion ask for confirmation; deleting a supplier keeps its invoices, which then show **Sin proveedor**. Invoice editing is still not exposed.
 
 ## Adjustments and waste
 
@@ -45,9 +49,13 @@ Manual operations and sales never produce a negative balance (`Stock insuficient
 
 ## History
 
-`/ingredients/{id}/movements` (Admin only, rechecked on every parameter change and callback) lists the movements of one ingredient newest first, 20 per page: date, type, signed quantity with unit, previous → resulting stock, reason, waste category, responsible (`Sin registro` when none) and the origin (sale/refund → `/sales/history/{saleId}`, invoice → `/invoices`, count → `/stock/count/{id}`). Filters: an inclusive date range (calendar days; an inverted range is an error) and a cause. `StockMovementFilter` is the service-side contract.
+`/ingredients/{id}/movements` (one ingredient) and `/ingredients/movements` (every ingredient, the **Movimientos** tab of the inventory view) are Admin only, rechecked on every parameter change and callback. They list movements newest first, 20 per page, with an **Ingrediente** selector (all or one) and, for the all-ingredients list, an ingredient column: date, type, signed quantity with unit, previous → resulting stock, reason, waste category, responsible (`Sin registro` when none) and the origin (sale/refund → `/sales/history/{saleId}`, invoice → `/invoices`, count → `/stock/count/{id}`). Filters: the ingredient, an inclusive date range (calendar days; an inverted range is an error) and a cause. `StockMovementFilter` is the service-side contract.
 
 **Saldo previo sin historial.** Stock that existed before the ledger (legacy `data.json`, never migrated) has no movements. The page shows `Saldo previo sin historial: X` when the ingredient has no movements but a nonzero stock (X = stock) or when its oldest movement has a nonzero `PreviousStock` (X = that value). It is computed on the whole history, so it does not appear or vanish with the filters.
+
+## Inventory view and routes
+
+The three stock screens are tabs of one inventory view (**Ingredientes e inventario**), each with its own route: **Stock y alertas** `/ingredients`, **Movimientos** `/ingredients/movements` (and `/ingredients/{id}/movements`), **Conteo físico** `/stock/count`. The sidebar has a single **Ingredientes y stock** entry that is active on all of them. Each tab is a separate page, so switching tabs discards unsaved page state. See [UserInterface.md](UserInterface.md).
 
 ## Alerts and coverage
 
@@ -55,7 +63,7 @@ Manual operations and sales never produce a negative balance (`Stock insuficient
 
 ## Physical counts
 
-The physical count flow (`/stock/count`) and its movements are documented in [StockCounts.md](StockCounts.md); it applies differences through `IngredientService.ApplyCountAdjustments` and the same ledger.
+The physical count flow (`/stock/count`, the **Conteo físico** tab) and its movements are documented in [StockCounts.md](StockCounts.md); it applies differences through `IngredientService.ApplyCountAdjustments` and the same ledger.
 
 ## Limits
 

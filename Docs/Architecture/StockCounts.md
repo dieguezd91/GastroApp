@@ -10,7 +10,7 @@ Implements S4 (physical counts compared with the registered stock and confirmed)
 | `Services/StockCountService.cs` | Singleton. `Preview`, `Confirm`, `GetHistory`, `GetDetail`. |
 | `DataStorageService` | `StockCounts` list, `_nextStockCountId` (`NextStockCountId` in JSON), count id allocation/rollback and load validation. |
 | `IngredientService.ApplyCountAdjustments` | Validates and applies the differences as `CountAdjustment` movements carrying the count id (all-or-nothing). |
-| `Pages/StockCount.razor` | `/stock/count` and `/stock/count/{CountId:int}`, admin only; NavMenu link **Conteo de stock**. |
+| `Pages/StockCount.razor` | `/stock/count` and `/stock/count/{CountId:int}`, admin only. It is the **Conteo físico** tab of `Shared/Inventory/InventoryView`; the sidebar entry is **Ingredientes y stock**, which stays active on `/stock/count`. |
 
 ## Persisted record
 
@@ -38,6 +38,8 @@ The mutation is one operation under a service lock: the count is appended to `St
 
 ## Page flow (`/stock/count`)
 
+Switching to another inventory tab while counting discards the selection and typed quantities: each tab is its own page.
+
 1. Choose ingredients: filter by name, only low stock (`stock <= minimum`), **Seleccionar todos los activos**, **Seleccionar los visibles**, **Limpiar selección**. Inactive ingredients are listed (marked) and can be counted manually. Existing negative stock shows a visible warning.
 2. Type the counted quantity (current-culture decimal). **Comparar** calls `Preview` and shows registered, counted, signed difference and the word `Faltante` / `Sobrante` / `Sin diferencia` (never only color), plus one required reason field per difference.
 3. Optional notes, the confirmation checkbox and **Confirmar conteo**. Changing the selection or a quantity drops the comparison (`Invalidate`) and the page re-checks it again on confirm. A stale stock refreshes the registered values, drops the comparison and shows the recount message.
@@ -47,4 +49,4 @@ Every callback (`OnParametersSet`, compare, confirm, selection helpers, detail n
 
 ## Verification
 
-`scripts/verify-stock-count.ps1` (scratch directory under the OS temp, live `data.json`/`GastroApp.csproj` hashed before and after) covers preview without mutation, confirm with movements linked to the count, lines without difference, every rejection with objects/counters/bytes unchanged (including ledger exhaustion rollback), reload persistence, legacy JSON, corrupt-file rejection and renderer-less page callbacks.
+`scripts/verify-stock-count.ps1` (scratch directory under the OS temp, live `data.json`/`GastroApp.csproj` hashed before and after) also pins that the menu has one admin-only **Ingredientes y stock** entry (no separate count link) and that `/stock/count` opens the **Conteo físico** tab. It covers preview without mutation, confirm with movements linked to the count, lines without difference, every rejection with objects/counters/bytes unchanged (including ledger exhaustion rollback), reload persistence, legacy JSON, corrupt-file rejection and renderer-less page callbacks.

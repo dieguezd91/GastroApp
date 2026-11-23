@@ -38,10 +38,29 @@ Rejected edits retain the prior cart and sale discount, give Spanish feedback in
 - Cash requires `ReceivedAmount` at least `Amount`; exact tender yields zero change, excess yields the difference. Every noncash method requires null `ReceivedAmount` and has zero change. A new sale with total zero requires an empty payment collection, including a sale reduced to zero by a 100% discount. Explicitly null payment collections are invalid.
 - `SaleService.ValidatePayments()` exposes side-effect-free payment validation shared by the POS and `ValidateSale()`. `ValidateSale()` checks it after discounts and before eligibility/stock; `Add()` repeats validation before notes normalization, ID allocation, sale insertion, stock deduction, or saving.
 - The POS offers each of **Efectivo**, **Tarjeta de débito**, **Tarjeta de crédito**, **Transferencia**, **Mercado Pago**, and **Otro** once. Adding a method assigns the current remaining amount; the operator can edit its applied amount or remove the row. It displays total, assigned, and remaining. Adding is disabled when nothing remains.
-- Cash has its own tender editor and live change based on its allocated portion, not the entire sale. Decimal editors use the current culture's separator without grouping. Blank, malformed, overflowing, nonpositive applied amounts and invalid/insufficient tender retain the last accepted values while recording invalid raw input; checkout stays disabled until corrected. No previous valid tender can be reused through an invalid edit.
+- Cash has its own tender editor and live change based on its allocated portion, not the entire sale. **Efectivo received defaults to the allocated amount** (**Exacto**, zero change) and follows later changes of that amount until the operator types a figure of their own, which is never overwritten; an **Exacto** button restores it. Decimal editors use the current culture's separator without grouping. Blank, malformed, overflowing, nonpositive applied amounts and invalid/insufficient tender retain the last accepted values while recording invalid raw input; checkout stays disabled until corrected. No previous valid tender can be reused through an invalid edit.
 - The POS rechecks the current final total on cart, quantity and discount changes and at checkout. It builds fresh payment objects from accepted allocations only; stale sums block checkout. A zero total clears local allocations and creates no payments. Clearing the cart or successful checkout resets the editor; catalog filters remain unchanged.
 
 Mixed allocations record applied amounts but add no fees, tips, refunds, or external payment processing. Only the applied cash portion creates a session movement after successful stock deduction; tender and change do not affect the drawer. Completed daily sales metrics remain separate from session cash; cancellation does not reverse prior cash movements. See [CashRegisters.md](CashRegisters.md).
+
+## POS availability (stock pre-block)
+
+The POS shows, before checkout, which products the recipe stock can still cover. It is a **read-only** projection built on the same `RecipeRequirements` used by checkout, so it cannot drift from the real rule; the atomic validation in `Add()` remains the second line of defense.
+
+- `SaleService.GetAvailability(cart, product)` returns `ProductAvailability(MaxAdditionalUnits, LimitingIngredient, ReservedByCart, InvalidRecipe)`: how many more units fit once the cart's lines reserve their ingredients. `MaxAdditionalUnits == null` means unlimited (no matching recipe by exact name, or stock services not wired); `0` means blocked (`IsBlocked`). The tightest ingredient is reported; `ReservedByCart` says the cart already holds part of it; `InvalidRecipe` flags a nonpositive recipe quantity, which checkout rejects too.
+- `SaleService.GetMaxQuantity(cart, item)` returns the largest quantity a line may have after the **other** lines reserve their stock (`null` = no cap). The line itself is ignored, so a copy being edited is capped like the line it replaces.
+- Decimal overflow reports `MaxAdditionalUnits = 0`. Neither method mutates anything or saves.
+- `Pages/Sales.razor` turns the result into a `TileAvailability` for each tile (`aria-disabled="true"`, the reason naming the missing ingredient, badge **Sin stock** or **Máximo en carrito**) and caps `+` and the numeric quantity field at `GetMaxQuantity`. Blocked products cannot be added from the cards.
+
+Recipes are still matched by product name, and recipe quantities are **not** divided by the recipe yield (see [Known limit: recipe yield](#known-limit-recipe-yield)).
+
+## Post-checkout receipt
+
+After a successful `Add()` the POS opens `ReceiptDialog` with the **stored** `Sale` (ID, date, operator, items, discounts, payments with received cash and change), never the cart. It is visual only: it states that it is not a ticket or fiscal document, and there is no print action. **Nueva venta** (or Esc/✕) closes it and leaves the cart empty. **Último comprobante (#N)** in the page header reopens the last receipt of the session without touching storage.
+
+### Known limit: recipe yield
+
+`RecipeRequirements` multiplies each recipe ingredient quantity by the units sold, **without dividing by `Recipe.Yield`**. A recipe with yield greater than 1 therefore deducts the full recipe per unit sold, and the availability above mirrors that. This pre-dates the UI redesign and was not changed.
 
 ## Checkout ordering and persistence
 
@@ -122,3 +141,13 @@ Payments are serialized inside each sale and restored by the existing `System.Te
 Older JSON without `Status` defaults to Completed (`0`), with null audit fields, an empty snapshot and `IsStockConsumptionReliable = false`. Reliable empty snapshots from new no-ingredient checkouts are distinct from legacy sales and can be cancelled without stock changes. New status, audit, stock consumption and reliability fields persist with the sale. Explicit null or malformed snapshots, missing ingredients, changed units and restoration overflow block cancellation before mutations.
 
 This remains prototype-level persistence, not a transaction or a durable-write acknowledgment. `SaveToFile()` catches and logs write errors rather than propagating them to checkout. A normal return does not guarantee disk persistence. Checkout is validated before it mutates and commits in one in-memory block followed by one save, but there is still no locking or multi-instance consistency. `Add()` stores the supplied sale reference, and exposed storage collections remain mutable. Discounts affect monetary totals only, not quantities or ingredient consumption. Payments record the checkout method, applied amount, and optional cash tender/change; only applied cash creates a movement, and payments do not change stock, totals, or authentication. Cancellation prevalidation is in-memory and does not add locking or transactional persistence. This contract adds no modifiers or kitchen workflow.
+
+## Verification
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-pos-availability.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-sales-refunds.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-sales-history.ps1
+```
+
+`verify-pos-availability.ps1` runs in a scratch fixture and covers `GetAvailability`/`GetMaxQuantity` (unlimited, blocked, reserved by cart, multiple ingredients, invalid recipe, overflow), their agreement with checkout and their read-only behavior. Like the other harnesses it does not prove browser layout.

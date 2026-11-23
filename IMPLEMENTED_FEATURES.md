@@ -8,6 +8,10 @@ It replaces the previous feature notes that had become partially outdated as aut
 
 For implementation details, current source code is authoritative.
 
+## User Interface
+
+Every screen uses one design system (CSS layers in `wwwroot/css/`, shared Blazor components, Argentine Spanish, `es-AR` formats). The shell has a sidebar (from 72 rem) or a drawer, and a topbar with the cash register status (refreshed every 5 seconds) and the user's role. The menu is grouped by role: **Operación diaria** (everyone), **Caja y ventas** and **Catálogo e inventario** (Admin). Related screens are tabs of one view, each tab keeping its own route: **Productos y categorías**, **Ingredientes e inventario** (stock, movements, physical count) and **Proveedores y facturas**. Recipes, invoices and refunds use a full-width workspace with **← Volver**. *Reportes* and *Configuración* from the prototype are not implemented. See [UserInterface.md](Docs/Architecture/UserInterface.md).
+
 ## Authentication
 
 GastroApp currently provides application-level authentication through:
@@ -35,14 +39,13 @@ Route:
 /
 ```
 
-The dashboard shows:
+The dashboard (**Inicio** for employees, **Panel operativo** for admins) shows:
 
-- current cash register state;
-- opening time;
-- initial cash;
-- today's sales total;
-- a primary sales action when the register is open;
-- admin quick links.
+- current cash register state, opening time and initial cash;
+- shift metrics (sales count and total of the open session);
+- stock alerts (employees: ingredients out of stock);
+- a primary sales action;
+- for admins, a priority list, the latest sales and quick links.
 
 ## Products
 
@@ -56,12 +59,15 @@ Admin functionality:
 
 - create products;
 - edit products;
-- delete products;
+- delete products (after a confirmation dialog);
 - set sale price;
 - optionally set product cost;
 - assign or change an optional category, or remove it with **Sin categoría**;
 - activate or deactivate products without deleting them;
-- display each product's category, availability, and calculated margin.
+- display each product's category, availability, and calculated margin;
+- see **Costo desfasado** when the saved cost differs from the unit cost of the recipe with the same name (exact name match, cent precision) and synchronize only the cost with **Sincronizar costo**.
+
+A blank name or a price of zero or less shows a validation banner. The drift rule and sync are documented in [ProductCatalog.md](Docs/Architecture/ProductCatalog.md#recipe-cost-sync).
 
 Margin status is based on the calculated percentage:
 
@@ -77,7 +83,7 @@ Route:
 /product-categories
 ```
 
-Admin users can create, list, rename, and delete product categories from the **PRODUCTOS** navigation section.
+Admin users can create, list, rename, and delete product categories in the **Categorías** tab of **Productos y categorías**.
 
 Category names are trimmed, required, and unique ignoring case. Categories have stable IDs, so renaming does not change product assignments. A category with assigned products cannot be deleted: those products must first be reassigned or left without a category. Validation failures are displayed in Spanish.
 
@@ -105,6 +111,8 @@ Authenticated users can:
 - review line gross, discount and final subtotals, then the sale's post-line subtotal, discount and final total;
 - allocate a positive-total sale across one or more unique methods (**Efectivo**, **Tarjeta de débito**, **Tarjeta de crédito**, **Transferencia**, **Mercado Pago**, **Otro**), edit or remove allocations and review assigned/remaining amounts; cash tender must cover its own allocation and displays live change;
 - complete a sale when the cash register is open; a zero-total sale requires no payment method.
+
+Products whose recipe stock cannot cover one more unit (counting what the cart already reserves) are blocked with `aria-disabled` and the missing ingredient named, and the cart caps `+` and the quantity field at the maximum available (`SaleService.GetAvailability` / `GetMaxQuantity`, see [Sales.md](Docs/Architecture/Sales.md#pos-availability-stock-pre-block)); checkout still validates stock atomically. Cash received defaults to the allocated amount (**Exacto**). After a successful checkout a visual receipt of the stored sale is shown (no print, not a fiscal document) and **Último comprobante** reopens it.
 
 Search and category filters affect only the displayed catalog, never the cart. The detailed projection, editing, and refresh contract is documented in [ProductCatalog.md](Docs/Architecture/ProductCatalog.md#point-of-sale-boundary).
 
@@ -217,7 +225,7 @@ Admin functionality:
 - define minimum stock;
 - adjust stock with a mandatory reason and confirmation (**Ajustar stock**);
 - register waste with category and reason (**Registrar merma**);
-- view the movement history of each ingredient with date and cause filters (`/ingredients/{id}/movements`);
+- view the movement history of one or all ingredients with ingredient, date and cause filters (`/ingredients/{id}/movements`, `/ingredients/movements`);
 - view stock alerts (**Alertas de stock**): exhausted and below-minimum ingredients with estimated coverage;
 - see a visible warning for negative balances (**Stock negativo: requiere ajuste**);
 - view the latest known purchase price;
@@ -247,7 +255,7 @@ Route:
 /suppliers
 ```
 
-Admin users can manage supplier records used by purchase invoices.
+Admin users can manage supplier records used by purchase invoices, in the **Proveedores** tab of **Proveedores y facturas**. Deleting a supplier asks for confirmation; its invoices are kept and show **Sin proveedor**.
 
 The current supplier model is intentionally small and primarily stores supplier identity information.
 
@@ -270,7 +278,7 @@ Admin users can create invoices with:
 - unit;
 - unit price.
 
-On creation, invoice quantities are converted when necessary and added to ingredient stock.
+Each line offers only units compatible with the ingredient and is stored converted to the ingredient's own unit (500 gr at 0.1 becomes 0.5 kg at 100), because recipe costing reads the last invoice price as a price per base unit. On creation, quantities are added to ingredient stock. Invoices are created in a full-width workspace; deleting one asks for confirmation (stock is kept).
 
 Invoice history is also used to resolve the latest purchase price for an ingredient.
 
@@ -293,7 +301,10 @@ Admin functionality:
 - add ingredients;
 - calculate total recipe cost;
 - calculate unit cost;
+- see a cost preview while editing (calculated on a scratch copy, nothing saved until confirmed);
 - recalculate costs from current invoice prices.
+
+Recipes are created and edited in a full-width workspace.
 
 Recipe costing uses the latest invoice price available for each ingredient.
 
@@ -406,7 +417,11 @@ The repository currently has the following relevant limitations:
 - shared application state is singleton-based;
 - JSON persistence is not transactional;
 - save behavior is inconsistent across some service mutations;
-- products and recipes are linked for stock consumption by matching names;
+- products and recipes are linked for stock consumption (and the cost sync) by matching names;
+- recipe yield is not applied to stock deduction: a sale deducts the full recipe quantity per unit sold, and the POS availability check mirrors it;
+- recalculating a recipe from its card calculates costs twice, so its variation indicator ends green;
+- switching tabs of a tabbed view discards unsaved page state (for example a count in progress);
+- Bootstrap remains in the lowest CSS layer until the last page stops using it;
 - deleting an invoice does not roll back stock;
 - editing an invoice does not reconcile previously applied stock;
 - no database is integrated;

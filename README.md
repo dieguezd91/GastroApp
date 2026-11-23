@@ -15,6 +15,17 @@ The repository is currently focused on validating product flows and business rul
 
 ## Implemented Features
 
+### User Interface
+
+The whole UI follows one design system (tokens, layout and components in `wwwroot/css/`, inline SVG icons) in Argentine Spanish with `es-AR` formats. Details: [Docs/Architecture/UserInterface.md](Docs/Architecture/UserInterface.md).
+
+- App shell with a sidebar (from 72 rem wide) or a drawer on narrow screens, and a topbar with the cash register status and the user's role.
+- Role-based menu: **Operación diaria** (everyone), **Caja y ventas** and **Catálogo e inventario** (Admin).
+- Related screens are tabs of one view: **Productos y categorías**, **Ingredientes e inventario** (stock, movements, physical count) and **Proveedores y facturas**. Their original URLs still work.
+- Long forms (recipes, invoices, refunds) open as a full-width workspace with a **← Volver** button.
+- Reusable components for badges, banners, KPI cards, modal dialogs and toasts.
+- The prototype's *Reportes* and *Configuración* proposals are intentionally **not** implemented.
+
 ### Authentication and Authorization
 
 - Username/password login
@@ -35,24 +46,23 @@ These credentials are intended only for local prototype use.
 
 ### Dashboard
 
-The main dashboard displays:
+The main dashboard (**Inicio** for employees, **Panel operativo** for admins) displays:
 
-- cash register state;
-- opening time and initial cash when open;
-- today's sales total;
-- direct access to the point of sale;
-- admin shortcuts to products, recipes, cash management, and daily summary.
+- cash register state, opening time and initial cash when open;
+- shift metrics (sales and total of the open session);
+- stock alerts (employees see ingredients out of stock);
+- a direct action to the point of sale;
+- for admins, a priority list, the latest sales and shortcuts to the other modules.
 
 ### Product Management
 
-Admin users can:
+Admin users manage products and categories in the **Productos y categorías** view (`/products`, `/product-categories`) and can:
 
-- create products;
-- edit products;
-- delete products;
-- define sale price;
-- optionally define product cost;
-- review calculated margin and its visual status.
+- create, edit and delete products (deleting asks for confirmation);
+- define sale price and optional product cost, and assign an optional category;
+- activate or deactivate products;
+- review calculated margin and its visual status;
+- see a **Costo desfasado** warning when the saved cost differs from the cost of the recipe with the same name, and synchronize it in one click.
 
 Margin is calculated as:
 
@@ -64,25 +74,25 @@ Margin is calculated as:
 
 Authenticated users can:
 
-- add products to a cart;
-- change quantities by adding repeated products;
-- remove cart items;
-- clear the cart;
-- register a sale when the cash register is open.
+- browse the catalog by category and name, and add products to a cart;
+- edit quantities, line notes and line or whole-sale discounts;
+- remove cart items or clear the cart;
+- charge with one or more payment methods (cash shows change; the amount received defaults to the amount due);
+- register a sale when the cash register is open and see its receipt right after checkout (visual only, not a fiscal document).
 
-Before checkout, the application validates ingredient availability for products that can be matched to a recipe.
+Products whose recipe stock cannot cover one more unit are blocked in the catalog and in the cart (counting what the cart already reserves), naming the missing ingredient. Checkout still validates ingredient availability atomically for products that can be matched to a recipe.
 
 ### Cash Register
 
 Admin users can:
 
 - open the current cash register with an initial amount;
-- view current register information;
-- close the register with the counted final amount;
-- calculate the expected amount from initial cash plus today's sales;
-- calculate the resulting cash difference.
+- view the session in a KPI strip (opening, cash inflow, expected cash, net receipts);
+- record manual income, expenses and withdrawals;
+- close the register through a detailed cash count (arqueo) and a confirmation dialog;
+- review closed sessions in **Historial de cajas**.
 
-Closing a register also creates a `DailySummary` entry in memory.
+Closing a register also creates a `DailySummary` entry. See [Docs/Architecture/CashRegisters.md](Docs/Architecture/CashRegisters.md).
 
 ### Daily Summary
 
@@ -98,7 +108,7 @@ The daily summary includes:
 
 ### Ingredient and Inventory Management
 
-Admin users can manage ingredients with:
+Ingredients, movements and physical counts are the tabs of the **Ingredientes e inventario** view (`/ingredients`, `/ingredients/movements`, `/stock/count`). Admin users can manage ingredients with:
 
 - name;
 - base unit;
@@ -124,7 +134,7 @@ Stock can also be adjusted manually.
 
 ### Suppliers and Purchase Invoices
 
-Admin users can manage suppliers and register purchase invoices.
+Admin users manage suppliers and register purchase invoices in the **Proveedores y facturas** view (`/invoices`, `/suppliers`); invoices are created in a full-width workspace. Invoice and supplier deletion ask for confirmation.
 
 An invoice contains:
 
@@ -137,13 +147,13 @@ An invoice contains:
 - unit;
 - unit price.
 
-When an invoice is added, compatible ingredient quantities are converted to the ingredient base unit and added to current stock.
+A line can be typed in any unit compatible with the ingredient; it is stored converted to the ingredient base unit (500 gr at 0.1 becomes 0.5 kg at 100) and added to current stock.
 
 The most recent invoice price for an ingredient is used by recipe costing.
 
 ### Recipes and Costing
 
-Admin users can create and edit standardized recipes with:
+Admin users can create and edit standardized recipes in a full-width workspace with a live cost preview, with:
 
 - recipe name;
 - yield;
@@ -200,34 +210,19 @@ GastroApp/
 ├── App.razor
 ├── GastroApp.csproj
 ├── Program.cs
-├── Models/
-│   ├── Product.cs
-│   ├── Sale.cs
-│   ├── CashRegister.cs
-│   ├── DailySummary.cs
-│   ├── User.cs
-│   ├── UserRole.cs
-│   ├── Ingredient.cs
-│   ├── Supplier.cs
-│   ├── Invoice.cs
-│   ├── InvoiceItem.cs
-│   ├── Recipe.cs
-│   └── RecipeIngredient.cs
-├── Services/
-│   ├── AuthService.cs
-│   ├── UserService.cs
-│   ├── DataStorageService.cs
-│   ├── ProductService.cs
-│   ├── SaleService.cs
-│   ├── CashRegisterService.cs
-│   ├── IngredientService.cs
-│   ├── SupplierService.cs
-│   ├── InvoiceService.cs
-│   ├── RecipeService.cs
-│   └── UnitConverter.cs
-├── Pages/
+├── Models/                  # data models (products, sales, cash, stock, recipes, ...)
+├── Services/                # business logic, one service per domain + UnitConverter
+├── Pages/                   # routable Blazor pages (one per route)
 ├── Shared/
+│   ├── MainLayout, NavMenu, SectionNavLink, CashStatusBadge   # app shell
+│   ├── Icon, Badge, Banner, KpiCard, ModalDialog, Toast       # shared components
+│   └── Pos/ Cash/ Catalog/ Inventory/ Recipes/ Purchasing/ SalesHistory/   # per-screen components
 ├── wwwroot/
+│   ├── css/                 # design system layers + views/<screen>.css
+│   └── js/                  # dialog.js, toast.js, shell.js (loaded on demand)
+├── Docs/Architecture/       # architecture documents
+├── scripts/                 # verify-*.ps1 harnesses
+├── odd/                     # task specs
 └── data.json
 ```
 
@@ -238,11 +233,11 @@ The application currently uses a simple service-oriented structure:
 - `Models/` contains application data models.
 - `Services/` owns business logic and state coordination.
 - `Pages/` contains routable Blazor UI.
-- `Shared/` contains shared layout and navigation components.
+- `Shared/` contains the app shell, shared UI components and per-screen components (see [Docs/Architecture/UserInterface.md](Docs/Architecture/UserInterface.md)).
 - `Program.cs` is the composition root.
 - `DataStorageService` owns JSON serialization and the main in-memory collections.
 
-Most application services are currently registered as singletons.
+Most application services are registered as singletons; `AuthService` alone is scoped per Blazor circuit.
 
 Some service relationships are wired after dependency injection construction through setter methods in `Program.cs` to avoid circular constructor dependencies.
 
@@ -305,11 +300,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-publish-a
 
 The current implementation has several known architectural limitations:
 
-- `AuthService` is registered as a singleton and stores the current user in memory, so authentication state is not isolated per Blazor circuit.
-- Application services share singleton in-memory state.
+- `AuthService` is scoped per Blazor circuit and stores the login in memory, so a full reload, a new tab or a replacement circuit starts unauthenticated (see [Docs/Architecture/Authentication.md](Docs/Architecture/Authentication.md)).
+- All other application services share singleton in-memory state.
 - JSON persistence provides no database transactions, concurrency control, or multi-instance consistency.
 - Save behavior is not uniform across all mutations.
-- Product-to-recipe stock consumption is matched by product name to recipe name rather than by a stable relationship ID.
+- Product-to-recipe stock consumption (and the recipe cost sync) is matched by product name to recipe name rather than by a stable relationship ID.
+- Recipe yield is not applied to stock deduction: `SaleService.RecipeRequirements` deducts the full recipe quantity per unit sold, so recipes with a yield above 1 over-deduct ingredients. The POS availability check mirrors checkout and inherits the same behavior.
+- Recalculating a recipe from its card runs the cost calculation twice (`CalculateCosts`, then again inside `RecipeService.Update`), so the cost variation indicator ends green after **Recalcular** because the previous cost is overwritten before the comparison.
+- `scripts/verify-payment-summary.ps1` pins `data.json` and `GastroApp.csproj` hashes that no commit since `7a173fd` matches, so it fails independently of the UI changes.
+- Each tab of a tabbed view is a separate page: switching tabs discards unsaved page state (for example a physical count in progress).
+- Bootstrap is still loaded in the lowest CSS layer until every page stops using it; some of its rules can leak into new components.
+- The topbar cash status refreshes by polling every 5 seconds; there is no push across circuits.
 - Deleting or editing an existing invoice does not automatically reconcile stock previously added by that invoice.
 - The application has no automated test project in the repository.
 - The project targets `net10.0` (LTS); framework upgrades should be handled as explicit work rather than incidental changes.
