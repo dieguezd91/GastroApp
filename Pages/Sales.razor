@@ -31,6 +31,14 @@
         </div>
         <p class="page-header__subtitle">Tocá o hacé clic en los productos para sumarlos al pedido. Los productos sin stock de receta quedan bloqueados; el stock se vuelve a validar al confirmar el cobro.</p>
     </div>
+    @if (lastCompletedSale is not null)
+    {
+        <div class="page-header__actions">
+            <button type="button" id="btn-last-receipt" class="btn btn--sm" @onclick="ShowLastReceipt">
+                <Icon Name="receipt" Size="16" /> <span>Último comprobante (#@lastCompletedSale.Id)</span>
+            </button>
+        </div>
+    }
 </div>
 
 @if (!registerOpen)
@@ -60,7 +68,7 @@ else
                     <div class="search-wrap">
                         <span class="search-wrap__icon"><Icon Name="search" Size="18" /></span>
                         <label for="pos-search" class="visually-hidden">Buscar producto por nombre</label>
-                        <input id="pos-search" type="search" class="input" autocomplete="off" autocorrect="off" spellcheck="false"
+                        <input id="pos-search" @ref="searchInput" type="search" class="input" autocomplete="off" autocorrect="off" spellcheck="false"
                                placeholder="Buscar por nombre (ej.: café, hamburguesa, limonada…)"
                                @bind="nameSearch" @bind:event="oninput" />
                     </div>
@@ -130,7 +138,8 @@ else
 
     <LineOptionsDialog @ref="lineDialog" Apply="ApplyLineOptions" />
     <SaleDiscountDialog @ref="discountDialog" Apply="ApplySaleDiscount" />
-    <CheckoutDialog @ref="checkoutDialog" OnConfirm="CompleteSale" />
+    <CheckoutDialog @ref="checkoutDialog" OnConfirm="CompleteSale" OnClosed="HandleCheckoutClosed" />
+    <ReceiptDialog @ref="receiptDialog" OnClosed="HandleReceiptClosed" />
 }
 
 <Toast @ref="toast" />
@@ -151,9 +160,15 @@ else
     private LineOptionsDialog lineDialog = default!;
     private SaleDiscountDialog discountDialog = default!;
     private CheckoutDialog checkoutDialog = default!;
+    private ReceiptDialog receiptDialog = default!;
+    private ElementReference searchInput;
 
     // Seam for the receipt (S10, T5): the sale exactly as SaleService stored it (Id, date, payments, change).
     private Sale? lastCompletedSale;
+    // Set once per checkout; the receipt opens when the checkout dialog has finished closing.
+    private bool receiptPending;
+    // The receipt reopened from the header button returns focus to that button (native behavior), not to the search.
+    private bool receiptFromCheckout;
 
     // Los filtros sólo proyectan el catálogo; no modifican productos ni el carrito.
     private IEnumerable<Product> FilteredProducts => products.Where(p =>
@@ -456,9 +471,37 @@ else
     private void OnSaleCompleted(Sale sale)
     {
         lastCompletedSale = sale;
+        receiptPending = true;
         ClearCart();
         StateHasChanged();
         toast.Show($"Venta #{sale.Id} registrada · {PosFormat.Money(sale.Total)}");
+    }
+
+    // S10: the receipt shows the stored sale once the checkout dialog is gone (never over it, never on cancel).
+    private async Task HandleCheckoutClosed(string returnValue)
+    {
+        if (!receiptPending) return;
+        receiptPending = false;
+        if (returnValue != "confirmed" || lastCompletedSale is null) return;
+
+        receiptFromCheckout = true;
+        await receiptDialog.ShowAsync(lastCompletedSale);
+    }
+
+    private async Task ShowLastReceipt()
+    {
+        if (lastCompletedSale is null) return;
+        receiptFromCheckout = false;
+        await receiptDialog.ShowAsync(lastCompletedSale);
+    }
+
+    // Closing the post-checkout receipt (Nueva venta, Esc or ✕) leaves the cart empty and the search ready.
+    private async Task HandleReceiptClosed(string returnValue)
+    {
+        if (!receiptFromCheckout) return;
+        receiptFromCheckout = false;
+        try { await searchInput.FocusAsync(); }
+        catch (JSDisconnectedException) { }
     }
 
     private void GoToCash()

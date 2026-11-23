@@ -313,6 +313,22 @@
     font-size: var(--text-lg);
   }
 
+  /* Post-checkout receipt (ReceiptDialog): product cell details and the total line. */
+  .receipt__product {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .receipt__detail {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .receipt__total {
+    font-size: var(--text-lg);
+    font-weight: 700;
+  }
+
   .pos-balance {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -24,6 +24,9 @@ public static class PosFormat
         return "$ " + text;
     }
 
+    /// <summary>"23/11/2026 14:05": es-AR date and time, independent of the host culture.</summary>
+    public static string DateTimeText(DateTime date) => date.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+
     /// <summary>Same rule the old POS used for every amount typed by the user (current culture, no thousands separator).</summary>
     public static bool TryParseDecimal(string? input, out decimal value)
     {

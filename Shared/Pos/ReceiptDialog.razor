@@ -1,0 +1,134 @@
+@* Post-checkout receipt (prototype openReceiptModal, S10). Visual only: it renders the Sale exactly as SaleService
+   stored it (Id, date, operator, payments with received cash), never the cart, and it is not a fiscal document (M13).
+   "Nueva venta" (or Esc / ✕) closes it; the page returns the focus to the product search through OnClosed. *@
+@using GastroApp.Models
+
+<ModalDialog @ref="modal" Title="@Title" Subtitle="@Subtitle" Size="lg" OnClosed="OnClosed">
+    <ChildContent>
+    @if (sale is not null)
+    {
+        <div class="stack receipt" id="pos-receipt">
+            @if (sale.Status == SaleStatus.Cancelled)
+            {
+                <Banner Variant="warn" Title="Esta venta fue anulada">El comprobante muestra los valores registrados originalmente.</Banner>
+            }
+            else
+            {
+                <Banner Variant="ok" Title="Cobro confirmado correctamente">@ConfirmationText</Banner>
+            }
+
+            <div class="table-wrapper" tabindex="0" role="region" aria-label="Detalle de productos vendidos">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Producto</th>
+                            <th scope="col" class="col-num">Cant.</th>
+                            <th scope="col" class="col-num">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in sale.Items)
+                        {
+                            <tr>
+                                <th scope="row">
+                                    <span class="receipt__product">@item.ProductName</span>
+                                    <span class="text-xs text-muted fw-600 tnum receipt__detail">@PosFormat.Money(item.Price) c/u</span>
+                                    @if (!string.IsNullOrEmpty(item.Notes))
+                                    {
+                                        <span class="text-xs text-muted fw-600 receipt__detail">Obs.: @item.Notes</span>
+                                    }
+                                    @if (item.DiscountAmount > 0m)
+                                    {
+                                        <span class="text-xs text-ok fw-600 tnum receipt__detail">Desc. @DiscountLabel(item.DiscountType, item.DiscountValue): -@PosFormat.Money(item.DiscountAmount)</span>
+                                    }
+                                </th>
+                                <td class="col-num tnum">@item.Quantity</td>
+                                <td class="col-num fw-700 tnum">@PosFormat.Money(item.Subtotal)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card card--compact card--subtle stack stack--sm">
+                @if (sale.DiscountAmount > 0m)
+                {
+                    <div class="summary-row">
+                        <span class="text-secondary">Subtotal tras desc. de línea</span>
+                        <span class="tnum fw-600">@PosFormat.Money(sale.Subtotal)</span>
+                    </div>
+                    <div class="summary-row text-ok">
+                        <span>Descuento general (@DiscountLabel(sale.DiscountType, sale.DiscountValue))</span>
+                        <span class="tnum fw-700">-@PosFormat.Money(sale.DiscountAmount)</span>
+                    </div>
+                }
+                <div class="summary-row receipt__total">
+                    <span>Total cobrado</span>
+                    <span class="tnum">@PosFormat.Money(sale.Total)</span>
+                </div>
+                @if (sale.Payments.Count == 0)
+                {
+                    <div class="summary-row text-sm text-secondary"><span>Sin pagos: la venta no tuvo importe a cobrar.</span></div>
+                }
+                @foreach (var payment in sale.Payments)
+                {
+                    <div class="summary-row text-sm text-secondary">
+                        <span>@PosFormat.PaymentLabel(payment.PaymentMethod)@(payment.PaymentMethod == PaymentMethod.Cash && payment.ReceivedAmount.HasValue ? $" (recibido {PosFormat.Money(payment.ReceivedAmount.Value)})" : string.Empty)</span>
+                        <span class="tnum">@PosFormat.Money(payment.Amount)</span>
+                    </div>
+                }
+                @if (Change > 0m)
+                {
+                    <div class="change-box">
+                        <span>Vuelto entregado</span>
+                        <span class="tnum change-box__amount">@PosFormat.Money(Change)</span>
+                    </div>
+                }
+            </div>
+
+            <p class="text-xs text-muted">Comprobante visual de la venta registrada; no es un ticket ni un comprobante fiscal.</p>
+        </div>
+    }
+    </ChildContent>
+    <Footer>
+        <button type="submit" id="receipt-new-sale" class="btn btn--primary" value="new" autofocus>Nueva venta</button>
+    </Footer>
+</ModalDialog>
+
+@code {
+    private ModalDialog modal = default!;
+    private Sale? sale;
+
+    /// <summary>Raised after the dialog closed ("new" for Nueva venta, "cancel" for Esc or the header ✕).</summary>
+    [Parameter] public EventCallback<string> OnClosed { get; set; }
+
+    private string Title => sale is null ? "Comprobante" : $"Venta #{sale.Id} registrada";
+
+    private string Subtitle => sale is null ? string.Empty
+        : $"{PosFormat.DateTimeText(sale.Date)} · Operador: {(string.IsNullOrWhiteSpace(sale.CreatedByUsername) ? "Sin registro" : sale.CreatedByUsername)}";
+
+    private string ConfirmationText
+    {
+        get
+        {
+            var ingredients = sale?.StockConsumption?.Count ?? 0;
+            return ingredients > 0
+                ? $"Se descontó automáticamente el stock de {ingredients} ingrediente(s) de recetas asociadas."
+                : "Venta registrada en la sesión de caja actual.";
+        }
+    }
+
+    // Only cash carries change (SalePayment.Change is zero for every other method).
+    private decimal Change => sale?.Payments.Sum(p => p.Change) ?? 0m;
+
+    private static string DiscountLabel(DiscountType type, decimal value) =>
+        type == DiscountType.Percentage ? $"{PosFormat.InputText(value)}%" : "importe fijo";
+
+    public async Task ShowAsync(Sale stored)
+    {
+        sale = stored;
+        // Title and Subtitle are parameters of the inner dialog: render this component with the sale first.
+        await InvokeAsync(StateHasChanged);
+        await modal.ShowAsync();
+    }
+}
