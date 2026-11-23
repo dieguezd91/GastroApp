@@ -1,0 +1,103 @@
+@* One recipe in the list (prototype recipes.js): yield, cost per portion, total cost at the latest invoice prices,
+   variation indicator (< 10% / 10–30% / >= 30%), ingredient breakdown and the recalculate / edit / delete actions. *@
+@using GastroApp.Models
+@using GastroApp.Shared.Pos
+
+@{
+    var variation = RecipeFormat.VariationOf(Recipe.CostIndicator);
+    var uncosted = Recipe.Ingredients.Count(i => i.UnitPrice <= 0m);
+}
+
+<article class="card stack recipe-card" aria-label="@($"Receta {Recipe.Name}")">
+    <div class="row-between">
+        <div class="recipe-card__heading">
+            <h2 class="card__title">@Recipe.Name</h2>
+            <p class="text-xs text-muted">
+                @RecipeFormat.Portions(Recipe.Yield) · @Recipe.Ingredients.Count ingrediente(s) ·
+                @(Recipe.LastCalculatedAt.HasValue ? $"Calculada {PosFormat.DateTimeText(Recipe.LastCalculatedAt.Value)}" : "Sin calcular")
+            </p>
+        </div>
+        <Badge Variant="@variation.Variant" Icon="@variation.Icon" Label="@variation.Label" />
+    </div>
+
+    <div class="recipe-card__stats">
+        <div class="card card--compact card--subtle">
+            <p class="text-xs text-muted">Rendimiento</p>
+            <p class="fw-700 tnum">@RecipeFormat.Portions(Recipe.Yield)</p>
+        </div>
+        <div class="card card--compact card--subtle">
+            <p class="text-xs text-muted">Costo por porción</p>
+            <p class="fw-700 tnum">@RecipeFormat.Money(Recipe.UnitCost)</p>
+        </div>
+        <div class="card card--compact card--subtle">
+            <p class="text-xs text-muted">Costo total (último precio de factura)</p>
+            <p class="fw-700 tnum">@RecipeFormat.Money(Recipe.TotalCost)</p>
+        </div>
+    </div>
+
+    @if (uncosted > 0)
+    {
+        <Banner Variant="warn">@(uncosted == 1 ? "1 ingrediente no suma al costo" : $"{uncosted} ingredientes no suman al costo"): sin precio de factura o con unidad incompatible.</Banner>
+    }
+
+    @if (Recipe.Ingredients.Any())
+    {
+        <details class="recipe-card__details">
+            <summary class="text-sm fw-600">Ver composición de ingredientes (@Recipe.Ingredients.Count)</summary>
+            <div class="table-wrapper mt-3" tabindex="0" role="region" aria-label="@($"Ingredientes de {Recipe.Name}")">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Ingrediente</th>
+                            <th scope="col" class="col-num">Cantidad</th>
+                            <th scope="col" class="col-num">Costo línea</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in Recipe.Ingredients)
+                        {
+                            <tr>
+                                <th scope="row">@line.IngredientName</th>
+                                <td class="col-num">@RecipeFormat.Qty(line.Quantity, line.Unit)</td>
+                                <td class="col-num fw-700">
+                                    @if (line.UnitPrice > 0m)
+                                    {
+                                        @RecipeFormat.Money(line.Subtotal)
+                                    }
+                                    else
+                                    {
+                                        <Badge Variant="warn" Icon="alertTriangle" Label="Sin costo" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    }
+
+    <div class="flex-wrap-gap">
+        <button type="button" class="btn btn--primary btn--sm" aria-label="@($"Recalcular costo de {Recipe.Name}")" @onclick="() => OnRecalculate.InvokeAsync(Recipe)">
+            <Icon Name="refresh" Size="15" />
+            <span>Recalcular costo</span>
+        </button>
+        <button type="button" class="btn btn--sm" aria-label="@($"Editar {Recipe.Name}")" @onclick="() => OnEdit.InvokeAsync(Recipe)">
+            <Icon Name="edit" Size="14" />
+            <span>Editar</span>
+        </button>
+        <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Eliminar receta {Recipe.Name}")" @onclick="() => OnDelete.InvokeAsync(Recipe)">
+            <Icon Name="trash" Size="15" />
+        </button>
+    </div>
+</article>
+
+@code {
+    [Parameter, EditorRequired] public Recipe Recipe { get; set; } = new();
+
+    [Parameter] public EventCallback<Recipe> OnEdit { get; set; }
+
+    [Parameter] public EventCallback<Recipe> OnRecalculate { get; set; }
+
+    [Parameter] public EventCallback<Recipe> OnDelete { get; set; }
+}

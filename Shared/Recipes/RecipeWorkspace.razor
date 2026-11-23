@@ -1,0 +1,238 @@
+@* Full-width recipe workspace (prototype renderRecipeWorkspace, UX_DECISIONS §7.5): create / edit a recipe with a
+   multi-ingredient builder. The unit control is poka-yoke (§4): it only offers units UnitConverter can convert to the
+   ingredient's unit, `unidad` is fixed and weight / volume get a 2-option segmented control. The per-line preview and the
+   totals are costed by RecipeService itself on a scratch copy, so they match what is stored on save.
+   The page owns the state and every service write; this component only renders it and raises callbacks. *@
+@using GastroApp.Models
+@using GastroApp.Services
+@inject RecipeService RecipeService
+@inject IngredientService IngredientService
+
+@{
+    var selected = SelectedIngredientId == 0 ? null : Ingredients.FirstOrDefault(i => i.Id == SelectedIngredientId);
+    IReadOnlyList<string> options = selected == null ? Array.Empty<string>() : RecipeFormat.UnitOptions(selected.Unit);
+    var preview = RecipeFormat.Preview(RecipeService, IngredientService, Recipe);
+    var isNew = Recipe.Id == 0;
+}
+
+<div class="page-header">
+    <div>
+        <h1 tabindex="-1" @ref="heading">@(isNew ? "Nueva receta estandarizada" : $"Editar receta · {Recipe.Name}")</h1>
+        <p class="page-header__subtitle">La unidad se adapta automáticamente al ingrediente elegido para evitar errores de carga.</p>
+    </div>
+    <div class="page-header__actions">
+        <button type="button" class="btn" @onclick="OnCancel">← Volver a Recetas</button>
+    </div>
+</div>
+
+<section class="workspace-panel stack" aria-label="Formulario de receta">
+    @if (!string.IsNullOrEmpty(FormError))
+    {
+        <Banner Variant="danger">@FormError</Banner>
+    }
+
+    <div class="form-grid">
+        <div class="field">
+            <label class="field__label" for="recipe-name">Nombre de la receta <span class="field__req" aria-hidden="true">*</span></label>
+            <span id="recipe-name-hint" class="field__hint">Usá el nombre exacto del producto para vincular el descuento de stock.</span>
+            <input id="recipe-name" type="text" class="input" autocomplete="off" aria-describedby="recipe-name-hint"
+                   placeholder="Ej: Pizza Margarita" @bind="Recipe.Name" @bind:event="oninput" />
+        </div>
+        <div class="field">
+            <label class="field__label" for="recipe-yield">Rendimiento (porciones / pax) <span class="field__req" aria-hidden="true">*</span></label>
+            <span id="recipe-yield-hint" class="field__hint">Divide el costo total para obtener el costo por porción.</span>
+            <input id="recipe-yield" type="number" min="1" step="1" class="input tnum" aria-describedby="recipe-yield-hint" placeholder="1"
+                   @bind:get="YieldText" @bind:set="HandleYield" @bind:event="oninput" />
+        </div>
+    </div>
+
+    <fieldset class="fieldset stack stack--sm">
+        <legend>Ingredientes de la receta</legend>
+
+        @if (Ingredients.Count == 0)
+        {
+            <Banner Variant="warn">No hay ingredientes activos para usar en recetas. Cargalos o activalos en <a href="/ingredients">Inventario</a>.</Banner>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(BuilderError))
+            {
+                <Banner Variant="danger">@BuilderError</Banner>
+            }
+
+            <div class="recipe-builder">
+                <div class="field">
+                    <label class="field__label" for="recipe-ingredient">Ingrediente activo</label>
+                    <select id="recipe-ingredient" class="select select--compact" @bind:get="SelectedIngredientId" @bind:set="HandleIngredient">
+                        <option value="0">Seleccionar...</option>
+                        @foreach (var ingredient in Ingredients)
+                        {
+                            var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
+                            <option value="@ingredient.Id">@ingredient.Name (@ingredient.Unit) — @(lastPrice.HasValue ? $"{RecipeFormat.Money(lastPrice.Value)}/{ingredient.Unit}" : "Sin precio")</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="recipe-quantity">Cantidad</label>
+                    <input id="recipe-quantity" type="number" min="0" step="any" inputmode="decimal" class="input input--compact tnum" placeholder="@QuantityPlaceholder"
+                           @bind:get="QuantityText" @bind:set="HandleQuantity" @bind:event="oninput" @onkeydown="HandleQuantityKey" />
+                </div>
+                <div class="field">
+                    <span class="field__label" id="recipe-unit-label">Unidad (@(options.Count > 1 ? "compatible" : "fija"))</span>
+                    @if (selected == null)
+                    {
+                        <span class="unit-static" aria-labelledby="recipe-unit-label">—</span>
+                    }
+                    else if (options.Count == 1)
+                    {
+                        <span class="unit-static" aria-labelledby="recipe-unit-label">@options[0]</span>
+                    }
+                    else
+                    {
+                        <div class="unit-toggle" role="radiogroup" aria-labelledby="recipe-unit-label">
+                            @foreach (var option in options)
+                            {
+                                <label class="unit-toggle__opt">
+                                    <input type="radio" name="recipe-unit" value="@option" class="visually-hidden" checked="@(Unit == option)"
+                                           @onchange="() => UnitChanged.InvokeAsync(option)" />
+                                    <span>@option</span>
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="recipe-builder__add">
+                    <button type="button" class="btn btn--primary btn--sm btn--block" @onclick="OnAdd">
+                        <Icon Name="plus" Size="15" />
+                        <span>Agregar ingrediente</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="live-preview-strip" aria-live="polite" id="recipe-line-preview">
+                <span>@RecipeFormat.LinePreviewText(RecipeService, IngredientService, selected, Unit, QuantityText)</span>
+            </div>
+        }
+
+        @if (Recipe.Ingredients.Count == 0)
+        {
+            <p class="text-sm text-muted">Todavía no agregaste ingredientes. Sumá al menos uno para costear la receta.</p>
+        }
+        else
+        {
+            <div class="table-wrapper mt-2" tabindex="0" role="region" aria-label="Ingredientes agregados a la receta">
+                <table class="data-table data-table--stack recipe-lines">
+                    <thead>
+                        <tr>
+                            <th scope="col">Ingrediente</th>
+                            <th scope="col" class="col-num">Cantidad</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col" class="col-num">Subtotal</th>
+                            <th scope="col" class="col-actions">Quitar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var index = 0; index < preview.Lines.Count; index++)
+                        {
+                            var item = preview.Lines[index];
+                            var line = Recipe.Ingredients[index];
+                            <tr>
+                                <th scope="row">@line.IngredientName</th>
+                                <td data-label="Cantidad" class="col-num">@RecipeFormat.Qty(line.Quantity, line.Unit)</td>
+                                <td data-label="Estado">
+                                    @switch (item.Status)
+                                    {
+                                        case RecipeLineStatus.Incompatible:
+                                            <Badge Variant="danger" Icon="alertOctagon" Label="@($"Unidad incompatible (base: {item.Ingredient?.Unit})")" />
+                                            break;
+                                        case RecipeLineStatus.Missing:
+                                            <Badge Variant="danger" Icon="alertOctagon" Label="Ingrediente no disponible" />
+                                            break;
+                                        case RecipeLineStatus.NoPrice:
+                                            <Badge Variant="warn" Icon="alertTriangle" Label="Sin precio de factura" />
+                                            break;
+                                        default:
+                                            <Badge Variant="ok" Icon="check" Label="@($"OK ({RecipeFormat.Money(item.Line.UnitPrice)}/{item.Ingredient?.Unit})")" />
+                                            break;
+                                    }
+                                </td>
+                                <td data-label="Subtotal" class="col-num fw-700">
+                                    @(item.Status == RecipeLineStatus.Incompatible ? "Excluido" : RecipeFormat.Money(item.Cost))
+                                </td>
+                                <td class="col-actions">
+                                    <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Quitar {line.IngredientName}")"
+                                            @onclick="() => OnRemove.InvokeAsync(line)">
+                                        <Icon Name="trash" Size="15" />
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </fieldset>
+
+    <div class="grid-kpi recipe-totals">
+        <KpiCard Label="Costo total estimado" Value="@RecipeFormat.Money(preview.TotalCost)" Meta="Con el último precio de factura de cada ingrediente." />
+        <KpiCard Label="@($"Costo por porción ({Math.Max(Recipe.Yield, 0)} u.)")" Value="@RecipeFormat.Money(preview.UnitCost)" />
+    </div>
+
+    <div class="workspace-panel__footer">
+        <button type="button" class="btn" @onclick="OnCancel">Cancelar</button>
+        <button type="button" class="btn btn--primary btn--lg" @onclick="OnSave">@(isNew ? "Guardar receta" : "Guardar cambios")</button>
+    </div>
+</section>
+
+@code {
+    private ElementReference heading;
+
+    [Parameter, EditorRequired] public Recipe Recipe { get; set; } = new();
+
+    /// <summary>Active ingredients the builder can pick from.</summary>
+    [Parameter] public IReadOnlyList<Ingredient> Ingredients { get; set; } = Array.Empty<Ingredient>();
+
+    /// <summary>Validation error of the whole form (save).</summary>
+    [Parameter] public string? FormError { get; set; }
+
+    /// <summary>Validation error of the ingredient picker (add).</summary>
+    [Parameter] public string? BuilderError { get; set; }
+
+    [Parameter] public string YieldText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> YieldTextChanged { get; set; }
+
+    [Parameter] public int SelectedIngredientId { get; set; }
+    [Parameter] public EventCallback<int> SelectedIngredientIdChanged { get; set; }
+
+    [Parameter] public string QuantityText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> QuantityTextChanged { get; set; }
+
+    [Parameter] public string Unit { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> UnitChanged { get; set; }
+
+    [Parameter] public EventCallback OnAdd { get; set; }
+    [Parameter] public EventCallback<RecipeIngredient> OnRemove { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string QuantityPlaceholder => Unit switch
+    {
+        "gr" or "ml" => "Ej: 180",
+        "kg" or "lt" => "Ej: 0,5",
+        _ => "Ej: 1"
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The workspace replaces the list: move focus to its heading, as the prototype does.
+        if (firstRender) await heading.FocusAsync();
+    }
+
+    private Task HandleYield(string? value) => YieldTextChanged.InvokeAsync(value);
+
+    private Task HandleIngredient(int id) => SelectedIngredientIdChanged.InvokeAsync(id);
+
+    private Task HandleQuantity(string? value) => QuantityTextChanged.InvokeAsync(value);
+
+    private Task HandleQuantityKey(KeyboardEventArgs e) => e.Key == "Enter" ? OnAdd.InvokeAsync() : Task.CompletedTask;
+}

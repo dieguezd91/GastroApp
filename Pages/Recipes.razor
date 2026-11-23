@@ -1,264 +1,109 @@
 @page "/recipes"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Recipes
 @inject RecipeService RecipeService
 @inject IngredientService IngredientService
-@inject DataStorageService DataStorage
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
 <PageTitle>Recetas</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
-        <h1>📖 Recetas Estandarizadas</h1>
-        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nueva Receta</button>
-    </div>
-
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
     @if (showForm)
     {
-        <div class="form-card">
-            <h3>@(editingRecipe.Id == 0 ? "Nueva Receta" : "Editar Receta")</h3>
-
-            <div class="form-group">
-                <label>Nombre de la Receta</label>
-                <input type="text" @bind="editingRecipe.Name" class="form-control" placeholder="Ej: Pizza Margarita" />
+        <RecipeWorkspace Recipe="editingRecipe" Ingredients="activeIngredients" FormError="@formError" BuilderError="@builderError"
+                         YieldText="@yieldText" YieldTextChanged="SetYield"
+                         SelectedIngredientId="selectedIngredientId" SelectedIngredientIdChanged="SelectIngredient"
+                         QuantityText="@ingredientQuantityText" QuantityTextChanged="SetQuantity"
+                         Unit="@ingredientUnit" UnitChanged="SetUnit"
+                         OnAdd="AddIngredient" OnRemove="RemoveIngredient" OnSave="SaveRecipe" OnCancel="CancelEdit" />
+    }
+    else
+    {
+        <div class="page-header">
+            <div>
+                <h1 tabindex="-1" @ref="listHeading">Recetas y costos</h1>
+                <p class="page-header__subtitle">Costo calculado con el último precio de factura de cada ingrediente. Variación: menos de 10% estable, de 10% a 30% media, 30% o más alta.</p>
             </div>
-
-            <div class="form-group">
-                <label>Rendimiento (porciones/pax)</label>
-                <input type="number" @bind="editingRecipe.Yield" class="form-control" placeholder="1" min="1" />
+            <div class="page-header__actions">
+                <a href="/products" class="btn">
+                    <Icon Name="products" Size="17" />
+                    <span>Ver productos</span>
+                </a>
+                <button type="button" class="btn btn--primary" @onclick="ShowAddForm">
+                    <Icon Name="plus" Size="17" />
+                    <span>Nueva receta</span>
+                </button>
             </div>
+        </div>
 
-            <hr />
+        <div class="stack">
+            <p class="proposal-note" role="note">
+                <span class="proposal-note__icon"><Icon Name="info" Size="15" /></span>
+                <span><strong>Vínculo actual:</strong> el descuento de stock al vender busca una receta con el mismo nombre exacto que el producto.</span>
+            </p>
 
-            <h4>Ingredientes de la Receta</h4>
-
-            <div class="recipe-ingredients">
-                <div class="form-group">
-                    <label>Ingrediente</label>
-                    <select @bind="selectedIngredientId" class="form-control">
-                        <option value="0">Seleccionar...</option>
-                        @foreach (var ingredient in activeIngredients)
-                        {
-                            var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
-                            var priceInfo = lastPrice.HasValue ? $"- ${lastPrice.Value}/{ingredient.Unit}" : "- Sin precio";
-                            <option value="@ingredient.Id">@ingredient.Name (@ingredient.Unit) @priceInfo</option>
-                        }
-                    </select>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Cantidad</label>
-                        <input type="number" @bind="ingredientQuantity" class="form-control" placeholder="0" step="0.01" />
-                    </div>
-
-                    <div class="form-group">
-                        <button class="btn btn-secondary" @onclick="AddIngredient" style="margin-top: 1.75rem;">+ Agregar</button>
-                    </div>
-                </div>
-
-                @if (editingRecipe.Ingredients.Any())
-                {
-                    <div class="items-list">
-                        <h5>Ingredientes agregados:</h5>
-                        @foreach (var item in editingRecipe.Ingredients)
-                        {
-                            var ingredientInfo = DataStorage.Ingredients.FirstOrDefault(i => i.Id == item.IngredientId);
-                            var isCompatible = ingredientInfo != null && UnitConverter.AreCompatible(item.Unit, ingredientInfo.Unit);
-
-                            <div class="recipe-ingredient-item">
-                                <span><strong>@item.IngredientName</strong></span>
-                                <span>@item.Quantity @item.Unit</span>
-                                @if (!isCompatible)
-                                {
-                                    <span class="unit-warning">⚠️ Unidad incompatible</span>
-                                }
-                                else if (item.UnitPrice > 0)
-                                {
-                                    <span>$@item.UnitPrice/@item.Unit = $@item.Subtotal</span>
-                                }
-                                else
-                                {
-                                    <span class="no-price">⚠️ Sin precio</span>
-                                }
-                                <button class="btn-remove" @onclick="() => RemoveIngredient(item)">❌</button>
-                            </div>
-                        }
-                    </div>
-                }
-            </div>
-
-            @if (editingRecipe.Ingredients.Any())
+            @if (recipes.Count == 0)
             {
-                <div class="recipe-cost-preview">
-                    <div class="cost-item">
-                        <span>Costo Total:</span>
-                        <strong>$@previewTotalCost.ToString("F2")</strong>
+                <div class="empty-state">
+                    <div class="empty-state__icon"><Icon Name="recipes" Size="24" /></div>
+                    <div class="stack stack--sm">
+                        <h3>Todavía no hay recetas cargadas</h3>
+                        <p class="text-sm text-secondary">Creá recetas estandarizadas con varios ingredientes para calcular costos y descontar stock al vender.</p>
                     </div>
-                    <div class="cost-item">
-                        <span>Costo por Porción:</span>
-                        <strong>$@previewUnitCost.ToString("F2")</strong>
+                    <div class="mt-2">
+                        <button type="button" class="btn btn--primary" @onclick="ShowAddForm">Crear primera receta</button>
                     </div>
                 </div>
             }
-
-            <div class="form-actions">
-                <button class="btn btn-success" @onclick="SaveRecipe" disabled="@(!CanSaveRecipe())">Guardar Receta</button>
-                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
-            </div>
+            else
+            {
+                <div class="grid-2 recipe-grid">
+                    @foreach (var recipe in recipes)
+                    {
+                        <RecipeCard @key="recipe.Id" Recipe="recipe" OnEdit="EditRecipe" OnRecalculate="RecalculateCostOf" OnDelete="ConfirmDelete" />
+                    }
+                </div>
+            }
         </div>
     }
 
-    <div class="products-list">
-        @foreach (var recipe in recipes)
-        {
-            var indicatorEmoji = recipe.CostIndicator switch
-            {
-                "green" => "🟢",
-                "yellow" => "🟡",
-                "red" => "🔴",
-                _ => "⚪"
-            };
+    <ModalDialog @ref="deleteDialog" Title="@($"¿Eliminar la receta «{pendingDelete?.Name}»?")" Size="md" OnClosed="HandleDeleteClosed">
+        <ChildContent>
+            <p>Se eliminará la receta estandarizada. Los productos con el mismo nombre dejarán de descontar stock automáticamente al vender.</p>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn" autofocus>Cancelar</button>
+            <button type="button" class="btn btn--danger" @onclick="() => DeleteRecipe(pendingDelete?.Id ?? 0)">Eliminar receta</button>
+        </Footer>
+    </ModalDialog>
 
-            <div class="product-card">
-                <div class="product-info">
-                    <h3>@indicatorEmoji @recipe.Name</h3>
-                    <p class="cost">👨‍🍳 Rinde: @recipe.Yield porciones</p>
-                    <p class="cost">🥘 @recipe.Ingredients.Count ingrediente(s)</p>
-                    <p class="price">Costo total: $@recipe.TotalCost.ToString("F2")</p>
-                    <p class="price">Costo x porción: $@recipe.UnitCost.ToString("F2")</p>
-
-                    @if (recipe.Ingredients.Any())
-                    {
-                        <details class="recipe-details">
-                            <summary>Ver ingredientes</summary>
-                            <ul>
-                                @foreach (var ing in recipe.Ingredients)
-                                {
-                                    <li>@ing.IngredientName: @ing.Quantity @ing.Unit</li>
-                                }
-                            </ul>
-                        </details>
-                    }
-                </div>
-                <div class="product-actions">
-                    <button class="btn btn-small" @onclick="() => EditRecipe(recipe)">✏️</button>
-                    <button class="btn btn-small" @onclick="() => RecalculateCost(recipe.Id)" title="Recalcular costo">🔄</button>
-                    <button class="btn btn-small btn-danger" @onclick="() => DeleteRecipe(recipe.Id)">🗑️</button>
-                </div>
-            </div>
-        }
-    </div>
-
-    @if (recipes.Count == 0)
-    {
-        <p class="empty-state">No hay recetas. Creá la primera!</p>
-    }
-</div>
-
-<style>
-    .form-row {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 1rem;
-        align-items: end;
-    }
-
-    .recipe-ingredients {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 4px;
-        margin: 1rem 0;
-    }
-
-    .items-list {
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 2px solid #dee2e6;
-    }
-
-    .recipe-ingredient-item {
-        display: grid;
-        grid-template-columns: 2fr 1fr 1fr auto;
-        gap: 1rem;
-        align-items: center;
-        background: white;
-        padding: 0.75rem;
-        border-radius: 4px;
-        margin-bottom: 0.5rem;
-    }
-
-    .no-price {
-        color: #ffc107;
-        font-size: 0.9rem;
-    }
-
-    .unit-warning {
-        color: #dc3545;
-        font-size: 0.9rem;
-        font-weight: bold;
-    }
-
-    .recipe-cost-preview {
-        background: #e7f3ff;
-        border: 2px solid #1b6ec2;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-
-    .cost-item {
-        display: flex;
-        justify-content: space-between;
-        padding: 0.5rem 0;
-        font-size: 1.1rem;
-    }
-
-    .recipe-details {
-        margin-top: 0.5rem;
-        padding: 0.5rem;
-        background: #f8f9fa;
-        border-radius: 4px;
-    }
-
-    .recipe-details summary {
-        cursor: pointer;
-        font-weight: bold;
-        color: #1b6ec2;
-    }
-
-    .recipe-details ul {
-        margin: 0.5rem 0 0 1rem;
-        padding: 0;
-    }
-
-    .recipe-details li {
-        margin: 0.25rem 0;
-    }
-
-    .btn-remove {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 1rem;
-    }
-</style>
+    <Toast @ref="toast" />
+}
 
 @code {
     private List<Recipe> recipes = new();
     private List<Ingredient> activeIngredients = new();
     private Recipe editingRecipe = new();
+    private Recipe? pendingDelete;
     private bool showForm = false;
 
-    // Para agregar ingredientes
-    private int selectedIngredientId = 0;
-    private decimal ingredientQuantity = 0;
+    // Form state
+    private string yieldText = "1";
+    private string formError = string.Empty;
+    private string builderError = string.Empty;
 
-    // Preview de costos
-    private decimal previewTotalCost = 0;
-    private decimal previewUnitCost = 0;
+    // Ingredient picker
+    private int selectedIngredientId = 0;
+    private string ingredientQuantityText = string.Empty;
+    private string ingredientUnit = string.Empty;
+
+    private ElementReference listHeading;
+    private bool focusListHeading;
+    private ModalDialog? deleteDialog;
+    private Toast? toast;
 
     protected override async Task OnInitializedAsync()
     {
@@ -266,6 +111,14 @@
 
         LoadData();
         await Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Back from the workspace: put focus on the list heading, like the prototype.
+        if (!focusListHeading || showForm) return;
+        focusListHeading = false;
+        await listHeading.FocusAsync();
     }
 
     private bool EnsureAdmin()
@@ -292,20 +145,85 @@
     private void ShowAddForm()
     {
         if (!EnsureAdmin()) return;
+        activeIngredients = IngredientService.GetActive();
         editingRecipe = new Recipe { Yield = 1 };
+        OpenForm();
+    }
+
+    private void OpenForm()
+    {
+        yieldText = editingRecipe.Yield.ToString();
+        formError = string.Empty;
+        builderError = string.Empty;
+        ResetPicker();
         showForm = true;
-        UpdatePreview();
+    }
+
+    private void ResetPicker()
+    {
+        selectedIngredientId = 0;
+        ingredientQuantityText = string.Empty;
+        ingredientUnit = string.Empty;
+    }
+
+    private void SetYield(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        yieldText = text ?? string.Empty;
+        // A value that is not a whole number leaves the yield at 0, which the save validation rejects.
+        editingRecipe.Yield = int.TryParse(yieldText, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+    }
+
+    private void SelectIngredient(int ingredientId)
+    {
+        if (!EnsureAdmin()) return;
+        selectedIngredientId = ingredientId;
+        var ingredient = ingredientId == 0 ? null : IngredientService.GetById(ingredientId);
+        // Poka-yoke: the unit always restarts from a unit compatible with the new ingredient (gr / ml preselected).
+        ingredientUnit = ingredient == null ? string.Empty : RecipeFormat.DefaultUnit(ingredient.Unit);
+        builderError = string.Empty;
+    }
+
+    private void SetQuantity(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        ingredientQuantityText = text ?? string.Empty;
+    }
+
+    private void SetUnit(string unit)
+    {
+        if (!EnsureAdmin()) return;
+        var ingredient = selectedIngredientId == 0 ? null : IngredientService.GetById(selectedIngredientId);
+        if (ingredient == null || !RecipeFormat.UnitOptions(ingredient.Unit).Contains(unit)) return;
+        ingredientUnit = unit;
     }
 
     private void AddIngredient()
     {
         if (!EnsureAdmin()) return;
-        if (selectedIngredientId == 0 || ingredientQuantity <= 0)
+        if (selectedIngredientId == 0)
+        {
+            builderError = "Seleccioná un ingrediente.";
             return;
+        }
+        if (!RecipeFormat.TryParseQuantity(ingredientQuantityText, out var quantity) || quantity <= 0)
+        {
+            builderError = "Ingresá una cantidad mayor a cero antes de agregar el ingrediente.";
+            return;
+        }
 
         var ingredient = IngredientService.GetById(selectedIngredientId);
         if (ingredient == null)
+        {
+            builderError = "El ingrediente seleccionado ya no existe.";
             return;
+        }
+        // The control only offers compatible units; this keeps the rule even if a stale unit slips through.
+        if (!UnitConverter.AreCompatible(ingredientUnit, ingredient.Unit))
+        {
+            builderError = $"La unidad {ingredientUnit} no es compatible con {ingredient.Name} ({ingredient.Unit}).";
+            return;
+        }
 
         var lastPrice = IngredientService.GetLastPrice(ingredient.Id) ?? 0;
 
@@ -313,67 +231,49 @@
         {
             IngredientId = ingredient.Id,
             IngredientName = ingredient.Name,
-            Quantity = ingredientQuantity,
-            Unit = ingredient.Unit,
+            Quantity = quantity,
+            Unit = ingredientUnit,
             UnitPrice = lastPrice,
-            Subtotal = ingredientQuantity * lastPrice
+            Subtotal = (UnitConverter.Convert(quantity, ingredientUnit, ingredient.Unit) ?? quantity) * lastPrice
         });
 
         // Reset
-        selectedIngredientId = 0;
-        ingredientQuantity = 0;
-
-        UpdatePreview();
+        builderError = string.Empty;
+        formError = string.Empty;
+        ResetPicker();
     }
 
     private void RemoveIngredient(RecipeIngredient item)
     {
         if (!EnsureAdmin()) return;
         editingRecipe.Ingredients.Remove(item);
-        UpdatePreview();
+        builderError = string.Empty;
     }
 
-    private void UpdatePreview()
+    private string? ValidateRecipe()
     {
-        decimal total = 0;
-
-        foreach (var item in editingRecipe.Ingredients)
-        {
-            var ingredientInfo = DataStorage.Ingredients.FirstOrDefault(i => i.Id == item.IngredientId);
-            if (ingredientInfo != null && UnitConverter.AreCompatible(item.Unit, ingredientInfo.Unit))
-            {
-                // Convertir cantidad a unidad base del ingrediente
-                var convertedQty = UnitConverter.Convert(item.Quantity, item.Unit, ingredientInfo.Unit);
-                if (convertedQty.HasValue && item.UnitPrice > 0)
-                {
-                    total += convertedQty.Value * item.UnitPrice;
-                }
-            }
-            else
-            {
-                // Sin conversión o incompatible: usar subtotal original
-                total += item.Subtotal;
-            }
-        }
-
-        previewTotalCost = total;
-        previewUnitCost = editingRecipe.Yield > 0 ? total / editingRecipe.Yield : 0;
-    }
-
-    private bool CanSaveRecipe()
-    {
-        return !string.IsNullOrWhiteSpace(editingRecipe.Name)
-            && editingRecipe.Yield > 0
-            && editingRecipe.Ingredients.Any();
+        if (string.IsNullOrWhiteSpace(editingRecipe.Name))
+            return "Ingresá un nombre para la receta.";
+        if (editingRecipe.Yield <= 0)
+            return "El rendimiento debe ser de al menos 1 porción.";
+        if (!editingRecipe.Ingredients.Any())
+            return "Agregá al menos un ingrediente a la receta.";
+        return null;
     }
 
     private void SaveRecipe()
     {
         if (!EnsureAdmin()) return;
-        if (!CanSaveRecipe())
+        var error = ValidateRecipe();
+        if (error != null)
+        {
+            formError = error;
             return;
+        }
 
-        if (editingRecipe.Id == 0)
+        var creating = editingRecipe.Id == 0;
+        var name = editingRecipe.Name;
+        if (creating)
         {
             RecipeService.Add(editingRecipe);
         }
@@ -384,30 +284,23 @@
 
         LoadData();
         CancelEdit();
+        toast?.Show(creating ? $"Receta «{name}» creada y costeada." : $"Receta «{name}» actualizada y recosteada.");
     }
 
     private void EditRecipe(Recipe recipe)
     {
         if (!EnsureAdmin()) return;
+        activeIngredients = IngredientService.GetActive();
         // Crear copia profunda para editar
         editingRecipe = new Recipe
         {
             Id = recipe.Id,
             Name = recipe.Name,
             Yield = recipe.Yield,
-            Ingredients = recipe.Ingredients.Select(i => new RecipeIngredient
-            {
-                IngredientId = i.IngredientId,
-                IngredientName = i.IngredientName,
-                Quantity = i.Quantity,
-                Unit = i.Unit,
-                UnitPrice = i.UnitPrice,
-                Subtotal = i.Subtotal
-            }).ToList()
+            Ingredients = recipe.Ingredients.Select(RecipeFormat.CopyOf).ToList()
         };
 
-        showForm = true;
-        UpdatePreview();
+        OpenForm();
     }
 
     private void RecalculateCost(int recipeId)
@@ -419,23 +312,39 @@
             RecipeService.CalculateCosts(recipe);
             RecipeService.Update(recipe);
             LoadData();
+            toast?.Show($"Receta «{recipe.Name}» recalculada: {RecipeFormat.Money(recipe.UnitCost)} por porción.");
         }
     }
 
-    private void DeleteRecipe(int id)
+    private void RecalculateCostOf(Recipe recipe) => RecalculateCost(recipe.Id);
+
+    private async Task ConfirmDelete(Recipe recipe)
     {
         if (!EnsureAdmin()) return;
+        pendingDelete = recipe;
+        if (deleteDialog is not null) await deleteDialog.ShowAsync();
+    }
+
+    private async Task DeleteRecipe(int id)
+    {
+        if (!EnsureAdmin()) return;
+        var name = RecipeService.GetById(id)?.Name;
         RecipeService.Delete(id);
         LoadData();
+        if (deleteDialog is not null) await deleteDialog.CloseAsync("deleted");
+        if (name is not null) toast?.Show($"Receta «{name}» eliminada.");
     }
+
+    private void HandleDeleteClosed(string _) => pendingDelete = null;
 
     private void CancelEdit()
     {
         showForm = false;
+        focusListHeading = true;
         editingRecipe = new Recipe();
-        selectedIngredientId = 0;
-        ingredientQuantity = 0;
-        previewTotalCost = 0;
-        previewUnitCost = 0;
+        yieldText = "1";
+        formError = string.Empty;
+        builderError = string.Empty;
+        ResetPicker();
     }
 }
