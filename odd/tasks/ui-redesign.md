@@ -17,7 +17,7 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 ## Tasks
 | ID | Specs | Route | Commit |
 | --- | --- | --- | --- |
-| T1 | S2, S3, S4, S7 | worker: design system CSS + icons in `wwwroot/`, `_Host.cshtml`, `MainLayout`/`NavMenu` shell, topbar, drawer; Login + Acceso denegado | — |
+| T1 | S2, S3, S4, S7 | worker: design system CSS + icons in `wwwroot/`, `_Host.cshtml`, `MainLayout`/`NavMenu` shell, topbar, drawer; Login + Acceso denegado | 799aea3 |
 | T2 | S6, S7 | worker: Dashboard (`/`) | — |
 | T3 | S6, S7 | worker: POS UI (`/sales`): catalog, cart, line dialog, checkout with mixed payments | — |
 | T4 | S8 | worker: POS stock availability (service + UI) + `scripts/verify-pos-availability.ps1` | — |
