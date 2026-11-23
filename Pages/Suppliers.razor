@@ -1,60 +1,69 @@
 @page "/suppliers"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Purchasing
 @inject SupplierService SupplierService
+@inject InvoiceService InvoiceService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
 <PageTitle>Proveedores</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
-        <h1>🚚 Proveedores</h1>
-        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nuevo Proveedor</button>
-    </div>
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    <PurchasingView ActiveTab="PurchasingTab.Suppliers" InvoiceCount="invoices.Count" SupplierCount="suppliers.Count">
+        <HeaderActions>
+            <button type="button" class="btn btn--primary" @onclick="ShowAddForm">
+                <Icon Name="plus" Size="17" />
+                <span>Nuevo proveedor</span>
+            </button>
+        </HeaderActions>
+        <ChildContent>
+            <SupplierList Suppliers="suppliers" Invoices="invoices" OnNew="ShowAddForm" OnEdit="EditSupplier" OnDelete="ConfirmDelete" />
+        </ChildContent>
+    </PurchasingView>
 
-    @if (showForm)
-    {
-        <div class="form-card">
-            <h3>@(editingSupplier.Id == 0 ? "Nuevo Proveedor" : "Editar Proveedor")</h3>
-
-            <div class="form-group">
-                <label>Nombre</label>
-                <input type="text" @bind="editingSupplier.Name" class="form-control" placeholder="Ej: Distribuidora XYZ" />
-            </div>
-
-            <div class="form-actions">
-                <button class="btn btn-primary" @onclick="SaveSupplier">Guardar</button>
-                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
-            </div>
-        </div>
-    }
-
-    <div class="products-list">
-        @foreach (var supplier in suppliers)
-        {
-            <div class="product-card">
-                <div class="product-info">
-                    <h3>@supplier.Name</h3>
+    <ModalDialog @ref="formDialog" Title="@(editingSupplier.Id == 0 ? "Nuevo proveedor" : $"Editar proveedor · {editingSupplier.Name}")" LightDismiss="false" OnClosed="HandleFormClosed">
+        <ChildContent>
+            <form id="supplier-form" class="stack" novalidate @onsubmit="SaveSupplier">
+                @if (!string.IsNullOrEmpty(formError))
+                {
+                    <Banner Variant="danger">@formError</Banner>
+                }
+                <div class="field">
+                    <label class="field__label" for="supplier-name">Nombre del proveedor <span class="field__req" aria-hidden="true">*</span></label>
+                    <input id="supplier-name" type="text" class="input" required autocomplete="off" placeholder="Ej: Distribuidora XYZ" @bind="editingSupplier.Name" />
                 </div>
-                <div class="product-actions">
-                    <button class="btn btn-small" @onclick="() => EditSupplier(supplier)">✏️</button>
-                    <button class="btn btn-small btn-danger" @onclick="() => DeleteSupplier(supplier.Id)">🗑️</button>
-                </div>
-            </div>
-        }
-    </div>
+            </form>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn">Cancelar</button>
+            <button type="submit" form="supplier-form" class="btn btn--primary">@(editingSupplier.Id == 0 ? "Guardar proveedor" : "Guardar cambios")</button>
+        </Footer>
+    </ModalDialog>
 
-    @if (suppliers.Count == 0)
-    {
-        <p class="empty-state">No hay proveedores. Creá el primero!</p>
-    }
-</div>
+    <ModalDialog @ref="deleteDialog" Title="@($"¿Eliminar a «{pendingDelete?.Name}»?")" Size="md" OnClosed="HandleDeleteClosed">
+        <ChildContent>
+            <p>@DeleteMessage()</p>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn" autofocus>Cancelar</button>
+            <button type="button" class="btn btn--danger" @onclick="() => DeleteSupplier(pendingDelete?.Id ?? 0)">Eliminar proveedor</button>
+        </Footer>
+    </ModalDialog>
+
+    <Toast @ref="toast" />
+}
 
 @code {
     private List<Supplier> suppliers = new();
+    private List<Invoice> invoices = new();
     private Supplier editingSupplier = new();
-    private bool showForm = false;
+    private Supplier? pendingDelete;
+    private string formError = string.Empty;
+    private ModalDialog? formDialog;
+    private ModalDialog? deleteDialog;
+    private Toast? toast;
 
     protected override async Task OnInitializedAsync()
     {
@@ -82,16 +91,18 @@
     private void LoadSuppliers()
     {
         suppliers = SupplierService.GetAll();
+        invoices = InvoiceService.GetAll();
     }
 
-    private void ShowAddForm()
+    private async Task ShowAddForm()
     {
         if (!EnsureAdmin()) return;
         editingSupplier = new Supplier();
-        showForm = true;
+        formError = string.Empty;
+        await OpenFormAsync();
     }
 
-    private void EditSupplier(Supplier supplier)
+    private async Task EditSupplier(Supplier supplier)
     {
         if (!EnsureAdmin()) return;
         editingSupplier = new Supplier
@@ -99,16 +110,24 @@
             Id = supplier.Id,
             Name = supplier.Name
         };
-        showForm = true;
+        formError = string.Empty;
+        await OpenFormAsync();
     }
 
-    private void SaveSupplier()
+    private Task OpenFormAsync() => formDialog is null ? Task.CompletedTask : formDialog.ShowAsync();
+
+    private async Task SaveSupplier()
     {
         if (!EnsureAdmin()) return;
         if (string.IsNullOrWhiteSpace(editingSupplier.Name))
+        {
+            formError = "Ingresá un nombre para el proveedor.";
             return;
+        }
 
-        if (editingSupplier.Id == 0)
+        formError = string.Empty;
+        var creating = editingSupplier.Id == 0;
+        if (creating)
         {
             SupplierService.Add(editingSupplier);
         }
@@ -118,19 +137,40 @@
         }
 
         LoadSuppliers();
-        CancelEdit();
+        if (formDialog is not null) await formDialog.CloseAsync("saved");
+        toast?.Show(creating ? "Proveedor agregado." : "Proveedor actualizado.");
     }
 
-    private void DeleteSupplier(int id)
+    private async Task ConfirmDelete(Supplier supplier)
     {
         if (!EnsureAdmin()) return;
-        SupplierService.Delete(id);
-        LoadSuppliers();
+        pendingDelete = supplier;
+        if (deleteDialog is not null) await deleteDialog.ShowAsync();
     }
 
-    private void CancelEdit()
+    private string DeleteMessage()
     {
-        showForm = false;
-        editingSupplier = new Supplier();
+        var count = pendingDelete == null ? 0 : invoices.Count(i => i.SupplierId == pendingDelete.Id);
+        return count == 0
+            ? "El proveedor desaparecerá del listado y ya no podrá elegirse en nuevas facturas."
+            : $"El proveedor desaparecerá del listado. Sus {count} factura(s) registradas se conservan y quedarán como «Sin proveedor».";
     }
+
+    private async Task DeleteSupplier(int id)
+    {
+        if (!EnsureAdmin()) return;
+        var name = SupplierService.GetById(id)?.Name;
+        SupplierService.Delete(id);
+        LoadSuppliers();
+        if (deleteDialog is not null) await deleteDialog.CloseAsync("deleted");
+        if (name is not null) toast?.Show($"Proveedor «{name}» eliminado.", "warn");
+    }
+
+    private void HandleFormClosed(string _)
+    {
+        editingSupplier = new Supplier();
+        formError = string.Empty;
+    }
+
+    private void HandleDeleteClosed(string _) => pendingDelete = null;
 }

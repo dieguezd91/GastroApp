@@ -1,3 +1,60 @@
 /* purchasing view styles, ported from prototypes/ui-ux/styles/views.css. */
 @layer views {
+  /* Legacy Bootstrap `.card`/form rules must not widen the workspace on phones. */
+  .invoice-workspace {
+    min-inline-size: 0;
+  }
+
+  /* Row actions stay on one line in the table and wrap in the stacked (narrow) layout. */
+  .purchasing-actions {
+    justify-content: flex-end;
+  }
+
+  /* Line picker: ingredient · quantity · unit · price · add button, stacked on narrow screens. */
+  .invoice-builder {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: end;
+  }
+
+  .invoice-builder > * {
+    min-inline-size: 0;
+  }
+
+  @container workspace (inline-size >= 48rem) {
+    .invoice-builder {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+
+    .invoice-builder__add {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .invoice-builder__add {
+    display: flex;
+  }
+
+  .invoice-builder .unit-toggle,
+  .invoice-builder .unit-static {
+    align-self: flex-start;
+  }
+
+  /* Legacy Bootstrap `.card` is a column flexbox and its direction leaks through the layers: keep the total a row. */
+  .invoice-total {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .invoice-total__amount {
+    font-size: var(--text-xl);
+  }
+
+  /* Why the save button is disabled sits next to it and takes the free space on the left. */
+  .invoice-save-hint {
+    margin-inline-end: auto;
+  }
 }

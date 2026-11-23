@@ -1,0 +1,73 @@
+@* Invoices tab panel (prototype renderPurchasing, tab "invoices"): empty state or the table of registered invoices.
+   Read-only: the page owns the data and the delete flow. *@
+@using GastroApp.Models
+
+@if (Invoices.Count == 0)
+{
+    <div class="empty-state">
+        <div class="empty-state__icon"><Icon Name="receipt" Size="24" /></div>
+        <div class="stack stack--sm">
+            <h3>Sin facturas registradas</h3>
+            <p class="text-sm text-secondary">Cargá tu primera factura de proveedor con uno o varios insumos para ingresar stock y precios.</p>
+        </div>
+        <div class="mt-2">
+            <button type="button" class="btn btn--primary" @onclick="OnNew">Registrar factura</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="Facturas de proveedores">
+        <table class="data-table data-table--stack">
+            <thead>
+                <tr>
+                    <th scope="col">Comprobante</th>
+                    <th scope="col">Fecha</th>
+                    <th scope="col">Proveedor</th>
+                    <th scope="col">Ítems ingresados</th>
+                    <th scope="col" class="col-num">Total factura</th>
+                    <th scope="col" class="col-actions">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var invoice in Invoices)
+                {
+                    var label = string.IsNullOrEmpty(invoice.InvoiceNumber) ? $"Factura #{invoice.Id}" : invoice.InvoiceNumber;
+                    <tr @key="invoice.Id">
+                        <th scope="row">
+                            <div>@label</div>
+                            @if (!string.IsNullOrWhiteSpace(invoice.Notes))
+                            {
+                                <div class="text-xs text-muted fw-600">@invoice.Notes</div>
+                            }
+                        </th>
+                        <td data-label="Fecha">@PurchasingFormat.DateText(invoice.Date)</td>
+                        <td data-label="Proveedor">@(Suppliers.FirstOrDefault(s => s.Id == invoice.SupplierId)?.Name ?? "Sin proveedor")</td>
+                        <td data-label="Ítems">
+                            @foreach (var item in invoice.Items)
+                            {
+                                <div class="text-xs">@item.IngredientName: <strong>@PurchasingFormat.Qty(item.Quantity, item.Unit)</strong> × @PurchasingFormat.Money(item.UnitPrice)</div>
+                            }
+                        </td>
+                        <td data-label="Total" class="col-num fw-700">@PurchasingFormat.Money(invoice.Total)</td>
+                        <td class="col-actions">
+                            <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Eliminar {label}")" @onclick="() => OnDelete.InvokeAsync(invoice)">
+                                <Icon Name="trash" Size="15" />
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<Invoice> Invoices { get; set; } = Array.Empty<Invoice>();
+
+    [Parameter] public IReadOnlyList<Supplier> Suppliers { get; set; } = Array.Empty<Supplier>();
+
+    [Parameter] public EventCallback OnNew { get; set; }
+
+    [Parameter] public EventCallback<Invoice> OnDelete { get; set; }
+}

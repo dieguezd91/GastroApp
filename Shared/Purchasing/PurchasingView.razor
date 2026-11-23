@@ -1,0 +1,96 @@
+@* Unified purchasing shell (prototype purchasing.js): page header, accessible Facturas / Proveedores tabs and the tab panel.
+   Each tab keeps its own route (/invoices, /suppliers): selecting a tab navigates in-circuit (no reload) and the page
+   behind the active tab supplies the header action and the panel content. Arrow keys, Home and End move between tabs
+   (roving tabindex); after a tab-driven navigation the new page puts focus back on its selected tab. *@
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div>
+        <h1 tabindex="-1" @ref="heading">Proveedores y facturas</h1>
+        <p class="page-header__subtitle">Al registrar una factura de compra se suma stock automáticamente en la unidad base del ingrediente y se actualiza el último precio para el costeo de recetas.</p>
+    </div>
+    <div class="page-header__actions">@HeaderActions</div>
+</div>
+
+<div class="tablist" role="tablist" aria-label="Secciones de compras">
+    <button type="button" id="purchasing-tab-invoices" role="tab" class="tab" @ref="invoicesTab"
+            aria-selected="@(IsInvoices ? "true" : "false")" aria-controls="@(IsInvoices ? PanelId : null)"
+            tabindex="@(IsInvoices ? 0 : -1)"
+            @onclick="() => Select(PurchasingTab.Invoices)" @onkeydown="HandleKeyDown">
+        <Icon Name="receipt" Size="16" />
+        <span>Facturas (@InvoiceCount)</span>
+    </button>
+    <button type="button" id="purchasing-tab-suppliers" role="tab" class="tab" @ref="suppliersTab"
+            aria-selected="@(IsInvoices ? "false" : "true")" aria-controls="@(IsInvoices ? null : PanelId)"
+            tabindex="@(IsInvoices ? -1 : 0)"
+            @onclick="() => Select(PurchasingTab.Suppliers)" @onkeydown="HandleKeyDown">
+        <Icon Name="suppliers" Size="16" />
+        <span>Proveedores (@SupplierCount)</span>
+    </button>
+</div>
+
+<div id="@PanelId" role="tabpanel" class="stack" aria-labelledby="@(IsInvoices ? "purchasing-tab-invoices" : "purchasing-tab-suppliers")">
+    @ChildContent
+</div>
+
+@code {
+    private const string PanelId = "purchasing-panel";
+    private const string FocusTabState = "purchasing-focus-tab";
+
+    private ElementReference heading;
+    private ElementReference invoicesTab;
+    private ElementReference suppliersTab;
+
+    [Parameter, EditorRequired] public PurchasingTab ActiveTab { get; set; }
+
+    [Parameter] public int InvoiceCount { get; set; }
+
+    [Parameter] public int SupplierCount { get; set; }
+
+    /// <summary>Primary action of the active tab (e.g. "Nueva factura").</summary>
+    [Parameter] public RenderFragment? HeaderActions { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool IsInvoices => ActiveTab == PurchasingTab.Invoices;
+
+    /// <summary>Moves focus to the page heading (after leaving the invoice workspace).</summary>
+    public async Task FocusHeadingAsync()
+    {
+        try { await heading.FocusAsync(); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private void Select(PurchasingTab tab)
+    {
+        if (tab == ActiveTab) return;
+        // The tab strip is re-created by the destination page; the history state tells it to restore focus.
+        Navigation.NavigateTo(PurchasingFormat.RouteOf(tab), new NavigationOptions { HistoryEntryState = FocusTabState });
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "ArrowRight":
+            case "End":
+                Select(PurchasingTab.Suppliers);
+                break;
+            case "ArrowLeft":
+            case "Home":
+                Select(PurchasingTab.Invoices);
+                break;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Navigation.HistoryEntryState != FocusTabState) return;
+        try { await (IsInvoices ? invoicesTab : suppliersTab).FocusAsync(); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+    }
+}

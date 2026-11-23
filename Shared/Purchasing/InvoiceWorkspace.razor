@@ -1,0 +1,265 @@
+@* Full-width invoice workspace (prototype renderInvoiceWorkspace, UX_DECISIONS §7.5): register a multi-item purchase invoice
+   with a running total and the stock impact of every line. The unit control is poka-yoke (§4): it only offers units
+   UnitConverter can convert to the ingredient's unit, `unidad` is fixed and weight / volume get a 2-option segmented
+   control. A line typed in another compatible unit is stored in the ingredient's unit (see PurchasingFormat.BuildItem).
+   The page owns the state and every service write; this component only renders it and raises callbacks. *@
+@using GastroApp.Models
+@using GastroApp.Services
+@inject IngredientService IngredientService
+
+@{
+    var selected = SelectedIngredientId == 0 ? null : Ingredients.FirstOrDefault(i => i.Id == SelectedIngredientId);
+    IReadOnlyList<string> options = selected == null ? Array.Empty<string>() : PurchasingFormat.UnitOptions(selected.Unit);
+    var added = new Dictionary<int, decimal>(); // stock already added to each ingredient by the lines above
+    var canSave = CanSave();
+}
+
+<div class="page-header">
+    <div>
+        <h1 tabindex="-1" @ref="heading">Registrar factura de compra</h1>
+        <p class="page-header__subtitle">La unidad se restringe automáticamente a la familia del ingrediente elegido para evitar errores de carga.</p>
+    </div>
+    <div class="page-header__actions">
+        <button type="button" class="btn" @onclick="OnCancel">← Volver a Facturas</button>
+    </div>
+</div>
+
+<section class="workspace-panel invoice-workspace stack" aria-label="Formulario de factura de compra">
+    @if (!string.IsNullOrEmpty(FormError))
+    {
+        <Banner Variant="danger">@FormError</Banner>
+    }
+
+    @if (Suppliers.Count == 0)
+    {
+        <Banner Variant="warn">No hay proveedores cargados. Creá uno en <a href="/suppliers">Proveedores</a> para poder registrar la factura.</Banner>
+    }
+
+    <div class="form-grid">
+        <div class="field">
+            <label class="field__label" for="invoice-date">Fecha <span class="field__req" aria-hidden="true">*</span></label>
+            <input id="invoice-date" type="date" class="input" @bind="Invoice.Date" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="field">
+            <label class="field__label" for="invoice-supplier">Proveedor <span class="field__req" aria-hidden="true">*</span></label>
+            <select id="invoice-supplier" class="select" @bind="Invoice.SupplierId">
+                <option value="0">Seleccionar...</option>
+                @foreach (var supplier in Suppliers)
+                {
+                    <option value="@supplier.Id">@supplier.Name</option>
+                }
+            </select>
+        </div>
+        <div class="field">
+            <label class="field__label" for="invoice-number">Número de factura (opcional)</label>
+            <input id="invoice-number" type="text" class="input" autocomplete="off" placeholder="Ej: A-0001-12345678" @bind="Invoice.InvoiceNumber" />
+        </div>
+    </div>
+
+    <div class="field">
+        <label class="field__label" for="invoice-notes">Notas (opcional)</label>
+        <input id="invoice-notes" type="text" class="input" autocomplete="off" placeholder="Ej: Reposición semanal, aumento de lista 12%" @bind="Invoice.Notes" />
+    </div>
+
+    <fieldset class="fieldset stack stack--sm">
+        <legend>Ítems de la factura</legend>
+
+        @if (Ingredients.Count == 0)
+        {
+            <Banner Variant="warn">No hay ingredientes activos para ingresar. Cargalos o activalos en <a href="/ingredients">Inventario</a>.</Banner>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(BuilderError))
+            {
+                <Banner Variant="danger">@BuilderError</Banner>
+            }
+
+            <div class="invoice-builder">
+                <div class="field">
+                    <label class="field__label" for="invoice-ingredient">Ingrediente activo</label>
+                    <select id="invoice-ingredient" class="select select--compact" @bind:get="SelectedIngredientId" @bind:set="HandleIngredient">
+                        <option value="0">Seleccionar...</option>
+                        @foreach (var ingredient in Ingredients)
+                        {
+                            var lastPrice = IngredientService.GetLastPrice(ingredient.Id);
+                            <option value="@ingredient.Id">@ingredient.Name (actual: @PurchasingFormat.Qty(ingredient.CurrentStock, ingredient.Unit))@(lastPrice.HasValue ? $" — último {PurchasingFormat.Money(lastPrice.Value)}/{ingredient.Unit}" : string.Empty)</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="invoice-quantity">Cantidad</label>
+                    <input id="invoice-quantity" type="number" min="0" step="any" inputmode="decimal" class="input input--compact tnum" placeholder="Ej: 5"
+                           @bind:get="QuantityText" @bind:set="HandleQuantity" @bind:event="oninput" @onkeydown="HandleKey" />
+                </div>
+                <div class="field">
+                    <span class="field__label" id="invoice-unit-label">Unidad (@(options.Count > 1 ? "compatible" : "fija"))</span>
+                    @if (selected == null)
+                    {
+                        <span class="unit-static" aria-labelledby="invoice-unit-label">—</span>
+                    }
+                    else if (options.Count == 1)
+                    {
+                        <span class="unit-static" aria-labelledby="invoice-unit-label">@options[0]</span>
+                    }
+                    else
+                    {
+                        <div class="unit-toggle" role="radiogroup" aria-labelledby="invoice-unit-label">
+                            @foreach (var option in options)
+                            {
+                                <label class="unit-toggle__opt">
+                                    <input type="radio" name="invoice-unit" value="@option" class="visually-hidden" checked="@(Unit == option)"
+                                           @onchange="() => UnitChanged.InvokeAsync(option)" />
+                                    <span>@option</span>
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="field">
+                    <label class="field__label" for="invoice-price">Precio por @(string.IsNullOrEmpty(Unit) ? "unidad" : Unit) ($)</label>
+                    <input id="invoice-price" type="number" min="0" step="any" inputmode="decimal" class="input input--compact tnum" placeholder="Ej: 2950"
+                           @bind:get="PriceText" @bind:set="HandlePrice" @bind:event="oninput" @onkeydown="HandleKey" />
+                </div>
+                <div class="invoice-builder__add">
+                    <button type="button" class="btn btn--primary btn--sm btn--block" @onclick="OnAdd">
+                        <Icon Name="plus" Size="15" />
+                        <span>Agregar ítem</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="live-preview-strip" aria-live="polite" id="invoice-line-preview">
+                <span>@PurchasingFormat.LinePreview(selected, Unit, QuantityText, PriceText)</span>
+            </div>
+        }
+
+        @if (Invoice.Items.Count == 0)
+        {
+            <p class="text-sm text-muted">Todavía no agregaste ítems a esta factura.</p>
+        }
+        else
+        {
+            <div class="table-wrapper mt-2" tabindex="0" role="region" aria-label="Ítems agregados a la factura">
+                <table class="data-table data-table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Ingrediente</th>
+                            <th scope="col" class="col-num">Cantidad</th>
+                            <th scope="col" class="col-num">Precio unit.</th>
+                            <th scope="col">Impacto en stock</th>
+                            <th scope="col" class="col-num">Subtotal</th>
+                            <th scope="col" class="col-actions">Quitar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Invoice.Items)
+                        {
+                            var ingredient = IngredientService.GetById(item.IngredientId);
+                            var converted = ingredient == null ? null : UnitConverter.Convert(item.Quantity, item.Unit, ingredient.Unit);
+                            var before = 0m;
+                            if (ingredient != null && converted != null)
+                            {
+                                added.TryGetValue(ingredient.Id, out var already);
+                                before = ingredient.CurrentStock + already;
+                                added[ingredient.Id] = already + converted.Value;
+                            }
+                            <tr @key="item">
+                                <th scope="row">@item.IngredientName</th>
+                                <td data-label="Cantidad" class="col-num">@PurchasingFormat.Qty(item.Quantity, item.Unit)</td>
+                                <td data-label="Precio unit." class="col-num">@PurchasingFormat.Money(item.UnitPrice)</td>
+                                <td data-label="Stock">
+                                    @if (ingredient == null)
+                                    {
+                                        <Badge Variant="danger" Icon="alertOctagon" Label="Ingrediente no disponible" />
+                                    }
+                                    else if (converted == null)
+                                    {
+                                        <Badge Variant="danger" Icon="alertOctagon" Label="@($"Unidad incompatible (base: {ingredient.Unit})")" />
+                                    }
+                                    else
+                                    {
+                                        <Badge Variant="ok" Icon="check" Label="@($"+{PurchasingFormat.Qty(converted.Value, ingredient.Unit)}")" />
+                                        <div class="text-xs text-muted">Stock @PurchasingFormat.Qty(before, ingredient.Unit) → @PurchasingFormat.Qty(before + converted.Value, ingredient.Unit)</div>
+                                    }
+                                </td>
+                                <td data-label="Subtotal" class="col-num fw-700">@PurchasingFormat.Money(item.Subtotal)</td>
+                                <td class="col-actions">
+                                    <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Quitar {item.IngredientName}")"
+                                            @onclick="() => OnRemove.InvokeAsync(item)">
+                                        <Icon Name="trash" Size="15" />
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </fieldset>
+
+    <div class="card card--compact card--subtle row-between invoice-total">
+        <span class="text-sm fw-700">Total factura (@Invoice.Items.Count ítem(s))</span>
+        <span class="fw-700 tnum invoice-total__amount">@PurchasingFormat.Money(Invoice.Total)</span>
+    </div>
+
+    <div class="workspace-panel__footer">
+        @if (!canSave)
+        {
+            <span id="invoice-save-hint" class="text-sm text-muted invoice-save-hint">Elegí un proveedor y agregá al menos un ítem para guardar.</span>
+        }
+        <button type="button" class="btn" @onclick="OnCancel">Cancelar</button>
+        <button type="button" class="btn btn--primary btn--lg" disabled="@(!canSave)" aria-describedby="@(canSave ? null : "invoice-save-hint")" @onclick="OnSave">Guardar factura e ingresar stock</button>
+    </div>
+</section>
+
+@code {
+    private ElementReference heading;
+
+    [Parameter, EditorRequired] public Invoice Invoice { get; set; } = new();
+
+    [Parameter] public IReadOnlyList<Supplier> Suppliers { get; set; } = Array.Empty<Supplier>();
+
+    /// <summary>Active ingredients the builder can pick from.</summary>
+    [Parameter] public IReadOnlyList<Ingredient> Ingredients { get; set; } = Array.Empty<Ingredient>();
+
+    /// <summary>Error of the whole form (the service rejected the invoice).</summary>
+    [Parameter] public string? FormError { get; set; }
+
+    /// <summary>Validation error of the line picker (add).</summary>
+    [Parameter] public string? BuilderError { get; set; }
+
+    /// <summary>Save rule of the page, evaluated on every render: the supplier select changes the invoice without a page callback.</summary>
+    [Parameter] public Func<bool> CanSave { get; set; } = () => false;
+
+    [Parameter] public int SelectedIngredientId { get; set; }
+    [Parameter] public EventCallback<int> SelectedIngredientIdChanged { get; set; }
+
+    [Parameter] public string QuantityText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> QuantityTextChanged { get; set; }
+
+    [Parameter] public string Unit { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> UnitChanged { get; set; }
+
+    [Parameter] public string PriceText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> PriceTextChanged { get; set; }
+
+    [Parameter] public EventCallback OnAdd { get; set; }
+    [Parameter] public EventCallback<InvoiceItem> OnRemove { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The workspace replaces the list: move focus to its heading, as the prototype does.
+        if (firstRender) await heading.FocusAsync();
+    }
+
+    private Task HandleIngredient(int id) => SelectedIngredientIdChanged.InvokeAsync(id);
+
+    private Task HandleQuantity(string? value) => QuantityTextChanged.InvokeAsync(value);
+
+    private Task HandlePrice(string? value) => PriceTextChanged.InvokeAsync(value);
+
+    private Task HandleKey(KeyboardEventArgs e) => e.Key == "Enter" ? OnAdd.InvokeAsync() : Task.CompletedTask;
+}

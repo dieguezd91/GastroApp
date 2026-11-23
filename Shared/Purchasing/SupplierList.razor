@@ -1,0 +1,63 @@
+@* Suppliers tab panel (prototype renderPurchasing, tab "suppliers"): current-model note, empty state or the supplier table.
+   Read-only: the page owns the data and the create / edit / delete flows. *@
+@using GastroApp.Models
+
+<Banner Variant="info" Title="Modelo actual">Los proveedores registran únicamente su nombre; CUIT, teléfono y condiciones quedan para iteraciones futuras.</Banner>
+
+@if (Suppliers.Count == 0)
+{
+    <div class="empty-state">
+        <div class="empty-state__icon"><Icon Name="suppliers" Size="24" /></div>
+        <div class="stack stack--sm">
+            <h3>No hay proveedores</h3>
+            <p class="text-sm text-secondary">Creá el primero para poder asignarlo a las facturas de compra.</p>
+        </div>
+        <div class="mt-2">
+            <button type="button" class="btn btn--primary" @onclick="OnNew">Crear proveedor</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="Listado de proveedores">
+        <table class="data-table data-table--stack">
+            <thead>
+                <tr>
+                    <th scope="col">Proveedor</th>
+                    <th scope="col" class="col-num">Facturas registradas</th>
+                    <th scope="col" class="col-actions">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var supplier in Suppliers)
+                {
+                    <tr @key="supplier.Id">
+                        <th scope="row">@supplier.Name</th>
+                        <td data-label="Facturas" class="col-num">@InvoiceCountOf(supplier)</td>
+                        <td class="col-actions">
+                            <div class="flex-wrap-gap purchasing-actions">
+                                <button type="button" class="btn btn--sm" aria-label="@($"Editar {supplier.Name}")" @onclick="() => OnEdit.InvokeAsync(supplier)">Editar</button>
+                                <button type="button" class="btn btn--danger-outline btn--sm" aria-label="@($"Eliminar {supplier.Name}")" @onclick="() => OnDelete.InvokeAsync(supplier)">Eliminar</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<Supplier> Suppliers { get; set; } = Array.Empty<Supplier>();
+
+    /// <summary>Invoices of each supplier (for the "Facturas registradas" column).</summary>
+    [Parameter] public IReadOnlyList<Invoice> Invoices { get; set; } = Array.Empty<Invoice>();
+
+    [Parameter] public EventCallback OnNew { get; set; }
+
+    [Parameter] public EventCallback<Supplier> OnEdit { get; set; }
+
+    [Parameter] public EventCallback<Supplier> OnDelete { get; set; }
+
+    private int InvoiceCountOf(Supplier supplier) => Invoices.Count(i => i.SupplierId == supplier.Id);
+}

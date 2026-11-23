@@ -1,6 +1,7 @@
 @page "/invoices"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Purchasing
 @inject InvoiceService InvoiceService
 @inject SupplierService SupplierService
 @inject IngredientService IngredientService
@@ -9,199 +10,66 @@
 
 <PageTitle>Facturas</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
-        <h1>📄 Facturas de Proveedores</h1>
-        <button class="btn btn-primary" @onclick="ShowAddForm">+ Nueva Factura</button>
-    </div>
-
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
     @if (showForm)
     {
-        <div class="form-card">
-            <h3>Nueva Factura</h3>
-
-            <div class="form-group">
-                <label>Fecha</label>
-                <input type="date" @bind="editingInvoice.Date" class="form-control" />
-            </div>
-
-            <div class="form-group">
-                <label>Proveedor</label>
-                <select @bind="editingInvoice.SupplierId" class="form-control">
-                    <option value="0">Seleccionar...</option>
-                    @foreach (var supplier in suppliers)
-                    {
-                        <option value="@supplier.Id">@supplier.Name</option>
-                    }
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>Número de Factura (opcional)</label>
-                <input type="text" @bind="editingInvoice.InvoiceNumber" class="form-control" placeholder="Ej: A-0001-12345678" />
-            </div>
-
-            <div class="form-group">
-                <label>Notas (opcional)</label>
-                <textarea @bind="editingInvoice.Notes" class="form-control" rows="2" placeholder="Observaciones..."></textarea>
-            </div>
-
-            <hr />
-
-            <h4>Items de la Factura</h4>
-
-            <div class="invoice-items">
-                <div class="form-group">
-                    <label>Ingrediente</label>
-                    <select @bind="selectedIngredientId" class="form-control">
-                        <option value="0">Seleccionar...</option>
-                        @foreach (var ingredient in activeIngredients)
-                        {
-                            <option value="@ingredient.Id">@ingredient.Name (@ingredient.Unit)</option>
-                        }
-                    </select>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Cantidad</label>
-                        <input type="number" @bind="itemQuantity" class="form-control" placeholder="0" step="0.01" />
-                    </div>
-
-                    <div class="form-group">
-                        <label>Precio Unitario</label>
-                        <input type="number" @bind="itemUnitPrice" class="form-control" placeholder="0" step="0.01" />
-                    </div>
-
-                    <div class="form-group">
-                        <button class="btn btn-secondary" @onclick="AddItem" style="margin-top: 1.75rem;">+ Agregar</button>
-                    </div>
-                </div>
-
-                @if (editingInvoice.Items.Any())
-                {
-                    <div class="items-list">
-                        <h5>Items agregados:</h5>
-                        @foreach (var item in editingInvoice.Items)
-                        {
-                            <div class="invoice-item">
-                                <span><strong>@item.IngredientName</strong></span>
-                                <span>@item.Quantity @item.Unit × $@item.UnitPrice = $@item.Subtotal</span>
-                                <button class="btn-remove" @onclick="() => RemoveItem(item)">❌</button>
-                            </div>
-                        }
-                        <div class="invoice-total">
-                            <strong>Total: $@editingInvoice.Total</strong>
-                        </div>
-                    </div>
-                }
-            </div>
-
-            @if (invoiceError != null)
-            {
-                <p class="text-danger" role="alert">@invoiceError</p>
-            }
-
-            <div class="form-actions">
-                <button class="btn btn-success" @onclick="SaveInvoice" disabled="@(!CanSaveInvoice())">Guardar Factura</button>
-                <button class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
-            </div>
-        </div>
+        <InvoiceWorkspace Invoice="editingInvoice" Suppliers="suppliers" Ingredients="activeIngredients"
+                          FormError="@invoiceError" BuilderError="@builderError" CanSave="CanSaveInvoice"
+                          SelectedIngredientId="selectedIngredientId" SelectedIngredientIdChanged="SelectIngredient"
+                          QuantityText="@itemQuantityText" QuantityTextChanged="SetQuantity"
+                          Unit="@itemUnit" UnitChanged="SetUnit"
+                          PriceText="@itemUnitPriceText" PriceTextChanged="SetUnitPrice"
+                          OnAdd="AddItem" OnRemove="RemoveItem" OnSave="SaveInvoice" OnCancel="CancelEdit" />
     }
-
-    <div class="products-list">
-        @foreach (var invoice in invoices)
-        {
-            var supplier = SupplierService.GetById(invoice.SupplierId);
-            <div class="product-card">
-                <div class="product-info">
-                    <h3>
-                        @if (!string.IsNullOrEmpty(invoice.InvoiceNumber))
-                        {
-                            <span>@invoice.InvoiceNumber</span>
-                        }
-                        else
-                        {
-                            <span>Factura #@invoice.Id</span>
-                        }
-                    </h3>
-                    <p class="cost">📅 @invoice.Date.ToString("dd/MM/yyyy")</p>
-                    <p class="cost">🚚 @(supplier?.Name ?? "Sin proveedor")</p>
-                    <p class="price">Total: $@invoice.Total</p>
-                    <p class="cost">@invoice.Items.Count item(s)</p>
-                </div>
-                <div class="product-actions">
-                    <button class="btn btn-small btn-danger" @onclick="() => DeleteInvoice(invoice.Id)">🗑️</button>
-                </div>
-            </div>
-        }
-    </div>
-
-    @if (invoices.Count == 0)
+    else
     {
-        <p class="empty-state">No hay facturas. Creá la primera!</p>
-    }
-</div>
-
-<style>
-    .form-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr auto;
-        gap: 1rem;
-        align-items: end;
-    }
-
-    .invoice-items {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 4px;
-        margin: 1rem 0;
+        <PurchasingView @ref="purchasingView" ActiveTab="PurchasingTab.Invoices" InvoiceCount="invoices.Count" SupplierCount="suppliers.Count">
+            <HeaderActions>
+                <button type="button" class="btn btn--primary" @onclick="ShowAddForm">
+                    <Icon Name="plus" Size="17" />
+                    <span>Nueva factura</span>
+                </button>
+            </HeaderActions>
+            <ChildContent>
+                <InvoiceList Invoices="invoices" Suppliers="suppliers" OnNew="ShowAddForm" OnDelete="ConfirmDelete" />
+            </ChildContent>
+        </PurchasingView>
     }
 
-    .items-list {
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 2px solid #dee2e6;
-    }
+    <ModalDialog @ref="deleteDialog" Title="@($"¿Eliminar {InvoiceLabel(pendingDelete)}?")" Size="md" OnClosed="HandleDeleteClosed">
+        <ChildContent>
+            <p>Eliminar una factura no revierte el stock ya ingresado ni sus movimientos de inventario. El último precio de cada ingrediente vuelve al de la factura anterior.</p>
+        </ChildContent>
+        <Footer>
+            <button value="cancel" class="btn" autofocus>Cancelar</button>
+            <button type="button" class="btn btn--danger" @onclick="() => DeleteInvoice(pendingDelete?.Id ?? 0)">Eliminar factura</button>
+        </Footer>
+    </ModalDialog>
 
-    .invoice-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: white;
-        padding: 0.75rem;
-        border-radius: 4px;
-        margin-bottom: 0.5rem;
-    }
-
-    .invoice-total {
-        text-align: right;
-        font-size: 1.2rem;
-        margin-top: 0.5rem;
-        padding-top: 0.5rem;
-        border-top: 2px solid #dee2e6;
-    }
-
-    .btn-remove {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 1rem;
-    }
-</style>
+    <Toast @ref="toast" />
+}
 
 @code {
     private List<Invoice> invoices = new();
     private List<Supplier> suppliers = new();
     private List<Ingredient> activeIngredients = new();
     private Invoice editingInvoice = new();
+    private Invoice? pendingDelete;
     private bool showForm = false;
     private string? invoiceError;
+    private string? builderError;
 
     // Para agregar items
     private int selectedIngredientId = 0;
-    private decimal itemQuantity = 0;
-    private decimal itemUnitPrice = 0;
+    private string itemQuantityText = string.Empty;
+    private string itemUnit = string.Empty;
+    private string itemUnitPriceText = string.Empty;
+
+    private PurchasingView? purchasingView;
+    private ModalDialog? deleteDialog;
+    private Toast? toast;
+    private bool focusListHeading;
 
     protected override async Task OnInitializedAsync()
     {
@@ -209,6 +77,14 @@
 
         LoadData();
         await Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Back from the workspace: put focus on the list heading, like the prototype.
+        if (!focusListHeading || showForm || purchasingView is null) return;
+        focusListHeading = false;
+        await purchasingView.FocusHeadingAsync();
     }
 
     private bool EnsureAdmin()
@@ -233,43 +109,106 @@
         activeIngredients = IngredientService.GetActive();
     }
 
+    private static string InvoiceLabel(Invoice? invoice) =>
+        invoice == null ? "la factura"
+        : string.IsNullOrEmpty(invoice.InvoiceNumber) ? $"la factura #{invoice.Id}" : $"la factura {invoice.InvoiceNumber}";
+
     private void ShowAddForm()
     {
         if (!EnsureAdmin()) return;
+        LoadData();
         invoiceError = null;
+        builderError = null;
+        ResetPicker();
         editingInvoice = new Invoice { Date = DateTime.Now };
         showForm = true;
+    }
+
+    private void ResetPicker()
+    {
+        selectedIngredientId = 0;
+        itemQuantityText = string.Empty;
+        itemUnit = string.Empty;
+        itemUnitPriceText = string.Empty;
+    }
+
+    private void SelectIngredient(int ingredientId)
+    {
+        if (!EnsureAdmin()) return;
+        selectedIngredientId = ingredientId;
+        var ingredient = ingredientId == 0 ? null : IngredientService.GetById(ingredientId);
+        // Poka-yoke: the unit always restarts from the ingredient's own unit, the only choices being its compatible units.
+        itemUnit = ingredient?.Unit ?? string.Empty;
+        builderError = null;
+    }
+
+    private void SetQuantity(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        itemQuantityText = text ?? string.Empty;
+    }
+
+    private void SetUnitPrice(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        itemUnitPriceText = text ?? string.Empty;
+    }
+
+    private void SetUnit(string unit)
+    {
+        if (!EnsureAdmin()) return;
+        var ingredient = selectedIngredientId == 0 ? null : IngredientService.GetById(selectedIngredientId);
+        if (ingredient == null || !PurchasingFormat.UnitOptions(ingredient.Unit).Contains(unit)) return;
+        itemUnit = unit;
     }
 
     private void AddItem()
     {
         if (!EnsureAdmin()) return;
-        if (selectedIngredientId == 0 || itemQuantity <= 0 || itemUnitPrice <= 0)
+        if (selectedIngredientId == 0)
+        {
+            builderError = "Seleccioná un ingrediente.";
             return;
+        }
+        if (!PurchasingFormat.TryParseDecimal(itemQuantityText, out var quantity) || quantity <= 0)
+        {
+            builderError = "Ingresá una cantidad mayor a cero antes de agregar el ítem.";
+            return;
+        }
+        if (!PurchasingFormat.TryParseDecimal(itemUnitPriceText, out var unitPrice) || unitPrice <= 0)
+        {
+            builderError = "Ingresá un precio unitario mayor a cero.";
+            return;
+        }
 
         var ingredient = IngredientService.GetById(selectedIngredientId);
         if (ingredient == null)
-            return;
-
-        editingInvoice.Items.Add(new InvoiceItem
         {
-            IngredientId = ingredient.Id,
-            IngredientName = ingredient.Name,
-            Quantity = itemQuantity,
-            Unit = ingredient.Unit,
-            UnitPrice = itemUnitPrice
-        });
+            builderError = "El ingrediente seleccionado ya no existe.";
+            return;
+        }
+
+        // The control only offers compatible units; this keeps the rule even if a stale unit slips through.
+        var item = PurchasingFormat.BuildItem(ingredient, quantity, itemUnit, unitPrice);
+        if (item == null)
+        {
+            builderError = $"La unidad {itemUnit} no es compatible con {ingredient.Name} ({ingredient.Unit}).";
+            return;
+        }
+
+        editingInvoice.Items.Add(item);
 
         // Reset
-        selectedIngredientId = 0;
-        itemQuantity = 0;
-        itemUnitPrice = 0;
+        builderError = null;
+        invoiceError = null;
+        ResetPicker();
     }
 
     private void RemoveItem(InvoiceItem item)
     {
         if (!EnsureAdmin()) return;
         editingInvoice.Items.Remove(item);
+        builderError = null;
     }
 
     private bool CanSaveInvoice()
@@ -283,6 +222,7 @@
         if (!CanSaveInvoice())
             return;
 
+        var itemCount = editingInvoice.Items.Count;
         try
         {
             InvoiceService.Add(editingInvoice, AuthService.CurrentUser);
@@ -294,22 +234,35 @@
         }
         LoadData();
         CancelEdit();
+        toast?.Show($"Factura registrada con {itemCount} ítem(s): stock y costos actualizados.");
     }
 
-    private void DeleteInvoice(int id)
+    private async Task ConfirmDelete(Invoice invoice)
     {
         if (!EnsureAdmin()) return;
+        pendingDelete = invoice;
+        if (deleteDialog is not null) await deleteDialog.ShowAsync();
+    }
+
+    private async Task DeleteInvoice(int id)
+    {
+        if (!EnsureAdmin()) return;
+        var existing = InvoiceService.GetById(id);
         InvoiceService.Delete(id);
         LoadData();
+        if (deleteDialog is not null) await deleteDialog.CloseAsync("deleted");
+        if (existing is not null) toast?.Show($"Se eliminó {InvoiceLabel(existing)}.", "warn");
     }
+
+    private void HandleDeleteClosed(string _) => pendingDelete = null;
 
     private void CancelEdit()
     {
         showForm = false;
+        focusListHeading = true;
         invoiceError = null;
+        builderError = null;
         editingInvoice = new Invoice();
-        selectedIngredientId = 0;
-        itemQuantity = 0;
-        itemUnitPrice = 0;
+        ResetPicker();
     }
 }
