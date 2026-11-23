@@ -1,313 +1,442 @@
 @page "/cash"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Cash
+@using GastroApp.Shared.Pos
 @using System.Globalization
 @inject CashRegisterService CashService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
-<PageTitle>Caja</PageTitle>
+<PageTitle>Caja diaria</PageTitle>
 
-<div class="page-container">
-    <h1>💵 Caja Diaria</h1>
-    <p><a href="/cash/history">Ver historial de cajas</a></p>
-    @{
-        // Resolve once per render, so a replaced current pointer cannot leave a stale header.
-        cashRegister = CashService.GetCurrent();
-        var paymentSummary = CashService.GetCurrentPaymentSummary();
-    }
-    @if (cashRegister != null)
-    {
-        <p>Caja #@cashRegister.Id — @(cashRegister.IsOpen ? "Abierta" : "Cerrada") · Apertura: @cashRegister.OpenDate.ToString("dd/MM/yyyy HH:mm")</p>
-    }
+@{
+    // Resolve once per render, so a replaced current pointer cannot leave a stale header.
+    cashRegister = CashService.GetCurrent();
+    var paymentSummary = CashService.GetCurrentPaymentSummary();
+    var isOpen = cashRegister?.IsOpen == true;
+    dialogHostRendered = false;
+    dialogWanted = false;
+}
 
+<div class="page-header">
+    <div>
+        <div class="page-header__title-row">
+            <h1>Caja diaria</h1>
+            @if (isOpen)
+            {
+                <Badge Variant="ok" Icon="checkCircle" Label="@($"Abierta · Sesión #{cashRegister!.Id}")" />
+            }
+            else
+            {
+                <Badge Variant="danger" Icon="alertOctagon" Label="Cerrada" />
+            }
+        </div>
+        <p class="page-header__subtitle">Controlá el efectivo disponible, registrá movimientos manuales y cerrá la jornada con arqueo por denominación.</p>
+    </div>
+    <div class="page-header__actions">
+        <a href="/cash/history" class="btn">
+            <Icon Name="history" Size="18" />
+            <span>Historial de cajas</span>
+        </a>
+    </div>
+</div>
+
+<div class="stack stack--lg">
     @if (!string.IsNullOrEmpty(closeMessage))
     {
-        <p role="status">@closeMessage <a href="/summary">Ver resumen del día</a></p>
+        <div role="status">
+            <Banner Variant="ok">
+                @closeMessage <a href="/summary">Ver resumen del día</a>
+            </Banner>
+        </div>
     }
-    @if (!string.IsNullOrEmpty(countError) && cashRegister?.IsOpen != true)
+    @if (!string.IsNullOrEmpty(countError) && !isOpen)
     {
         @* A confirmation rejected because another circuit closed the session must stay visible. *@
-        <p role="alert">@countError</p>
+        <Banner Variant="danger">@countError</Banner>
     }
 
-    @if (cashRegister == null || !cashRegister.IsOpen)
+    @if (!isOpen)
     {
-        <div class="form-card">
-            <h3>Abrir Caja</h3>
-            <p>Ingresá el monto inicial con el que empezás el día</p>
-
-            <div class="form-group">
-                <label>Monto Inicial</label>
-                <input type="number" @bind="initialAmount" class="form-control" placeholder="0" step="0.01" />
+        <section class="card stack" aria-labelledby="open-cash-title">
+            <div>
+                <h2 id="open-cash-title" class="card__title">Abrir nueva sesión de caja</h2>
+                <p class="card__desc">Ingresá el monto inicial con el que empezás el día.</p>
             </div>
+            @if (!string.IsNullOrEmpty(cashError))
+            {
+                <Banner Variant="danger">@cashError</Banner>
+            }
+            <form class="toolbar" novalidate @onsubmit="OpenCash">
+                <div class="field cash-open-field">
+                    <label class="field__label" for="initial-amount">Monto inicial ($)</label>
+                    <input id="initial-amount" type="number" @bind="initialAmount" class="input tnum" placeholder="0" step="0.01" />
+                </div>
+                <button type="submit" class="btn btn--collect btn--lg">
+                    <Icon Name="checkCircle" Size="18" />
+                    <span>Abrir caja</span>
+                </button>
+            </form>
+        </section>
 
-            <button class="btn btn-success btn-large" @onclick="OpenCash">
-                ✅ Abrir Caja
-            </button>
-        </div>
+        @if (cashRegister != null)
+        {
+            var count = CashService.GetCount(cashRegister.Id);
+            var closedDifference = count?.Difference ?? cashRegister.Difference;
+            var (closedVariant, closedIcon) = CashFormat.DifferenceBadge(closedDifference);
+            <section class="card stack" aria-labelledby="last-closed-title">
+                <div class="row-between">
+                    <div>
+                        <h2 id="last-closed-title" class="card__title">Última caja cerrada — Sesión #@cashRegister.Id</h2>
+                        <p class="card__desc">
+                            Apertura @cashRegister.OpenDate.ToString("dd/MM/yyyy HH:mm")@(cashRegister.CloseDate.HasValue ? $" · Cierre {cashRegister.CloseDate.Value:dd/MM/yyyy HH:mm}" : "")
+                        </p>
+                    </div>
+                    <Badge Variant="@closedVariant" Icon="@closedIcon" Label="@($"{DifferenceLabel(closedDifference)} ({CashFormat.SignedMoney(closedDifference)})")" />
+                </div>
+                <div class="grid-kpi">
+                    <KpiCard Label="Fondo inicial" Value="@PosFormat.Money(cashRegister.InitialAmount)" />
+                    <KpiCard Label="Esperado en caja" Value="@PosFormat.Money(count?.ExpectedAmount ?? cashRegister.ExpectedAmount)" />
+                    <KpiCard Label="@(count == null ? "Monto final" : "Total contado")" Value="@PosFormat.Money(count?.CountedAmount ?? cashRegister.FinalAmount)" />
+                </div>
+                @if (count == null)
+                {
+                    <Banner Variant="info" Title="Cierre sin arqueo">Esta caja se cerró sin arqueo detallado.</Banner>
+                }
+                else
+                {
+                    <div class="stack stack--sm">
+                        <h3 class="card__title">Arqueo registrado</h3>
+                        <p class="text-sm text-secondary">Responsable: @count.Username (ID @count.UserId) · Fecha: @count.CountedAt.ToString("dd/MM/yyyy HH:mm")</p>
+                        <p class="text-sm">Motivo: @(string.IsNullOrWhiteSpace(count.Reason) ? "Sin motivo (cierre exacto)" : count.Reason)</p>
+                        <CountLinesTable Lines="count.Lines" AriaLabel="Denominaciones del arqueo registrado" />
+                    </div>
+                }
+                <div>
+                    <a href="/summary" class="btn btn--sm"><Icon Name="summary" Size="16" /> <span>Ver resumen del día</span></a>
+                </div>
+            </section>
+        }
     }
     else
     {
-        <div class="cash-info">
-            <div class="info-card">
-                <h4>Apertura</h4>
-                <p>@cashRegister.OpenDate.ToString("dd/MM/yyyy HH:mm")</p>
-                <p class="amount">$@cashRegister.InitialAmount</p>
-            </div>
-
-            <div class="info-card">
-                <h4>Efectivo ingresado en esta caja</h4>
-                <p class="amount success">$@CashService.GetCashInflow(cashRegister.Id)</p>
-            </div>
-
-            <div class="info-card">
-                <h4>Esperado en Caja</h4>
-                <p class="amount">$@CashService.GetExpectedCash(cashRegister.Id)</p>
-            </div>
-        </div>
-
-        <div class="form-card">
-            <h3>Movimiento de efectivo</h3>
-            <p>Registrá un ingreso, gasto o retiro de la caja abierta. Los movimientos no se pueden editar ni eliminar.</p>
-            <div class="form-group">
-                <label for="movement-type">Tipo</label>
-                <select id="movement-type" @bind="movementType" class="form-control">
-                    <option value="@CashMovementType.Income">Ingreso</option>
-                    <option value="@CashMovementType.Expense">Gasto</option>
-                    <option value="@CashMovementType.Withdrawal">Retiro</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="movement-amount">Monto</label>
-                <input id="movement-amount" type="text" inputmode="decimal" @bind="movementAmount" class="form-control" placeholder="0" />
-                <small>Mayor que cero, sin separador de miles. Separador decimal: @CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator</small>
-            </div>
-            <div class="form-group">
-                <label for="movement-reason">Motivo (obligatorio)</label>
-                <input id="movement-reason" type="text" @bind="movementReason" class="form-control" />
-            </div>
-            <button class="btn btn-success" @onclick="RecordMovement">Registrar movimiento</button>
-            @if (!string.IsNullOrEmpty(movementMessage))
-            {
-                <p role="status">@movementMessage</p>
-            }
-        </div>
-
         var fresh = TryGetFreshReview();
         var stale = countReview == null || fresh == null || fresh != countReview;
         var (preview, previewError) = BuildPreview();
         var activeRows = countRows.Where(r => !IsBlank(r)).ToList();
-        <div class="form-card">
-            <h3>Arqueo y cierre de caja</h3>
-            <p>Contá el efectivo por denominación. Las filas vacías se ignoran y el cierre es definitivo.</p>
-            <p>Esperado en caja (según tu última revisión): <strong>@(countReview == null ? "—" : $"${countReview.ExpectedAmount}")</strong></p>
+        var differenceMissing = preview != null && preview.Difference != 0m;
+        dialogHostRendered = true;
+        dialogWanted = confirmingClose && preview != null && !stale;
 
-            @if (stale)
-            {
-                <div class="alert alert-warning" role="alert">
-                    <p>@StaleText(fresh)</p>
-                    <button class="btn btn-secondary" @onclick="RefreshCountReview">Actualizar saldo esperado</button>
+        <section class="grid-kpi" aria-label="Indicadores de la caja abierta">
+            <KpiCard Label="Apertura" Value="@cashRegister!.OpenDate.ToString("HH:mm")"
+                     Meta="@($"{cashRegister.OpenDate:dd/MM/yyyy} · Fondo inicial: {PosFormat.Money(cashRegister.InitialAmount)}")" />
+            <KpiCard Label="Efectivo ingresado" Value="@PosFormat.Money(CashService.GetCashInflow(cashRegister.Id))"
+                     Meta="Ventas en efectivo + ingresos manuales" />
+            <KpiCard Label="Esperado en caja" Value="@PosFormat.Money(CashService.GetExpectedCash(cashRegister.Id))"
+                     Meta="Inicial + ventas/ingresos − gastos/retiros/devoluciones">
+                <StatusContent><Badge Variant="ok" Label="En vivo" /></StatusContent>
+            </KpiCard>
+            <KpiCard Label="Cobros netos" Value="@CashFormat.Money(paymentSummary.NetTotal)"
+                     Meta="Todos los medios de pago de la sesión" />
+        </section>
+
+        <div class="grid-2 cash-workspace">
+            <section class="card stack" aria-labelledby="cash-move-title">
+                <div>
+                    <h2 id="cash-move-title" class="card__title">Movimiento de efectivo</h2>
+                    <p class="card__desc">Registrá un ingreso, gasto o retiro de la caja abierta. Los movimientos no se pueden editar ni eliminar.</p>
                 </div>
-            }
-            @if (!string.IsNullOrEmpty(countNotice))
-            {
-                <div class="alert alert-warning" role="alert">@countNotice</div>
-            }
-
-            @for (var i = 0; i < countRows.Count; i++)
-            {
-                var row = countRows[i];
-                var number = i + 1;
-                var rowError = ParseRow(row, out _);
-                var activeIndex = activeRows.IndexOf(row);
-                <div class="count-row" @key="row">
-                    <div class="form-group">
-                        <label for="count-denomination-@number">Denominación</label>
-                        <input id="count-denomination-@number" type="text" inputmode="decimal" class="form-control" placeholder="0"
-                               @bind="row.Denomination" @bind:after="ResetConfirmation" />
+                @if (!string.IsNullOrEmpty(cashError))
+                {
+                    <Banner Variant="danger">@cashError</Banner>
+                }
+                <form class="stack" novalidate @onsubmit="RecordMovement">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label class="field__label" for="movement-type">Tipo</label>
+                            <select id="movement-type" @bind="movementType" class="select">
+                                <option value="@CashMovementType.Income">Ingreso (+)</option>
+                                <option value="@CashMovementType.Expense">Gasto (−)</option>
+                                <option value="@CashMovementType.Withdrawal">Retiro (−)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="movement-amount">Monto ($) <span class="field__req" aria-hidden="true">*</span></label>
+                            <input id="movement-amount" type="text" inputmode="decimal" @bind="movementAmount" @bind:event="oninput"
+                                   class="input tnum" placeholder="Ej.: 5000" aria-describedby="movement-amount-hint" />
+                            <span id="movement-amount-hint" class="field__hint">Mayor que cero, sin separador de miles. Separador decimal: @PosFormat.DecimalSeparator</span>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="count-quantity-@number">Cantidad</label>
-                        <input id="count-quantity-@number" type="text" inputmode="numeric" class="form-control" placeholder="0"
-                               @bind="row.Quantity" @bind:after="ResetConfirmation" />
+                    <div class="field">
+                        <label class="field__label" for="movement-reason">Motivo (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+                        <input id="movement-reason" type="text" @bind="movementReason" @bind:event="oninput" class="input"
+                               placeholder="Ej.: Compra de hielo, refuerzo de cambio, retiro a caja fuerte" />
                     </div>
-                    <div class="form-group">
-                        <label>Subtotal</label>
-                        <div class="count-subtotal">@(preview != null && activeIndex >= 0 ? $"${preview.Lines[activeIndex].Subtotal}" : "—")</div>
+                    <div class="flex-wrap-gap">
+                        <button type="submit" class="btn btn--primary">
+                            <Icon Name="plus" Size="17" />
+                            <span>Registrar movimiento</span>
+                        </button>
                     </div>
-                    <div class="form-group">
-                        <button class="btn btn-secondary btn-small" type="button" @onclick="() => RemoveCountRow(row)">Quitar</button>
-                    </div>
-                    @if (rowError != null)
+                    @if (!string.IsNullOrEmpty(movementMessage))
                     {
-                        <div class="count-row-error" role="alert">Fila @number: @rowError</div>
-                    }
-                </div>
-            }
-            <button class="btn btn-secondary" type="button" @onclick="AddCountRow">Agregar denominación</button>
-            <small>Denominación mayor que cero, sin separador de miles. Separador decimal: @CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator</small>
-
-            @if (previewError != null)
-            {
-                <p role="alert">@previewError</p>
-            }
-            <div class="cash-info">
-                <div class="info-card">
-                    <h4>Total contado</h4>
-                    <p class="amount">@(preview == null ? "—" : $"${preview.CountedAmount}")</p>
-                </div>
-                <div class="info-card">
-                    <h4>Esperado en caja</h4>
-                    <p class="amount">@(countReview == null ? "—" : $"${countReview.ExpectedAmount}")</p>
-                </div>
-            </div>
-            @if (preview != null)
-            {
-                <div class="difference @DifferenceClass(preview.Difference)">
-                    Diferencia: @DifferenceLabel(preview.Difference) (@(preview.Difference > 0m ? "+" : "")$@preview.Difference)
-                </div>
-            }
-
-            <div class="form-group">
-                <label for="count-reason">Motivo de la diferencia (@(preview != null && preview.Difference != 0m ? "obligatorio" : "opcional si el cierre es exacto"))</label>
-                <textarea id="count-reason" class="form-control" rows="2" @bind="countReason" @bind:after="ResetConfirmation"></textarea>
-            </div>
-
-            @if (!string.IsNullOrEmpty(countError))
-            {
-                <p role="alert">@countError</p>
-            }
-            @if (!confirmingClose)
-            {
-                <button class="btn btn-danger btn-large" @onclick="ReviewClose" disabled="@stale">Revisar cierre</button>
-            }
-            else if (preview != null && !stale)
-            {
-                <div class="form-card" role="region" aria-label="Confirmación de cierre">
-                    <h4>Confirmá el cierre</h4>
-                    <p>Total contado: $@preview.CountedAmount</p>
-                    <p>Esperado en caja: $@preview.ExpectedAmount</p>
-                    <p>Diferencia: @DifferenceLabel(preview.Difference) ($@preview.Difference)</p>
-                    <p>Motivo: @(string.IsNullOrWhiteSpace(countReason) ? "Sin motivo (cierre exacto)" : countReason.Trim())</p>
-                    @if (preview.CountedAmount == 0m)
-                    {
-                        <div class="form-group">
-                            <label><input type="checkbox" id="count-zero-confirmed" @bind="zeroConfirmed" /> Confirmo que el efectivo contado es cero</label>
+                        <div role="status">
+                            <Banner Variant="ok">@movementMessage</Banner>
                         </div>
                     }
-                    <div class="form-actions">
-                        <button class="btn btn-danger" @onclick="CloseCash" disabled="@(preview.CountedAmount == 0m && !zeroConfirmed)">Confirmar cierre definitivo</button>
-                        <button class="btn btn-secondary" @onclick="ResetConfirmation">Volver a editar</button>
+                </form>
+            </section>
+
+            <section class="card stack cash-arqueo" aria-labelledby="arqueo-title">
+                <div class="row-between">
+                    <div>
+                        <h2 id="arqueo-title" class="card__title">Arqueo y cierre de caja</h2>
+                        <p class="card__desc">Contá el efectivo por denominación. Las filas vacías se ignoran y el cierre es definitivo.</p>
+                    </div>
+                    @if (preview != null)
+                    {
+                        var (diffVariant, diffIcon) = CashFormat.DifferenceBadge(preview.Difference);
+                        <Badge Variant="@diffVariant" Icon="@diffIcon" Label="@DifferenceText(preview.Difference)" />
+                    }
+                </div>
+                <p class="text-sm text-secondary">Esperado en caja (según tu última revisión): <strong class="tnum">@(countReview == null ? "—" : PosFormat.Money(countReview.ExpectedAmount))</strong></p>
+
+                @if (stale)
+                {
+                    <div role="alert">
+                        <Banner Variant="warn" Title="Saldo esperado desactualizado">
+                            <ChildContent>@StaleText(fresh)</ChildContent>
+                            <Actions>
+                                <button type="button" class="btn btn--sm" @onclick="RefreshCountReview">
+                                    <Icon Name="refresh" Size="14" />
+                                    <span>Actualizar saldo esperado</span>
+                                </button>
+                            </Actions>
+                        </Banner>
+                    </div>
+                }
+                else if (!string.IsNullOrEmpty(countNotice))
+                {
+                    <div role="alert">
+                        <Banner Variant="warn">@countNotice</Banner>
+                    </div>
+                }
+
+                <div class="denom-grid" role="group" aria-label="Conteo de efectivo por denominación">
+                    <div class="denom-row denom-row--head" aria-hidden="true">
+                        <span>Denominación</span>
+                        <span>Cantidad</span>
+                        <span class="denom-row__sub">Subtotal</span>
+                        <span></span>
+                    </div>
+                    @for (var i = 0; i < countRows.Count; i++)
+                    {
+                        var row = countRows[i];
+                        var number = i + 1;
+                        var rowError = ParseRow(row, out _);
+                        var activeIndex = activeRows.IndexOf(row);
+                        <div class="denom-row" @key="row">
+                            <input id="count-denomination-@number" type="text" inputmode="decimal" class="input input--compact tnum"
+                                   placeholder="Denominación" aria-label="@($"Denominación de la fila {number}")" aria-invalid="@(rowError != null ? "true" : null)"
+                                   @bind="row.Denomination" @bind:event="oninput" @bind:after="ResetConfirmation" />
+                            <input id="count-quantity-@number" type="text" inputmode="numeric" class="input input--compact tnum"
+                                   placeholder="Cantidad" aria-label="@($"Cantidad de la fila {number}")" aria-invalid="@(rowError != null ? "true" : null)"
+                                   @bind="row.Quantity" @bind:event="oninput" @bind:after="ResetConfirmation" />
+                            <span class="denom-row__sub fw-700 tnum">@(preview != null && activeIndex >= 0 ? PosFormat.Money(preview.Lines[activeIndex].Subtotal) : "—")</span>
+                            <button class="btn btn--ghost btn--icon" type="button" aria-label="@($"Quitar la fila {number}")" @onclick="() => RemoveCountRow(row)">
+                                <Icon Name="trash" Size="14" />
+                            </button>
+                            @if (rowError != null)
+                            {
+                                <p class="denom-row__error" role="alert"><Icon Name="alertOctagon" Size="14" /> <span>Fila @number: @rowError</span></p>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="flex-wrap-gap">
+                    <button class="btn btn--sm" type="button" @onclick="AddCountRow">
+                        <Icon Name="plus" Size="14" />
+                        <span>Agregar denominación</span>
+                    </button>
+                    <span class="text-xs text-muted">Denominación mayor que cero, sin separador de miles. Separador decimal: @PosFormat.DecimalSeparator</span>
+                </div>
+
+                @if (previewError != null)
+                {
+                    <Banner Variant="danger">@previewError</Banner>
+                }
+
+                <div class="card card--compact card--subtle stack stack--sm" aria-live="polite">
+                    <div class="tally-row">
+                        <span class="text-secondary">Total contado</span>
+                        <span class="fw-700 tnum">@(preview == null ? "—" : PosFormat.Money(preview.CountedAmount))</span>
+                    </div>
+                    <div class="tally-row">
+                        <span class="text-secondary">Esperado en caja</span>
+                        <span class="fw-700 tnum">@(countReview == null ? "—" : PosFormat.Money(countReview.ExpectedAmount))</span>
+                    </div>
+                    <div class="tally-row tally-row--total">
+                        <span>Diferencia</span>
+                        <span class="tnum @(preview == null ? "" : preview.Difference == 0m ? "text-ok" : preview.Difference < 0m ? "text-danger" : "")">@(preview == null ? "—" : DifferenceText(preview.Difference))</span>
                     </div>
                 </div>
-            }
-        </div>
-    }
-    @if (cashRegister != null && !cashRegister.IsOpen)
-    {
-        var count = CashService.GetCount(cashRegister.Id);
-        <div class="form-card">
-            @if (count == null)
-            {
-                <h3>Cierre sin arqueo</h3>
-                <p>Esta caja se cerró sin arqueo detallado.</p>
-                <p>Esperado: $@cashRegister.ExpectedAmount</p>
-                <p>Monto final: $@cashRegister.FinalAmount</p>
-                <p>Diferencia: $@cashRegister.Difference</p>
-            }
-            else
-            {
-                <h3>Arqueo registrado</h3>
-                <p>Responsable: @count.Username (ID @count.UserId)</p>
-                <p>Fecha: @count.CountedAt.ToString("dd/MM/yyyy HH:mm")</p>
-                <p>Esperado: $@count.ExpectedAmount</p>
-                <p>Contado: $@count.CountedAmount</p>
-                <div class="difference @DifferenceClass(count.Difference)">
-                    Diferencia: @DifferenceLabel(count.Difference) (@(count.Difference > 0m ? "+" : "")$@count.Difference)
+
+                <div class="field">
+                    <label class="field__label" for="count-reason">Motivo de la diferencia @if (differenceMissing){<span class="field__req" aria-hidden="true">*</span>}</label>
+                    <textarea id="count-reason" class="textarea" rows="2" aria-required="@(differenceMissing ? "true" : null)" aria-describedby="count-reason-hint"
+                              @bind="countReason" @bind:event="oninput" @bind:after="ResetConfirmation"></textarea>
+                    <span id="count-reason-hint" class="field__hint">@(differenceMissing ? "Obligatorio: el conteo no coincide con el esperado." : "Opcional si el cierre es exacto.")</span>
                 </div>
-                <p>Motivo: @(string.IsNullOrWhiteSpace(count.Reason) ? "Sin motivo (cierre exacto)" : count.Reason)</p>
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead><tr><th>Denominación</th><th>Cantidad</th><th>Subtotal</th></tr></thead>
-                        <tbody>
-                            @foreach (var line in count.Lines)
-                            {
-                                <tr><td>$@line.Denomination</td><td>@line.Quantity</td><td>$@line.Subtotal</td></tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
+
+                @if (!string.IsNullOrEmpty(countError) && !confirmingClose)
+                {
+                    <Banner Variant="danger">@countError</Banner>
+                }
+                <button type="button" class="btn btn--danger btn--lg btn--block" @onclick="ReviewClose" disabled="@stale">
+                    <Icon Name="clipboard" Size="18" />
+                    <span>Revisar cierre de caja</span>
+                </button>
+            </section>
         </div>
+
+        <ModalDialog @ref="closeDialog" Title="@($"Confirmá el cierre · Caja #{cashRegister.Id}")"
+                     Subtitle="Esta acción cierra la sesión actual, guarda el arqueo y genera el resumen diario. El cierre es definitivo."
+                     LightDismiss="false" OnClosed="HandleCloseDialogClosed">
+            <ChildContent>
+                @if (preview != null)
+                {
+                    <div class="stack cash-dialog">
+                        @if (!string.IsNullOrEmpty(countError))
+                        {
+                            <Banner Variant="danger">@countError</Banner>
+                        }
+                        <div class="card card--compact card--subtle stack stack--sm">
+                            <div class="tally-row"><span>Total contado</span><strong class="tnum">@PosFormat.Money(preview.CountedAmount)</strong></div>
+                            <div class="tally-row"><span>Esperado en caja</span><strong class="tnum">@PosFormat.Money(preview.ExpectedAmount)</strong></div>
+                            <div class="tally-row">
+                                <span>Diferencia</span>
+                                <Badge Variant="@CashFormat.DifferenceBadge(preview.Difference).Variant" Icon="@CashFormat.DifferenceBadge(preview.Difference).Icon"
+                                       Label="@DifferenceText(preview.Difference)" />
+                            </div>
+                            <p class="text-xs text-secondary">Motivo: @(string.IsNullOrWhiteSpace(countReason) ? "Sin motivo (cierre exacto)" : countReason.Trim())</p>
+                        </div>
+                        @if (preview.CountedAmount == 0m)
+                        {
+                            <label class="check-field">
+                                <input type="checkbox" id="count-zero-confirmed" @bind="zeroConfirmed" />
+                                <span>Confirmo que el efectivo contado es cero</span>
+                            </label>
+                        }
+                    </div>
+                }
+            </ChildContent>
+            <Footer>
+                <button value="cancel" class="btn" autofocus>Volver a editar</button>
+                <button type="button" class="btn btn--danger" @onclick="CloseCash"
+                        disabled="@(preview != null && preview.CountedAmount == 0m && !zeroConfirmed)">Confirmar cierre definitivo</button>
+            </Footer>
+        </ModalDialog>
     }
-    <div class="form-card">
-        <h3>Cobros registrados por medio de pago</h3>
-        <p>Importes aplicados a las ventas de esta caja, incluidas las canceladas: no se revierten los cobros.
-            No son las ventas completadas del día ni el efectivo disponible en caja.
-            No incluyen monto inicial, movimientos manuales, efectivo entregado ni vuelto.</p>
-        <p>"Devuelto" son las devoluciones registradas en esta caja (aunque la venta sea de otra caja); "Neto" es lo registrado menos lo devuelto.
-            Los cobros registrados no se modifican.</p>
-        <p role="status">@PaymentStateLabel(paymentSummary.State)</p>
-        <div style="overflow-x: auto;">
-            <table class="table">
-                <thead><tr><th>Medio de pago</th><th>Importe registrado</th><th>Devuelto</th><th>Neto</th></tr></thead>
+
+    <PaymentBreakdown Summary="paymentSummary" Title="Cobros registrados por medio de pago" TitleId="cash-pay-title"
+                       Description="Importes aplicados a las ventas de esta caja, incluidas las canceladas: no se revierten los cobros. No son las ventas completadas del día ni el efectivo disponible en caja. No incluyen monto inicial, movimientos manuales, efectivo entregado ni vuelto.">
+        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cash-pay-title">
+            <table class="data-table data-table--stack">
+                <thead>
+                    <tr>
+                        <th scope="col">Medio de pago</th>
+                        <th scope="col" class="col-num">Importe registrado</th>
+                        <th scope="col" class="col-num">Devuelto</th>
+                        <th scope="col" class="col-num">Neto</th>
+                    </tr>
+                </thead>
                 <tbody>
                     @foreach (var row in paymentSummary.Rows)
                     {
-                        <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@(row.Amount.HasValue ? $"${row.Amount.Value}" : "No disponible")</td><td>@(row.RefundedAmount.HasValue ? $"${row.RefundedAmount.Value}" : "No disponible")</td><td>@(row.NetAmount.HasValue ? $"${row.NetAmount.Value}" : "No disponible")</td></tr>
+                        <tr @key="row.Method">
+                            <th scope="row">@PosFormat.PaymentLabel(row.Method)</th>
+                            <td data-label="Registrado" class="col-num">@CashFormat.Money(row.Amount)</td>
+                            <td data-label="Devuelto" class="@CashFormat.RefundClass(row.RefundedAmount)">@CashFormat.Money(row.RefundedAmount)</td>
+                            <td data-label="Neto" class="col-num fw-700">@CashFormat.Money(row.NetAmount)</td>
+                        </tr>
                     }
+                    <tr class="payment-total">
+                        <th scope="row">Total de cobros registrados</th>
+                        <td data-label="Registrado" class="col-num fw-700">@CashFormat.Money(paymentSummary.RegisteredTotal)</td>
+                        <td data-label="Devuelto" class="@CashFormat.RefundClass(paymentSummary.RefundedTotal) fw-700">@CashFormat.Money(paymentSummary.RefundedTotal)</td>
+                        <td data-label="Neto" class="col-num fw-700">@CashFormat.Money(paymentSummary.NetTotal)</td>
+                    </tr>
                 </tbody>
-                <tfoot><tr><th>Total de cobros registrados</th><td>@(paymentSummary.RegisteredTotal.HasValue ? $"${paymentSummary.RegisteredTotal.Value}" : "No disponible")</td><td>@(paymentSummary.RefundedTotal.HasValue ? $"${paymentSummary.RefundedTotal.Value}" : "No disponible")</td><td>@(paymentSummary.NetTotal.HasValue ? $"${paymentSummary.NetTotal.Value}" : "No disponible")</td></tr></tfoot>
             </table>
         </div>
         @foreach (var warning in paymentSummary.Warnings)
         {
-            <p role="alert">@warning.Message Registros afectados: @warning.Count.</p>
+            <div role="alert">
+                <Banner Variant="warn">@warning.Message Registros afectados: @warning.Count.</Banner>
+            </div>
         }
-    </div>
+    </PaymentBreakdown>
+
     @if (cashRegister != null)
     {
         var movements = CashService.GetCurrentMovements();
-        <div class="form-card">
-            <h3>Movimientos de esta caja</h3>
+        <section class="card stack" aria-labelledby="cash-ledger-title">
+            <div>
+                <h2 id="cash-ledger-title" class="card__title">Movimientos de esta caja (@movements.Count)</h2>
+                <p class="card__desc">Libro cronológico de entradas y salidas de efectivo en la sesión #@cashRegister.Id.</p>
+            </div>
             @if (movements.Count == 0)
             {
-                <p>No hay movimientos registrados.</p>
+                <div class="empty-state">
+                    <div class="empty-state__icon"><Icon Name="cash" Size="24" /></div>
+                    <div class="stack stack--sm">
+                        <h3>Sin movimientos registrados</h3>
+                        <p class="text-sm text-secondary">No hay movimientos registrados. Las ventas en efectivo y los movimientos manuales aparecerán en esta tabla.</p>
+                    </div>
+                </div>
             }
             else
             {
-                <div style="overflow-x: auto;">
-                    <table class="table">
+                <div class="table-wrapper" style="overflow-x: auto;" tabindex="0" role="region" aria-labelledby="cash-ledger-title">
+                    <table class="data-table data-table--stack">
                         <thead>
-                            <tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Responsable</th><th>Motivo</th><th>Venta</th></tr>
+                            <tr>
+                                <th scope="col">ID / Fecha</th>
+                                <th scope="col">Tipo</th>
+                                <th scope="col">Motivo</th>
+                                <th scope="col">Responsable</th>
+                                <th scope="col">Venta</th>
+                                <th scope="col" class="col-num">Monto</th>
+                            </tr>
                         </thead>
                         <tbody>
                             @foreach (var movement in movements)
                             {
+                                var sign = movement.Type == CashMovementType.Expense || movement.Type == CashMovementType.Withdrawal || movement.Type == CashMovementType.Refund ? "−" : "+";
                                 <tr @key="movement.Id">
-                                    <td>@movement.Id</td>
-                                    <td>@movement.Date.ToString("dd/MM/yyyy HH:mm")</td>
-                                    <td>@MovementLabel(movement.Type)</td>
-                                    <td>@(movement.Type == CashMovementType.Expense || movement.Type == CashMovementType.Withdrawal || movement.Type == CashMovementType.Refund ? "−" : "+")$@movement.Amount</td>
-                                    <td>@(string.IsNullOrWhiteSpace(movement.Username) ? "Sin responsable registrado" : movement.Username) @(movement.UserId.HasValue ? $"(ID {movement.UserId})" : "")</td>
-                                    <td>@(string.IsNullOrWhiteSpace(movement.Reason) ? "Sin motivo registrado" : movement.Reason)</td>
-                                    <td>@(movement.SaleId?.ToString() ?? "—")</td>
+                                    <th scope="row">#@movement.Id <span class="text-xs text-muted fw-600">· @movement.Date.ToString("dd/MM/yyyy HH:mm")</span></th>
+                                    <td data-label="Tipo"><Badge Variant="@MovementVariant(movement.Type)" Label="@MovementLabel(movement.Type)" /></td>
+                                    <td data-label="Motivo">@(string.IsNullOrWhiteSpace(movement.Reason) ? "Sin motivo registrado" : movement.Reason)</td>
+                                    <td data-label="Responsable">@(string.IsNullOrWhiteSpace(movement.Username) ? "Sin responsable registrado" : movement.Username) @(movement.UserId.HasValue ? $"(ID {movement.UserId})" : "")</td>
+                                    <td data-label="Venta">@(movement.SaleId?.ToString() ?? "—")</td>
+                                    <td data-label="Monto" class="col-num fw-700 @(sign == "−" ? "text-danger" : "text-ok")">@sign@PosFormat.Money(movement.Amount)</td>
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
             }
-        </div>
-    }
-    @if (!string.IsNullOrEmpty(cashError))
-    {
-        <p role="alert">@cashError</p>
+        </section>
     }
 </div>
 
+<Toast @ref="toast" />
+
 @code {
+    private const string ProgrammaticClose = "sync";
+
     private CashRegister? cashRegister;
     private decimal initialAmount;
     private sealed class CountRow
@@ -324,29 +453,53 @@
     private string? countNotice;
     private string? closeMessage;
     private string? cashError;
-    private string? countError; // Count-flow errors render inside the arqueo card, next to its buttons.
+    private string? countError; // Count-flow errors render inside the arqueo card (or its confirmation dialog).
     private CashMovementType movementType = CashMovementType.Income;
     private string movementAmount = string.Empty;
     private string? movementReason;
     private string? movementMessage;
 
-    private static string PaymentStateLabel(CashPaymentSummaryState state) => state switch
-    {
-        CashPaymentSummaryState.NoSession => "Sin sesión de caja seleccionada; no hay cobros atribuibles.",
-        CashPaymentSummaryState.Complete => "Resumen completo para esta sesión.",
-        CashPaymentSummaryState.Partial => "Resumen parcial: revisá las advertencias. Solo se incluyen ventas con pagos válidos y vinculadas a esta caja.",
-        _ => "Resumen no disponible; no se muestran importes por desbordamiento decimal."
-    };
+    // The confirmation dialog mirrors confirmingClose: opened/closed after render, never from the handlers,
+    // so every handler stays a plain synchronous state change.
+    private Toast? toast;
+    private ModalDialog? closeDialog;
+    private bool dialogHostRendered;
+    private bool dialogWanted;
+    private bool dialogShown;
 
-    private static string PaymentLabel(PaymentMethod method) => method switch
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        PaymentMethod.Cash => "Efectivo",
-        PaymentMethod.DebitCard => "Tarjeta de débito",
-        PaymentMethod.CreditCard => "Tarjeta de crédito",
-        PaymentMethod.Transfer => "Transferencia",
-        PaymentMethod.MercadoPago => "Mercado Pago",
-        _ => "Otro"
-    };
+        if (!dialogHostRendered || closeDialog is null)
+        {
+            dialogShown = false; // The dialog left the tree together with its host (session closed elsewhere).
+            return;
+        }
+        try
+        {
+            if (dialogWanted && !dialogShown)
+            {
+                dialogShown = true;
+                await closeDialog.ShowAsync();
+            }
+            else if (!dialogWanted && dialogShown)
+            {
+                dialogShown = false;
+                await closeDialog.CloseAsync(ProgrammaticClose);
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            // Circuit already gone; nothing to show or close.
+        }
+    }
+
+    // Esc, "Volver a editar" or the header close button: back to editing without closing the session.
+    private Task HandleCloseDialogClosed(string returnValue)
+    {
+        dialogShown = false;
+        if (returnValue != ProgrammaticClose && confirmingClose) ResetConfirmation();
+        return Task.CompletedTask;
+    }
 
     private static string MovementLabel(CashMovementType type) => type switch
     {
@@ -356,6 +509,13 @@
         CashMovementType.Withdrawal => "Retiro",
         CashMovementType.Refund => "Devolución",
         _ => "Tipo desconocido"
+    };
+
+    private static string MovementVariant(CashMovementType type) => type switch
+    {
+        CashMovementType.Sale or CashMovementType.Income => "ok",
+        CashMovementType.Refund => "warn",
+        _ => "danger"
     };
 
     private void RecordMovement()
@@ -381,7 +541,7 @@
         {
             CashService.AddManualMovement(movementType, amount, movementReason, actor);
             cashRegister = CashService.GetCurrent();
-            movementMessage = $"{MovementLabel(movementType)} de ${amount} registrado en caja.";
+            movementMessage = $"{MovementLabel(movementType)} de {PosFormat.Money(amount)} registrado en caja.";
             movementAmount = string.Empty;
             movementReason = null;
         }
@@ -422,12 +582,14 @@
         cashError = null;
         try
         {
-            CashService.Open(initialAmount);
+            var opened = initialAmount;
+            CashService.Open(opened);
             cashRegister = CashService.GetCurrent();
             initialAmount = 0;
             closeMessage = null;
             ResetCountForm();
             countReview = TryGetFreshReview();
+            toast?.Show($"Caja #{cashRegister?.Id} abierta con {PosFormat.Money(opened)}.");
         }
         catch (InvalidOperationException ex) { cashError = ex.Message; }
     }
@@ -491,13 +653,13 @@
         : StaleMessage(countReview, fresh);
 
     private static string StaleMessage(CashCountReview before, CashCountReview now) =>
-        $"El saldo esperado cambió mientras contabas (antes ${before.ExpectedAmount}, ahora ${now.ExpectedAmount}). Revisá el arqueo nuevamente.";
+        $"El saldo esperado cambió mientras contabas (antes {PosFormat.Money(before.ExpectedAmount)}, ahora {PosFormat.Money(now.ExpectedAmount)}). Revisá el arqueo nuevamente.";
 
     private static string DifferenceLabel(decimal difference) =>
         difference < 0m ? "Faltante" : difference > 0m ? "Sobrante" : "Exacto";
 
-    private static string DifferenceClass(decimal difference) =>
-        difference < 0m ? "negative" : difference > 0m ? "positive" : "exact";
+    private static string DifferenceText(decimal difference) =>
+        difference == 0m ? DifferenceLabel(difference) : $"{DifferenceLabel(difference)} ({CashFormat.SignedMoney(difference)})";
 
     private void ResetConfirmation()
     {
@@ -536,9 +698,10 @@
         ResetConfirmation();
         countReview = TryGetFreshReview();
         if (countReview == null) countError = "No hay caja abierta";
+        else toast?.Show("Saldo esperado actualizado.");
     }
 
-    // Step one: validate everything the user can fix, then show the confirmation panel.
+    // Step one: validate everything the user can fix, then show the confirmation dialog.
     private void ReviewClose()
     {
         if (!EnsureAdmin()) return;

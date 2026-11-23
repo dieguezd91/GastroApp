@@ -2,255 +2,289 @@
 @page "/cash/history/{RegisterId:int}"
 @using GastroApp.Models
 @using GastroApp.Services
+@using GastroApp.Shared.Cash
+@using GastroApp.Shared.Pos
 @inject CashRegisterService CashService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
 <PageTitle>Historial de cajas</PageTitle>
 
-<div class="page-container">
-    <h1>🗂️ Historial de cajas</h1>
-    <p>Consulta de solo lectura de las sesiones de caja. Nada en esta pantalla modifica cajas, movimientos, cobros ni arqueos.</p>
-    <p><a href="/cash">← Volver a la caja actual</a></p>
+<div class="page-header">
+    <div>
+        <h1>Historial de cajas</h1>
+        <p class="page-header__subtitle">Consulta de solo lectura de las sesiones de caja: arqueos, movimientos, cobros por medio de pago y resumen diario asociado.
+            Nada en esta pantalla modifica cajas, movimientos, cobros ni arqueos.</p>
+    </div>
+    <div class="page-header__actions">
+        <a href="/cash" class="btn">
+            <Icon Name="cash" Size="17" />
+            <span>Ir a la caja actual</span>
+        </a>
+    </div>
+</div>
 
-    @if (RegisterId.HasValue)
-    {
-        <div class="form-card history-detail" role="region" aria-label="Detalle de caja">
-            @if (detail == null)
-            {
-                <h3>Caja #@RegisterId</h3>
-                <p role="alert">@(detailMessage ?? "No se pudo cargar la caja.")</p>
-            }
-            else
-            {
-                var entry = detail.Entry;
-                <h3>Caja #@entry.Id — @(entry.IsOpen ? "Abierta" : "Cerrada")</h3>
-
-                <h4>Información general</h4>
-                <div class="cash-info">
-                    <div class="info-card">
-                        <h4>Apertura</h4>
-                        <p>@entry.OpenDate.ToString("dd/MM/yyyy HH:mm")</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Cierre</h4>
-                        <p>@(entry.CloseDate?.ToString("dd/MM/yyyy HH:mm") ?? (entry.IsOpen ? "Caja abierta" : "Sin fecha registrada"))</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>Fondo inicial</h4>
-                        <p class="amount">$@entry.InitialAmount</p>
-                    </div>
-                    <div class="info-card">
-                        <h4>@(entry.IsOpen ? "Esperado en caja (actual)" : "Esperado al cierre")</h4>
-                        <p class="amount">@Money(entry.ExpectedAmount)</p>
-                    </div>
-                    @if (!entry.IsOpen)
-                    {
-                        <div class="info-card">
-                            <h4>@(entry.HasCount ? "Efectivo contado" : "Monto final registrado")</h4>
-                            <p class="amount">@Money(entry.CountedAmount)</p>
-                        </div>
-                    }
-                </div>
-                @if (entry.IsOpen)
-                {
-                    <p>La caja sigue abierta: el esperado se calcula ahora desde sus movimientos y todavía no tiene cierre ni diferencia.</p>
-                }
-                else if (entry.Difference.HasValue)
-                {
-                    <div class="difference @DifferenceClass(entry.Difference.Value)">
-                        Diferencia registrada: @DifferenceLabel(entry.Difference.Value) (@SignedMoney(entry.Difference.Value))
-                    </div>
-                }
-                @if (entry.AmountsUnavailable)
-                {
-                    <p role="alert">Algunos importes no están disponibles porque superan el límite de cálculo; no se muestran cifras aproximadas.</p>
-                }
-
-                <h4>Movimientos</h4>
-                @if (detail.Movements.Count == 0)
-                {
-                    <p>No hay movimientos registrados en esta caja.</p>
-                }
-                else
-                {
-                    <div style="overflow-x: auto;">
-                        <table class="table">
-                            <thead>
-                                <tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Responsable</th><th>Motivo</th><th>Venta</th></tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var movement in detail.Movements)
-                                {
-                                    <tr @key="movement.Id">
-                                        <td>@movement.Id</td>
-                                        <td>@movement.Date.ToString("dd/MM/yyyy HH:mm")</td>
-                                        <td>@MovementLabel(movement.Type)</td>
-                                        <td>@(IsOutflow(movement.Type) ? "−" : "+")$@movement.Amount</td>
-                                        <td>@(string.IsNullOrWhiteSpace(movement.Username) ? "Sin responsable registrado" : movement.Username) @(movement.UserId.HasValue ? $"(ID {movement.UserId})" : "")</td>
-                                        <td>@(string.IsNullOrWhiteSpace(movement.Reason) ? "Sin motivo registrado" : movement.Reason)</td>
-                                        <td>@(movement.SaleId?.ToString() ?? "—")</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
-
-                var payments = detail.PaymentSummary;
-                <h4>Cobros registrados por medio de pago</h4>
-                <p>Importes aplicados a las ventas vinculadas a esta caja, incluidas las canceladas: no se revierten los cobros.
-                    No son las ventas completadas del día ni el efectivo disponible en caja.</p>
-                <p>"Devuelto" son las devoluciones registradas en esta caja (aunque la venta sea de otra caja); "Neto" es lo registrado menos lo devuelto.
-                    Los cobros registrados no se modifican.</p>
-                <p role="status">@PaymentStateLabel(payments.State)</p>
-                <div style="overflow-x: auto;">
-                    <table class="table">
-                        <thead><tr><th>Medio de pago</th><th>Importe registrado</th><th>Devuelto</th><th>Neto</th></tr></thead>
-                        <tbody>
-                            @foreach (var row in payments.Rows)
-                            {
-                                <tr @key="row.Method"><td>@PaymentLabel(row.Method)</td><td>@Money(row.Amount)</td><td>@Money(row.RefundedAmount)</td><td>@Money(row.NetAmount)</td></tr>
-                            }
-                        </tbody>
-                        <tfoot><tr><th>Total de cobros registrados</th><td>@Money(payments.RegisteredTotal)</td><td>@Money(payments.RefundedTotal)</td><td>@Money(payments.NetTotal)</td></tr></tfoot>
-                    </table>
-                </div>
-                @foreach (var warning in payments.Warnings)
-                {
-                    <p role="alert">@warning.Message Registros afectados: @warning.Count.</p>
-                }
-
-                <h4>Arqueo</h4>
-                @if (entry.IsOpen)
-                {
-                    <p>La caja está abierta; el arqueo se registra al cerrarla.</p>
-                }
-                else if (detail.Count == null)
-                {
-                    <p>Esta caja se cerró sin arqueo detallado. No hay responsable, denominaciones ni motivo registrados.</p>
-                }
-                else
-                {
-                    var count = detail.Count;
-                    <p>Responsable: @count.Username (ID @count.UserId)</p>
-                    <p>Fecha del conteo: @count.CountedAt.ToString("dd/MM/yyyy HH:mm")</p>
-                    <div style="overflow-x: auto;">
-                        <table class="table">
-                            <thead><tr><th>Denominación</th><th>Cantidad</th><th>Subtotal</th></tr></thead>
-                            <tbody>
-                                @foreach (var line in count.Lines)
-                                {
-                                    <tr><td>$@line.Denomination</td><td>@line.Quantity</td><td>$@line.Subtotal</td></tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                    <p>Total contado: $@count.CountedAmount</p>
-                    <p>Esperado: $@count.ExpectedAmount</p>
-                    <p>Diferencia: @DifferenceLabel(count.Difference) (@SignedMoney(count.Difference))</p>
-                    <p>Motivo: @(string.IsNullOrWhiteSpace(count.Reason) ? "Sin motivo (cierre exacto)" : count.Reason)</p>
-                }
-
-                <h4>Resumen asociado</h4>
-                @if (detail.LinkedSummaries.Count == 0)
-                {
-                    <p>No hay un resumen diario vinculado a esta caja. Los resúmenes antiguos sin caja asociada no se atribuyen por fecha.</p>
-                }
-                else
-                {
-                    @foreach (var summary in detail.LinkedSummaries)
-                    {
-                        <div class="info-card">
-                            <p>Fecha: @summary.Date.ToString("dd/MM/yyyy")</p>
-                            <p>Ventas completadas del día: $@summary.TotalSales (@summary.SalesCount ventas)</p>
-                            <p>Producto más vendido: @(string.IsNullOrWhiteSpace(summary.TopProduct) ? "Sin datos" : $"{summary.TopProduct} ({summary.TopProductQuantity})")</p>
-                            <p>Efectivo inicial: $@summary.InitialCash · Final: $@summary.FinalCash · Diferencia: @SignedMoney(summary.Difference)</p>
-                        </div>
-                    }
-                }
-            }
-            <div class="form-actions">
-                <button class="btn btn-secondary" @onclick="CloseDetail">Volver al listado</button>
+<div class="stack">
+    <search class="card card--compact history-filters-card">
+        <div class="form-grid">
+            <div class="field">
+                <label class="field__label" for="history-from">Apertura desde</label>
+                <input id="history-from" type="date" class="input input--compact" @bind="filterFrom" />
             </div>
-        </div>
-    }
-
-    <div class="form-card">
-        <h3>Sesiones de caja</h3>
-        <div class="history-filters">
-            <div class="form-group">
-                <label for="history-from">Apertura desde</label>
-                <input id="history-from" type="date" class="form-control" @bind="filterFrom" />
+            <div class="field">
+                <label class="field__label" for="history-to">Apertura hasta</label>
+                <input id="history-to" type="date" class="input input--compact" @bind="filterTo" />
             </div>
-            <div class="form-group">
-                <label for="history-to">Apertura hasta</label>
-                <input id="history-to" type="date" class="form-control" @bind="filterTo" />
-            </div>
-            <div class="form-group">
-                <label for="history-status">Estado</label>
-                <select id="history-status" class="form-control" @bind="filterStatus">
+            <div class="field">
+                <label class="field__label" for="history-status">Estado</label>
+                <select id="history-status" class="select select--compact" @bind="filterStatus">
                     <option value="@CashHistoryStatusFilter.All">Todas</option>
                     <option value="@CashHistoryStatusFilter.Open">Abiertas</option>
                     <option value="@CashHistoryStatusFilter.Closed">Cerradas</option>
                 </select>
             </div>
         </div>
-        <div class="form-actions">
-            <button class="btn btn-primary" @onclick="ApplyFilters">Aplicar filtros</button>
-            <button class="btn btn-secondary" @onclick="ClearFilters">Limpiar</button>
+        <div class="flex-wrap-gap">
+            <button type="button" class="btn btn--primary btn--sm" @onclick="ApplyFilters">Aplicar filtros</button>
+            <button type="button" class="btn btn--sm" @onclick="ClearFilters">Limpiar filtros</button>
+            @if (historyPage != null)
+            {
+                <span class="text-xs text-muted" role="status">@historyPage.TotalCount sesión(es)</span>
+            }
         </div>
+    </search>
 
-        @if (!string.IsNullOrEmpty(historyError))
+    @if (!string.IsNullOrEmpty(historyError))
+    {
+        <Banner Variant="danger">@historyError</Banner>
+    }
+    else if (historyPage == null)
+    {
+        <p class="text-sm text-secondary" role="status">Cargando historial…</p>
+    }
+    else if (historyPage.TotalCount == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-state__icon"><Icon Name="history" Size="24" /></div>
+            <div class="stack stack--sm">
+                <h2 class="card__title">Sin sesiones para mostrar</h2>
+                <p class="text-sm text-secondary">No hay sesiones de caja que coincidan con los filtros. Ajustalos para consultar otras cajas.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="table-wrapper" tabindex="0" role="region" aria-label="Listado de sesiones de caja">
+            <table class="data-table data-table--stack">
+                <thead>
+                    <tr>
+                        <th scope="col">Sesión</th>
+                        <th scope="col">Apertura</th>
+                        <th scope="col">Cierre</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col" class="col-num">Fondo inicial</th>
+                        <th scope="col" class="col-num">Esperado</th>
+                        <th scope="col" class="col-num">Contado</th>
+                        <th scope="col" class="col-num">Diferencia</th>
+                        <th scope="col" class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in historyPage.Entries)
+                    {
+                        <tr @key="entry.Id" class="@(entry.Id == RegisterId ? "history-row--selected" : null)" aria-current="@(entry.Id == RegisterId ? "true" : null)">
+                            <th scope="row">Caja #@entry.Id</th>
+                            <td data-label="Apertura">@entry.OpenDate.ToString("dd/MM/yyyy HH:mm")</td>
+                            <td data-label="Cierre">@(entry.CloseDate?.ToString("dd/MM/yyyy HH:mm") ?? (entry.IsOpen ? "En curso" : "—"))</td>
+                            <td data-label="Estado"><Badge Variant="@(entry.IsOpen ? "ok" : "neutral")" Label="@(entry.IsOpen ? "Abierta" : "Cerrada")" /></td>
+                            <td data-label="Fondo inicial" class="col-num">@PosFormat.Money(entry.InitialAmount)</td>
+                            <td data-label="Esperado" class="col-num">@CashFormat.Money(entry.ExpectedAmount)</td>
+                            <td data-label="Contado" class="col-num">@(entry.IsOpen ? "—" : CashFormat.Money(entry.CountedAmount) + (entry.HasCount ? "" : " (sin arqueo)"))</td>
+                            <td data-label="Diferencia" class="col-num fw-700 @DifferenceTextClass(entry)">@(entry.IsOpen ? "—" : entry.Difference.HasValue ? $"{DifferenceLabel(entry.Difference.Value)} ({SignedMoney(entry.Difference.Value)})" : CashFormat.Unavailable)</td>
+                            <td class="col-actions">
+                                <button type="button" class="btn btn--sm" aria-label="@($"Ver detalle de la caja {entry.Id}")" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="history-pagination">
+            <button type="button" class="btn btn--sm" @onclick="PreviousPage" disabled="@(historyPage.Page <= 1)">Anterior</button>
+            <span class="text-sm text-secondary">Página @historyPage.Page de @historyPage.TotalPages · @historyPage.TotalCount sesiones</span>
+            <button type="button" class="btn btn--sm" @onclick="NextPage" disabled="@(historyPage.Page >= historyPage.TotalPages)">Siguiente</button>
+        </div>
+    }
+</div>
+
+@* The detail keeps its own route (/cash/history/{id}); the dialog mirrors it after each render. *@
+<ModalDialog @ref="detailDialog" Size="lg" Title="@DetailTitle" Subtitle="@DetailSubtitle" OnClosed="HandleDetailClosed">
+    <ChildContent>
+        @if (detail == null)
         {
-            <p role="alert">@historyError</p>
-        }
-        else if (historyPage == null)
-        {
-            <p>Cargando historial…</p>
-        }
-        else if (historyPage.TotalCount == 0)
-        {
-            <p>No hay sesiones de caja que coincidan con los filtros.</p>
+            <div class="cash-dialog">
+                <Banner Variant="danger">@(detailMessage ?? "No se pudo cargar la caja.")</Banner>
+            </div>
         }
         else
         {
-            <div style="overflow-x: auto;">
-                <table class="table">
-                    <thead>
-                        <tr><th>ID</th><th>Apertura</th><th>Cierre</th><th>Estado</th><th>Fondo inicial</th><th>Esperado</th><th>Contado</th><th>Diferencia</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var entry in historyPage.Entries)
+            var entry = detail.Entry;
+            var payments = detail.PaymentSummary;
+            <div class="stack cash-dialog">
+                <div class="history-detail-kpis">
+                    <KpiCard Label="Fondo inicial" Value="@PosFormat.Money(entry.InitialAmount)" />
+                    <KpiCard Label="@(entry.IsOpen ? "Esperado en caja (actual)" : "Esperado al cierre")" Value="@CashFormat.Money(entry.ExpectedAmount)" />
+                    @if (!entry.IsOpen)
+                    {
+                        <KpiCard Label="@(entry.HasCount ? "Efectivo contado" : "Monto final registrado")" Value="@CashFormat.Money(entry.CountedAmount)" />
+                        <KpiCard Label="Diferencia registrada"
+                                 Value="@(entry.Difference.HasValue ? SignedMoney(entry.Difference.Value) : CashFormat.Unavailable)"
+                                 Meta="@(entry.Difference.HasValue ? DifferenceLabel(entry.Difference.Value) : null)" />
+                    }
+                </div>
+                @if (entry.IsOpen)
+                {
+                    <Banner Variant="info">La caja sigue abierta: el esperado se calcula ahora desde sus movimientos y todavía no tiene cierre ni diferencia.</Banner>
+                }
+                @if (entry.AmountsUnavailable)
+                {
+                    <Banner Variant="danger">Algunos importes no están disponibles porque superan el límite de cálculo; no se muestran cifras aproximadas.</Banner>
+                }
+
+                <section class="card card--compact stack stack--sm" aria-labelledby="hist-summary-title">
+                    <h3 id="hist-summary-title" class="card__title">Resumen asociado</h3>
+                    @if (detail.LinkedSummaries.Count == 0)
+                    {
+                        <p class="text-sm text-secondary">No hay un resumen diario vinculado a esta caja. Los resúmenes antiguos sin caja asociada no se atribuyen por fecha.</p>
+                    }
+                    else
+                    {
+                        @foreach (var summary in detail.LinkedSummaries)
                         {
-                            <tr @key="entry.Id" class="@(entry.Id == RegisterId ? "history-selected" : null)">
-                                <td>@entry.Id</td>
-                                <td>@entry.OpenDate.ToString("dd/MM/yyyy HH:mm")</td>
-                                <td>@(entry.CloseDate?.ToString("dd/MM/yyyy HH:mm") ?? "—")</td>
-                                <td>@(entry.IsOpen ? "Abierta" : "Cerrada")</td>
-                                <td>$@entry.InitialAmount</td>
-                                <td>@Money(entry.ExpectedAmount)</td>
-                                <td>@(entry.IsOpen ? "—" : Money(entry.CountedAmount) + (entry.HasCount ? "" : " (sin arqueo)"))</td>
-                                <td>@(entry.IsOpen ? "—" : entry.Difference.HasValue ? $"{DifferenceLabel(entry.Difference.Value)} ({SignedMoney(entry.Difference.Value)})" : "No disponible")</td>
-                                <td><button class="btn btn-secondary btn-small" @onclick="() => ShowDetail(entry.Id)">Ver detalle</button></td>
-                            </tr>
+                            <div class="history-summary-grid">
+                                <div><p class="text-xs text-muted">Fecha</p><p class="fw-700">@summary.Date.ToString("dd/MM/yyyy")</p></div>
+                                <div><p class="text-xs text-muted">Ventas completadas del día</p><p class="fw-700 tnum">@PosFormat.Money(summary.TotalSales) (@summary.SalesCount ventas)</p></div>
+                                <div><p class="text-xs text-muted">Producto más vendido</p><p class="fw-700">@(string.IsNullOrWhiteSpace(summary.TopProduct) ? "Sin datos" : $"{summary.TopProduct} ({summary.TopProductQuantity})")</p></div>
+                                <div><p class="text-xs text-muted">Efectivo inicial / final</p><p class="fw-700 tnum">@PosFormat.Money(summary.InitialCash) / @PosFormat.Money(summary.FinalCash)</p></div>
+                                <div><p class="text-xs text-muted">Diferencia del resumen</p><p class="fw-700 tnum">@SignedMoney(summary.Difference)</p></div>
+                            </div>
                         }
-                    </tbody>
-                </table>
-            </div>
-            <div class="form-actions history-pagination">
-                <button class="btn btn-secondary" @onclick="PreviousPage" disabled="@(historyPage.Page <= 1)">Anterior</button>
-                <span>Página @historyPage.Page de @historyPage.TotalPages · @historyPage.TotalCount sesiones</span>
-                <button class="btn btn-secondary" @onclick="NextPage" disabled="@(historyPage.Page >= historyPage.TotalPages)">Siguiente</button>
+                    }
+                </section>
+
+                <section class="card card--compact stack stack--sm" aria-labelledby="hist-count-title">
+                    <h3 id="hist-count-title" class="card__title">Arqueo</h3>
+                    @if (entry.IsOpen)
+                    {
+                        <p class="text-sm text-secondary">La caja está abierta; el arqueo se registra al cerrarla.</p>
+                    }
+                    else if (detail.Count == null)
+                    {
+                        <p class="text-sm text-secondary">Esta caja se cerró sin arqueo detallado. No hay responsable, denominaciones ni motivo registrados.</p>
+                    }
+                    else
+                    {
+                        var count = detail.Count;
+                        <p class="text-sm text-secondary">Contado por @count.Username (ID @count.UserId) el @count.CountedAt.ToString("dd/MM/yyyy HH:mm")</p>
+                        <CountLinesTable Lines="count.Lines" AriaLabel="Denominaciones del arqueo" />
+                        <div class="tally-row"><span class="text-secondary">Total contado</span><span class="fw-700 tnum">@PosFormat.Money(count.CountedAmount)</span></div>
+                        <div class="tally-row"><span class="text-secondary">Esperado</span><span class="fw-700 tnum">@PosFormat.Money(count.ExpectedAmount)</span></div>
+                        <div class="tally-row"><span class="text-secondary">Diferencia</span><span class="fw-700 tnum">@DifferenceLabel(count.Difference) (@SignedMoney(count.Difference))</span></div>
+                        <p class="text-sm"><strong>Motivo:</strong> @(string.IsNullOrWhiteSpace(count.Reason) ? "Sin motivo (cierre exacto)" : count.Reason)</p>
+                    }
+                </section>
+
+                <PaymentBreakdown Summary="payments" Embedded="true" Title="Cobros registrados por medio de pago" TitleId="hist-pay-title"
+                                  Description="Importes aplicados a las ventas vinculadas a esta caja, incluidas las canceladas: no se revierten los cobros. No son las ventas completadas del día ni el efectivo disponible en caja.">
+                    <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="hist-pay-title">
+                        <table class="data-table data-table--stack">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Medio de pago</th>
+                                    <th scope="col" class="col-num">Importe registrado</th>
+                                    <th scope="col" class="col-num">Devuelto</th>
+                                    <th scope="col" class="col-num">Neto</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in payments.Rows)
+                                {
+                                    <tr @key="row.Method">
+                                        <th scope="row">@PosFormat.PaymentLabel(row.Method)</th>
+                                        <td data-label="Registrado" class="col-num">@CashFormat.Money(row.Amount)</td>
+                                        <td data-label="Devuelto" class="@CashFormat.RefundClass(row.RefundedAmount)">@CashFormat.Money(row.RefundedAmount)</td>
+                                        <td data-label="Neto" class="col-num fw-700">@CashFormat.Money(row.NetAmount)</td>
+                                    </tr>
+                                }
+                                <tr class="payment-total">
+                                    <th scope="row">Total de cobros registrados</th>
+                                    <td data-label="Registrado" class="col-num fw-700">@CashFormat.Money(payments.RegisteredTotal)</td>
+                                    <td data-label="Devuelto" class="@CashFormat.RefundClass(payments.RefundedTotal) fw-700">@CashFormat.Money(payments.RefundedTotal)</td>
+                                    <td data-label="Neto" class="col-num fw-700">@CashFormat.Money(payments.NetTotal)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    @foreach (var warning in payments.Warnings)
+                    {
+                        <div role="alert">
+                            <Banner Variant="warn">@warning.Message Registros afectados: @warning.Count.</Banner>
+                        </div>
+                    }
+                </PaymentBreakdown>
+
+                <section class="stack stack--sm" aria-labelledby="hist-moves-title">
+                    <h3 id="hist-moves-title" class="card__title">Movimientos de efectivo (@detail.Movements.Count)</h3>
+                    @if (detail.Movements.Count == 0)
+                    {
+                        <p class="text-sm text-muted">No hay movimientos registrados en esta caja.</p>
+                    }
+                    else
+                    {
+                        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="hist-moves-title">
+                            <table class="data-table data-table--stack">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">ID / Fecha</th>
+                                        <th scope="col">Tipo</th>
+                                        <th scope="col">Motivo</th>
+                                        <th scope="col">Responsable</th>
+                                        <th scope="col">Venta</th>
+                                        <th scope="col" class="col-num">Monto</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var movement in detail.Movements)
+                                    {
+                                        var outflow = IsOutflow(movement.Type);
+                                        <tr @key="movement.Id">
+                                            <th scope="row">#@movement.Id <span class="text-xs text-muted fw-600">· @movement.Date.ToString("dd/MM/yyyy HH:mm")</span></th>
+                                            <td data-label="Tipo"><Badge Variant="@MovementVariant(movement.Type)" Label="@MovementLabel(movement.Type)" /></td>
+                                            <td data-label="Motivo">@(string.IsNullOrWhiteSpace(movement.Reason) ? "Sin motivo registrado" : movement.Reason)</td>
+                                            <td data-label="Responsable">@(string.IsNullOrWhiteSpace(movement.Username) ? "Sin responsable registrado" : movement.Username) @(movement.UserId.HasValue ? $"(ID {movement.UserId})" : "")</td>
+                                            <td data-label="Venta">@(movement.SaleId?.ToString() ?? "—")</td>
+                                            <td data-label="Monto" class="col-num fw-700 @(outflow ? "text-danger" : "text-ok")">@(outflow ? "−" : "+")@PosFormat.Money(movement.Amount)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
             </div>
         }
-    </div>
-</div>
+    </ChildContent>
+    <Footer>
+        <button value="cancel" class="btn btn--primary">Volver al listado</button>
+    </Footer>
+</ModalDialog>
 
 @code {
     [Parameter] public int? RegisterId { get; set; }
 
     private const int PageSize = 10;
+    private const string ProgrammaticClose = "sync";
+
     private DateTime? filterFrom;
     private DateTime? filterTo;
     private CashHistoryStatusFilter filterStatus = CashHistoryStatusFilter.All;
@@ -261,12 +295,57 @@
     private CashHistoryDetail? detail;
     private string? detailMessage;
 
+    private ModalDialog? detailDialog;
+    private int? dialogShownFor; // Register whose dialog was already requested, so a user close is never undone by a re-render.
+
+    private string DetailTitle => RegisterId.HasValue ? $"Detalle de Caja #{RegisterId}" : "Detalle de caja";
+
+    private string? DetailSubtitle
+    {
+        get
+        {
+            if (detail == null) return null;
+            var entry = detail.Entry;
+            return $"Apertura: {entry.OpenDate:dd/MM/yyyy HH:mm} · "
+                + (entry.CloseDate.HasValue ? $"Cierre: {entry.CloseDate.Value:dd/MM/yyyy HH:mm}" : entry.IsOpen ? "Sesión abierta" : "Sin fecha de cierre registrada");
+        }
+    }
+
     // Runs on first load and on every route change, so each selection rechecks live permissions.
     protected override void OnParametersSet()
     {
         if (!EnsureAdmin()) return;
+        if (!RegisterId.HasValue) dialogShownFor = null;
         if (historyPage == null && historyError == null) LoadHistory();
         LoadDetail();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (detailDialog is null) return;
+        try
+        {
+            if (RegisterId.HasValue && dialogShownFor != RegisterId)
+            {
+                dialogShownFor = RegisterId;
+                await detailDialog.ShowAsync();
+            }
+            else if (!RegisterId.HasValue && detailDialog.IsOpen)
+            {
+                await detailDialog.CloseAsync(ProgrammaticClose);
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            // Circuit already gone; nothing to show or hide.
+        }
+    }
+
+    // Esc, the footer button or the header close button: back to the list route.
+    private Task HandleDetailClosed(string returnValue)
+    {
+        if (returnValue != ProgrammaticClose && RegisterId.HasValue) CloseDetail();
+        return Task.CompletedTask;
     }
 
     private bool EnsureAdmin()
@@ -351,9 +430,7 @@
         Navigation.NavigateTo("/cash/history");
     }
 
-    private static string Money(decimal? amount) => amount.HasValue ? $"${amount.Value}" : "No disponible";
-
-    private static string SignedMoney(decimal amount) => $"{(amount > 0m ? "+" : "")}${amount}";
+    private static string SignedMoney(decimal amount) => CashFormat.SignedMoney(amount);
 
     private static bool IsOutflow(CashMovementType type) =>
         type == CashMovementType.Expense || type == CashMovementType.Withdrawal || type == CashMovementType.Refund;
@@ -361,8 +438,16 @@
     private static string DifferenceLabel(decimal difference) =>
         difference < 0m ? "Faltante" : difference > 0m ? "Sobrante" : "Exacto";
 
-    private static string DifferenceClass(decimal difference) =>
-        difference < 0m ? "negative" : difference > 0m ? "positive" : "exact";
+    private static string DifferenceTextClass(CashHistoryEntry entry) =>
+        entry.IsOpen || !entry.Difference.HasValue || entry.Difference.Value > 0m ? ""
+            : entry.Difference.Value == 0m ? "text-ok" : "text-danger";
+
+    private static string MovementVariant(CashMovementType type) => type switch
+    {
+        CashMovementType.Sale or CashMovementType.Income => "ok",
+        CashMovementType.Refund => "warn",
+        _ => "danger"
+    };
 
     // Automatic sale entries are distinguished from the manual ones recorded on /cash.
     private static string MovementLabel(CashMovementType type) => type switch
@@ -373,23 +458,5 @@
         CashMovementType.Withdrawal => "Retiro manual",
         CashMovementType.Refund => "Devolución",
         _ => "Tipo desconocido"
-    };
-
-    private static string PaymentStateLabel(CashPaymentSummaryState state) => state switch
-    {
-        CashPaymentSummaryState.NoSession => "Sin sesión de caja seleccionada; no hay cobros atribuibles.",
-        CashPaymentSummaryState.Complete => "Resumen completo para esta sesión.",
-        CashPaymentSummaryState.Partial => "Resumen parcial: revisá las advertencias. Solo se incluyen ventas con pagos válidos y vinculadas a esta caja.",
-        _ => "Resumen no disponible; no se muestran importes por desbordamiento decimal."
-    };
-
-    private static string PaymentLabel(PaymentMethod method) => method switch
-    {
-        PaymentMethod.Cash => "Efectivo",
-        PaymentMethod.DebitCard => "Tarjeta de débito",
-        PaymentMethod.CreditCard => "Tarjeta de crédito",
-        PaymentMethod.Transfer => "Transferencia",
-        PaymentMethod.MercadoPago => "Mercado Pago",
-        _ => "Otro"
     };
 }

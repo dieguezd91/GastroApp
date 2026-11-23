@@ -1,0 +1,75 @@
+@* Frame of the payment-method breakdown of one cash session, shared by /cash and /cash/history: heading, scope description,
+   completeness badge and message. The pages render the table and warnings themselves (ChildContent) from the
+   CashPaymentSummary they own. Read-only. Embedded = true renders without the card (inside a dialog). *@
+@using GastroApp.Models
+
+<section class="@(Embedded ? "stack stack--sm" : "card stack")" aria-labelledby="@TitleId">
+    <div class="row-between">
+        <div>
+            @if (Embedded)
+            {
+                <h3 id="@TitleId" class="card__title">@Title</h3>
+            }
+            else
+            {
+                <h2 id="@TitleId" class="card__title">@Title</h2>
+            }
+            <p class="card__desc">@Description</p>
+        </div>
+        <Badge Variant="@StateVariant(Summary.State)" Icon="@StateIcon(Summary.State)" Label="@StateBadge(Summary.State)" />
+    </div>
+    <p class="text-xs text-muted">"Devuelto" son las devoluciones registradas en esta caja (aunque la venta sea de otra caja);
+        "Neto" es lo registrado menos lo devuelto. Los cobros registrados no se modifican.</p>
+    <p class="text-sm text-secondary" role="status">@StateLabel(Summary.State)</p>
+
+    @ChildContent
+</section>
+
+@code {
+    [Parameter, EditorRequired] public CashPaymentSummary Summary { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Id of the heading, so the table region the page renders can be labelled by it.</summary>
+    [Parameter, EditorRequired] public string TitleId { get; set; } = string.Empty;
+
+    /// <summary>What the figures cover (e.g. which sales are included), shown under the heading.</summary>
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+
+    /// <summary>The payments table (rows per method plus totals) and the summary warnings, rendered by the page.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Parameter] public bool Embedded { get; set; }
+
+    private static string StateBadge(CashPaymentSummaryState state) => state switch
+    {
+        CashPaymentSummaryState.Complete => "Registro completo",
+        CashPaymentSummaryState.Partial => "Registro parcial",
+        CashPaymentSummaryState.NoSession => "Sin sesión",
+        _ => "No disponible"
+    };
+
+    private static string StateVariant(CashPaymentSummaryState state) => state switch
+    {
+        CashPaymentSummaryState.Complete => "ok",
+        CashPaymentSummaryState.Partial => "warn",
+        CashPaymentSummaryState.NoSession => "neutral",
+        _ => "danger"
+    };
+
+    private static string StateIcon(CashPaymentSummaryState state) => state switch
+    {
+        CashPaymentSummaryState.Complete => "checkCircle",
+        CashPaymentSummaryState.Partial => "alertTriangle",
+        CashPaymentSummaryState.NoSession => "info",
+        _ => "alertOctagon"
+    };
+
+    private static string StateLabel(CashPaymentSummaryState state) => state switch
+    {
+        CashPaymentSummaryState.NoSession => "Sin sesión de caja seleccionada; no hay cobros atribuibles.",
+        CashPaymentSummaryState.Complete => "Resumen completo para esta sesión.",
+        CashPaymentSummaryState.Partial => "Resumen parcial: revisá las advertencias. Solo se incluyen ventas con pagos válidos y vinculadas a esta caja.",
+        _ => "Resumen no disponible; no se muestran importes por desbordamiento decimal."
+    };
+}

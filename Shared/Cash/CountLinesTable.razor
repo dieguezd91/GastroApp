@@ -1,0 +1,31 @@
+@* Denomination lines of a registered cash count (read-only), shared by /cash and /cash/history. *@
+@using GastroApp.Models
+@using GastroApp.Shared.Pos
+
+<div class="table-wrapper" tabindex="0" role="region" aria-label="@AriaLabel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th scope="col">Denominación</th>
+                <th scope="col" class="col-num">Cantidad</th>
+                <th scope="col" class="col-num">Subtotal</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var line in Lines)
+            {
+                <tr>
+                    <th scope="row">@PosFormat.Money(line.Denomination)</th>
+                    <td class="col-num">@line.Quantity</td>
+                    <td class="col-num fw-700">@PosFormat.Money(line.Subtotal)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<CashCountLine> Lines { get; set; } = Array.Empty<CashCountLine>();
+
+    [Parameter] public string AriaLabel { get; set; } = "Denominaciones contadas";
+}
