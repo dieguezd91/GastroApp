@@ -1,0 +1,144 @@
+@* Cart column (prototype .pos-cart) plus the fixed mobile cart bar. Presentational: every change is raised to
+   the page, which owns the cart rules (quantity/discount validation) so they stay in one place. *@
+@using GastroApp.Models
+
+<aside class="pos-cart" id="pos-cart-panel" aria-label="Carrito de venta actual">
+    <div class="pos-cart__header">
+        <div class="flex-wrap-gap">
+            <Icon Name="cart" Size="18" />
+            <h2 class="card__title">Carrito (@ItemCount)</h2>
+        </div>
+        @if (Sale.Items.Count > 0)
+        {
+            <button type="button" class="btn btn--ghost btn--sm" @onclick="OnClear">Vaciar</button>
+        }
+    </div>
+
+    @if (Sale.Items.Count == 0)
+    {
+        <div class="pos-cart__empty stack stack--sm">
+            <p class="fw-700">El carrito está vacío</p>
+            <p class="text-sm text-muted">Seleccioná productos del catálogo para armar el pedido.</p>
+        </div>
+    }
+    else
+    {
+        <div class="pos-cart__items">
+            @foreach (var item in Sale.Items)
+            {
+                var max = MaxQuantity?.Invoke(item);
+                var atLimit = max.HasValue && item.Quantity >= max.Value;
+                <article class="cart-line" @key="item" aria-label="@item.ProductName">
+                    <div class="cart-line__top">
+                        <div>
+                            <p class="fw-700 text-sm">@item.ProductName</p>
+                            <p class="text-xs text-muted tnum">@PosFormat.Money(item.Price) c/u @LineNote(item, atLimit)</p>
+                            @if (!string.IsNullOrEmpty(item.Notes))
+                            {
+                                <p class="text-xs text-secondary mt-2"><strong>Obs.:</strong> @item.Notes</p>
+                            }
+                        </div>
+                        <p class="fw-700 tnum">@PosFormat.Money(item.Subtotal)</p>
+                    </div>
+
+                    <div class="cart-line__controls">
+                        <div class="qty-stepper" role="group" aria-label="@($"Cantidad de {item.ProductName}")">
+                            <button type="button" class="qty-stepper__btn" aria-label="@($"Restar uno a {item.ProductName}")"
+                                    @onclick="() => OnDecrement.InvokeAsync(item)"><Icon Name="minus" Size="14" /></button>
+                            <input @key="(item.Quantity, QuantityEditVersion)" type="text" inputmode="numeric"
+                                   class="qty-stepper__input" value="@item.Quantity"
+                                   aria-label="@($"Cantidad exacta de {item.ProductName}")"
+                                   @onchange="e => OnQuantityChanged.InvokeAsync((item, e.Value?.ToString()))" />
+                            <button type="button" class="qty-stepper__btn" aria-disabled="@(atLimit ? "true" : null)"
+                                    aria-label="@($"Sumar uno a {item.ProductName}{(atLimit ? " (límite de stock alcanzado)" : "")}")"
+                                    @onclick="() => OnIncrement.InvokeAsync(item)"><Icon Name="plus" Size="14" /></button>
+                        </div>
+
+                        <div class="flex-wrap-gap">
+                            <button type="button" class="btn btn--ghost btn--sm" @onclick="() => OnEditLine.InvokeAsync(item)">
+                                <Icon Name="edit" Size="14" />
+                                <span>@(!string.IsNullOrEmpty(item.Notes) || item.DiscountType != DiscountType.None ? "Editar obs. / desc." : "Obs. / Desc.")</span>
+                            </button>
+                            <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Quitar {item.ProductName} del carrito")"
+                                    @onclick="() => OnRemove.InvokeAsync(item)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                    </div>
+                </article>
+            }
+        </div>
+
+        <div class="pos-cart__summary">
+            <div class="row-between">
+                <span class="text-xs fw-700 text-muted pos-cart__eyebrow">Descuento general de la venta</span>
+                <button type="button" class="btn btn--ghost btn--sm" @onclick="OnEditSaleDiscount">
+                    <Icon Name="tag" Size="14" />
+                    <span>@(Sale.DiscountType == DiscountType.None ? "Aplicar descuento" : "Modificar descuento")</span>
+                </button>
+            </div>
+
+            <div class="stack stack--sm">
+                <div class="summary-row">
+                    <span class="text-secondary">Subtotal tras desc. de línea</span>
+                    <span class="tnum fw-600">@PosFormat.Money(Sale.Subtotal)</span>
+                </div>
+                @if (Sale.DiscountAmount > 0m)
+                {
+                    <div class="summary-row text-ok">
+                        <span>Descuento de venta (@(Sale.DiscountType == DiscountType.Percentage ? $"{PosFormat.InputText(Sale.DiscountValue)}%" : "importe fijo"))</span>
+                        <span class="tnum fw-700">-@PosFormat.Money(Sale.DiscountAmount)</span>
+                    </div>
+                }
+                <div class="summary-row summary-row--total">
+                    <span>Total final</span>
+                    <span class="tnum">@PosFormat.Money(Sale.Total)</span>
+                </div>
+            </div>
+
+            <button type="button" id="pos-checkout-btn" class="btn btn--collect btn--lg btn--block"
+                    @onclick="OnCheckout">
+                <Icon Name="checkCircle" Size="20" />
+                <span>Cobrar @PosFormat.Money(Sale.Total)</span>
+            </button>
+        </div>
+    }
+</aside>
+
+@if (Sale.Items.Count > 0)
+{
+    <div class="pos-mobile-bar" role="region" aria-label="Resumen rápido del carrito">
+        <div>
+            <p class="text-xs pos-mobile-bar__count">@ItemCount ítem(s) en carrito</p>
+            <p class="fw-700 tnum pos-mobile-bar__total">@PosFormat.Money(Sale.Total)</p>
+        </div>
+        <button type="button" class="btn btn--collect" id="pos-mobile-checkout" @onclick="OnCheckout">
+            Cobrar ahora
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Sale Sale { get; set; } = default!;
+
+    /// <summary>Bumped by the page to recreate quantity inputs after a rejected edit (restores the visible value).</summary>
+    [Parameter] public int QuantityEditVersion { get; set; }
+
+    /// <summary>Per-line stock cap (T4 seam): null result = unlimited. At the cap "+" is aria-disabled.</summary>
+    [Parameter] public Func<SaleItem, int?>? MaxQuantity { get; set; }
+
+    [Parameter] public EventCallback<SaleItem> OnIncrement { get; set; }
+    [Parameter] public EventCallback<SaleItem> OnDecrement { get; set; }
+    [Parameter] public EventCallback<(SaleItem Item, string? Value)> OnQuantityChanged { get; set; }
+    [Parameter] public EventCallback<SaleItem> OnRemove { get; set; }
+    [Parameter] public EventCallback<SaleItem> OnEditLine { get; set; }
+    [Parameter] public EventCallback OnEditSaleDiscount { get; set; }
+    [Parameter] public EventCallback OnClear { get; set; }
+    [Parameter] public EventCallback OnCheckout { get; set; }
+
+    private static string LineNote(SaleItem item, bool atLimit)
+    {
+        var note = item.DiscountAmount > 0m ? $"· Desc. -{PosFormat.Money(item.DiscountAmount)}" : string.Empty;
+        return atLimit ? $"{note} · Máximo de stock alcanzado".Trim() : note;
+    }
+
+    private long ItemCount => Sale.Items.Sum(i => (long)i.Quantity);
+}

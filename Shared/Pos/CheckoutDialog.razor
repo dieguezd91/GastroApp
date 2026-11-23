@@ -1,0 +1,380 @@
+@* Checkout dialog (prototype openCheckoutModal): one-click single method, mixed payments with unique methods,
+   quick bills, and live Asignado / Restante / Vuelto. "Confirmar cobro" stays disabled until the payments pass
+   SaleService.ValidatePayments (Restante = $ 0, every amount > 0, Efectivo recibido >= importe en efectivo) and no
+   field holds unreadable text. The service stays the authority: OnConfirm runs the real checkout and returns its
+   error message (insufficient stock, closed register, ...) or null when the sale was registered. *@
+@using GastroApp.Models
+@using GastroApp.Services
+
+<ModalDialog @ref="modal" Title="Cobrar venta" Subtitle="@Subtitle" Size="lg" LightDismiss="false" OnClosed="HandleClosed">
+    <ChildContent>
+    @if (total == 0m)
+    {
+        <div class="stack">
+            @if (!string.IsNullOrEmpty(submitError)) { <Banner Variant="danger" Title="No se pudo confirmar el cobro">@submitError</Banner> }
+            <Banner Variant="info" Title="Total cero: no requiere pagos ni registra un pago.">
+                El descuento cubre el 100% de la operación. Al confirmar se descontará el stock de las recetas asociadas.
+            </Banner>
+        </div>
+    }
+    else
+    {
+        <div class="stack">
+            @if (!string.IsNullOrEmpty(submitError)) { <Banner Variant="danger" Title="No se pudo confirmar el cobro">@submitError</Banner> }
+
+            <div class="stack stack--sm">
+                <p class="text-xs fw-700 text-muted pos-cart__eyebrow" id="checkout-single-label">Atajo de cobro en un solo medio</p>
+                <div class="flex-wrap-gap" role="group" aria-labelledby="checkout-single-label">
+                    @foreach (var method in AllMethods)
+                    {
+                        <button type="button" class="chip" aria-pressed="@(rows.Count == 1 && rows[0].Method == method ? "true" : "false")"
+                                @onclick="() => SetSingle(method)">@PosFormat.PaymentShortLabel(method)</button>
+                    }
+                </div>
+            </div>
+
+            <div class="stack stack--sm">
+                <div class="row-between">
+                    <h3 class="card__title">Medios de pago (@rows.Count)</h3>
+                    @if (AvailableMethods.Any())
+                    {
+                        <button type="button" class="btn btn--sm" @onclick="AddRow"><Icon Name="plus" Size="15" /><span>Agregar pago mixto</span></button>
+                    }
+                </div>
+
+                @foreach (var row in rows)
+                {
+                    var rowKey = row.Key;
+                    <div class="payment-line" @key="rowKey">
+                        <div class="field">
+                            <label class="field__label" for="@($"pay-method-{rowKey}")">Medio de pago</label>
+                            <select id="@($"pay-method-{rowKey}")" class="select select--compact" value="@((int)row.Method)"
+                                    @onchange="e => ChangeMethod(row, e)">
+                                @foreach (var method in AllMethods)
+                                {
+                                    <option value="@((int)method)" disabled="@(method != row.Method && rows.Any(r => r.Method == method))">@PosFormat.PaymentLabel(method)</option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="@($"pay-amt-{rowKey}")">Importe aplicado ($)</label>
+                            <input id="@($"pay-amt-{rowKey}")" type="text" inputmode="decimal" autocomplete="off"
+                                   class="input input--compact tnum" value="@row.AmountText"
+                                   aria-invalid="@(row.InvalidAmount ? "true" : null)"
+                                   aria-describedby="@(row.InvalidAmount ? $"pay-amt-err-{rowKey}" : null)"
+                                   @oninput="e => EditAmount(row, e.Value?.ToString())" />
+                            @if (row.InvalidAmount)
+                            {
+                                <span id="@($"pay-amt-err-{rowKey}")" class="field__error field__error--visible"><Icon Name="alertOctagon" Size="14" /> El importe debe ser un número mayor que cero.</span>
+                            }
+                        </div>
+
+                        <div class="flex-wrap-gap">
+                            @if (Remaining != 0m)
+                            {
+                                <button type="button" class="btn btn--sm" @onclick="() => FillRemaining(row)">Completar (@PosFormat.Money(Math.Max(0m, row.Amount + Remaining)))</button>
+                            }
+                            @if (rows.Count > 1)
+                            {
+                                <button type="button" class="btn btn--ghost btn--sm" aria-label="@($"Quitar {PosFormat.PaymentLabel(row.Method)}")"
+                                        @onclick="() => RemoveRow(row)"><Icon Name="trash" Size="15" /> Quitar</button>
+                            }
+                            else
+                            {
+                                <span class="text-xs text-muted">Pago único</span>
+                            }
+                        </div>
+
+                        @if (row.Method == PaymentMethod.Cash)
+                        {
+                            <div class="payment-line__cash stack stack--sm">
+                                <div class="form-grid">
+                                    <div class="field">
+                                        <label class="field__label" for="@($"pay-received-{rowKey}")">Efectivo recibido (obligatorio) <span class="field__req" aria-hidden="true">*</span></label>
+                                        <input id="@($"pay-received-{rowKey}")" type="text" inputmode="decimal" autocomplete="off"
+                                               class="input input--compact tnum" placeholder="Ej.: 20000" value="@row.ReceivedText"
+                                               aria-invalid="@(row.InvalidReceived ? "true" : null)"
+                                               aria-describedby="@($"pay-change-{rowKey}")"
+                                               @oninput="e => EditReceived(row, e.Value?.ToString())" />
+                                    </div>
+                                    <div class="field">
+                                        <span class="field__label" id="@($"pay-bills-{rowKey}")">Billetes rápidos</span>
+                                        <div class="flex-wrap-gap" role="group" aria-labelledby="@($"pay-bills-{rowKey}")">
+                                            <button type="button" class="btn btn--sm" @onclick="() => SetReceivedExact(row)">Exacto</button>
+                                            @foreach (var bill in QuickBills)
+                                            {
+                                                <button type="button" class="btn btn--sm" @onclick="() => SetReceived(row, bill)">@PosFormat.Money(bill)</button>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="@($"pay-change-{rowKey}")" aria-live="polite">
+                                    @if (row.InvalidReceived)
+                                    {
+                                        <Banner Variant="danger">Ingresá el efectivo recibido: un número igual o mayor que el importe en efectivo.</Banner>
+                                    }
+                                    else if (row.InvalidAmount)
+                                    {
+                                        @* The amount banner/field error explains it; no change to compute yet. *@
+                                    }
+                                    else if (row.Received >= row.Amount)
+                                    {
+                                        <div class="change-box"><span>Vuelto a entregar</span><span class="tnum change-box__amount">@PosFormat.Money(row.Received - row.Amount)</span></div>
+                                    }
+                                    else
+                                    {
+                                        <Banner Variant="danger">Faltan @PosFormat.Money(row.Amount - row.Received) para cubrir el importe en efectivo.</Banner>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="card card--compact card--subtle">
+                <div class="pos-balance">
+                    <div>
+                        <p class="text-xs text-muted fw-700">Asignado</p>
+                        <p class="fw-700 tnum" id="checkout-assigned">@PosFormat.Money(Assigned)</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-muted fw-700">Total venta</p>
+                        <p class="fw-700 tnum">@PosFormat.Money(total)</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-muted fw-700">Restante</p>
+                        <p class="fw-700 tnum @(Remaining == 0m ? "text-ok" : "text-danger")" id="checkout-remaining">@PosFormat.Money(Remaining)</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    </ChildContent>
+    <Footer>
+        @if (!CanConfirm && !string.IsNullOrEmpty(PaymentError))
+        {
+            <p id="checkout-validation" class="text-xs text-danger pos-footer-hint" role="status">@PaymentError</p>
+        }
+        <button class="btn" value="cancel">Volver al carrito</button>
+        <button type="button" id="checkout-confirm-btn" class="btn btn--collect btn--lg" disabled="@(!CanConfirm)"
+                aria-describedby="@(!CanConfirm && !string.IsNullOrEmpty(PaymentError) ? "checkout-validation" : null)"
+                @onclick="Confirm">
+            <Icon Name="checkCircle" Size="18" />
+            <span>Confirmar cobro · @PosFormat.Money(total)</span>
+        </button>
+    </Footer>
+</ModalDialog>
+
+@code {
+    private sealed class PaymentRow
+    {
+        public int Key { get; init; }
+        public PaymentMethod Method { get; set; }
+        public decimal Amount { get; set; }
+        public string AmountText { get; set; } = string.Empty;
+        public bool InvalidAmount { get; set; }
+        public decimal Received { get; set; }
+        public string ReceivedText { get; set; } = string.Empty;
+        public bool InvalidReceived { get; set; }
+        // Efectivo recibido mirrors the amount until the user types a figure of their own.
+        public bool ReceivedFollowsAmount { get; set; }
+    }
+
+    private static readonly PaymentMethod[] AllMethods = Enum.GetValues<PaymentMethod>();
+    private static readonly decimal[] QuickBills = { 10000m, 20000m, 50000m };
+
+    private ModalDialog modal = default!;
+    private readonly List<PaymentRow> rows = new();
+    private decimal total;
+    private long itemCount;
+    private int nextKey;
+    private string submitError = string.Empty;
+
+    /// <summary>Runs the checkout for the accepted payments; returns the service error message, or null on success.</summary>
+    [Parameter, EditorRequired] public Func<List<SalePayment>, string?> OnConfirm { get; set; } = default!;
+
+    /// <summary>Raised after the dialog closed with "confirmed" (sale registered) or "cancel".</summary>
+    [Parameter] public EventCallback<string> OnClosed { get; set; }
+
+    private string Subtitle => $"{itemCount} ítem(s) · Total final {PosFormat.Money(total)}";
+
+    private IEnumerable<PaymentMethod> AvailableMethods => AllMethods.Where(m => rows.All(r => r.Method != m));
+
+    private decimal Assigned
+    {
+        get
+        {
+            try { return rows.Aggregate(0m, (sum, row) => checked(sum + row.Amount)); }
+            catch (OverflowException) { return decimal.MaxValue; }
+        }
+    }
+
+    private decimal Remaining => total - Assigned;
+
+    private bool HasInvalidInput => rows.Any(r => r.InvalidAmount || r.InvalidReceived);
+
+    private List<SalePayment> CurrentPayments() => total == 0m ? new() : rows.Select(r => new SalePayment
+    {
+        PaymentMethod = r.Method,
+        Amount = r.Amount,
+        ReceivedAmount = r.Method == PaymentMethod.Cash ? r.Received : null
+    }).ToList();
+
+    private string PaymentError => total == 0m ? string.Empty
+        : HasInvalidInput ? "Corregí los importes y el efectivo recibido antes de cobrar."
+        : SaleService.ValidatePayments(CurrentPayments(), total).ErrorMessage;
+
+    private bool CanConfirm => PaymentError == string.Empty
+        && SaleService.ValidatePayments(CurrentPayments(), total).IsValid;
+
+    public Task ShowAsync(Sale sale)
+    {
+        total = sale.Total;
+        itemCount = sale.Items.Sum(i => (long)i.Quantity);
+        submitError = string.Empty;
+        rows.Clear();
+        if (total > 0m)
+            rows.Add(NewRow(PaymentMethod.Cash, total));
+        return modal.ShowAsync();
+    }
+
+    private PaymentRow NewRow(PaymentMethod method, decimal amount)
+    {
+        var row = new PaymentRow { Key = ++nextKey };
+        SetMethod(row, method, amount);
+        return row;
+    }
+
+    private static void SetAmount(PaymentRow row, decimal amount)
+    {
+        row.Amount = amount;
+        row.AmountText = PosFormat.InputText(amount);
+        row.InvalidAmount = amount <= 0m;
+        SyncReceived(row);
+    }
+
+    private static void SetMethod(PaymentRow row, PaymentMethod method, decimal amount)
+    {
+        row.Method = method;
+        row.Received = 0m;
+        row.ReceivedText = string.Empty;
+        row.InvalidReceived = false;
+        row.ReceivedFollowsAmount = method == PaymentMethod.Cash;
+        SetAmount(row, amount);
+    }
+
+    // Keeps "Exacto" in step with the amount; a figure typed by the user is never overwritten.
+    private static void SyncReceived(PaymentRow row)
+    {
+        if (row.Method != PaymentMethod.Cash || !row.ReceivedFollowsAmount) return;
+        row.Received = row.Amount;
+        row.ReceivedText = PosFormat.InputText(row.Amount);
+        row.InvalidReceived = false;
+    }
+
+    private void SetSingle(PaymentMethod method)
+    {
+        rows.Clear();
+        rows.Add(NewRow(method, total));
+        submitError = string.Empty;
+    }
+
+    private void AddRow()
+    {
+        var method = AvailableMethods.FirstOrDefault();
+        if (rows.Any(r => r.Method == method)) return;
+
+        var amount = Remaining;
+        if (amount <= 0m)
+        {
+            if (rows.Count == 1)
+            {
+                // A single settled row is split in two so both stay positive.
+                amount = Math.Round(total / 2m, 2, MidpointRounding.AwayFromZero);
+                SetAmount(rows[0], total - amount);
+            }
+            else
+            {
+                amount = 0m;
+            }
+        }
+        rows.Add(NewRow(method, amount));
+        submitError = string.Empty;
+    }
+
+    private void RemoveRow(PaymentRow row)
+    {
+        if (rows.Count > 1) rows.Remove(row);
+        submitError = string.Empty;
+    }
+
+    private void ChangeMethod(PaymentRow row, ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var value) || !Enum.IsDefined(typeof(PaymentMethod), value)) return;
+        var method = (PaymentMethod)value;
+        if (rows.Any(r => r != row && r.Method == method)) return;
+        SetMethod(row, method, row.Amount);
+        submitError = string.Empty;
+    }
+
+    private void EditAmount(PaymentRow row, string? text)
+    {
+        row.AmountText = text ?? string.Empty;
+        var readable = PosFormat.TryParseDecimal(row.AmountText, out var amount);
+        row.InvalidAmount = !readable || amount <= 0m;
+        if (readable)
+            row.Amount = amount;
+        if (row.Method == PaymentMethod.Cash && row.ReceivedFollowsAmount)
+            SyncReceived(row);
+        submitError = string.Empty;
+    }
+
+    private void EditReceived(PaymentRow row, string? text)
+    {
+        row.ReceivedFollowsAmount = false;
+        row.ReceivedText = text ?? string.Empty;
+        // A short figure is not "unreadable": the Faltan banner explains it and ValidatePayments blocks it.
+        row.InvalidReceived = !PosFormat.TryParseDecimal(row.ReceivedText, out var received);
+        if (!row.InvalidReceived)
+            row.Received = received;
+        submitError = string.Empty;
+    }
+
+    private void FillRemaining(PaymentRow row)
+    {
+        SetAmount(row, Math.Max(0m, row.Amount + Remaining));
+        submitError = string.Empty;
+    }
+
+    private void SetReceivedExact(PaymentRow row)
+    {
+        row.ReceivedFollowsAmount = true;
+        SyncReceived(row);
+        submitError = string.Empty;
+    }
+
+    private void SetReceived(PaymentRow row, decimal value)
+    {
+        row.ReceivedFollowsAmount = false;
+        row.Received = value;
+        row.ReceivedText = PosFormat.InputText(value);
+        row.InvalidReceived = false;
+        submitError = string.Empty;
+    }
+
+    private async Task Confirm()
+    {
+        if (!CanConfirm) return;
+        var message = OnConfirm(CurrentPayments());
+        if (message is not null)
+        {
+            submitError = message;
+            return;
+        }
+        await modal.CloseAsync("confirmed");
+    }
+
+    private Task HandleClosed(string returnValue) => OnClosed.InvokeAsync(returnValue);
+}

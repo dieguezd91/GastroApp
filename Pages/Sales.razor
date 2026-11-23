@@ -1,7 +1,7 @@
 @page "/sales"
 @using GastroApp.Models
 @using GastroApp.Services
-@using System.Globalization
+@using GastroApp.Shared.Pos
 @inject ProductService ProductService
 @inject ProductCategoryService CategoryService
 @inject SaleService SaleService
@@ -11,286 +11,158 @@
 
 <PageTitle>Vender</PageTitle>
 
-<div class="page-container">
-    <h1>💰 Punto de Venta</h1>
+@{
+    var register = CashService.GetCurrent();
+    var registerOpen = CashService.IsOpen();
+}
 
-    @if (!CashService.IsOpen())
-    {
-        <div class="alert alert-warning">
-            <p>⚠️ La caja está cerrada. Abrí la caja para empezar a vender.</p>
-            <button class="btn btn-primary" @onclick="GoToCash">Ir a Caja</button>
+<div class="page-header pos-header">
+    <div>
+        <div class="page-header__title-row">
+            <h1>Punto de Venta</h1>
+            @if (registerOpen)
+            {
+                <Badge Variant="ok" Icon="checkCircle" Label="@($"Caja abierta · Sesión #{register?.Id}")" />
+            }
+            else
+            {
+                <Badge Variant="danger" Icon="alertOctagon" Label="Caja cerrada" />
+            }
         </div>
-    }
-    else
-    {
-        <div class="sales-layout">
-            <div>
-                <h3>Productos</h3>
-                <div class="form-group">
-                    <label for="sales-category">Filtrar por categoría</label>
-                    <select id="sales-category" class="form-control" @bind="categoryFilter">
-                        <option value="">Todos</option>
-                        @foreach (var category in categories)
-                        {
-                            <option value="@category.Id">@category.Name</option>
-                        }
-                        @if (products.Any(p => !p.CategoryId.HasValue))
-                        {
-                            <option value="uncategorized">Sin categoría</option>
-                        }
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="sales-search">Buscar por nombre</label>
-                    <input id="sales-search" type="search" class="form-control"
-                           placeholder="Buscar productos..." @bind="nameSearch" @bind:event="oninput" />
-                </div>
-                <div class="products-grid">
-                    @foreach (var product in FilteredProducts)
-                    {
-                        <button class="product-button" @onclick="() => AddToCart(product)">
-                            <div class="product-name">@product.Name</div>
-                            <div class="product-price">$@product.Price</div>
-                        </button>
-                    }
-                </div>
-                @if (!FilteredProducts.Any())
-                {
-                    <p class="empty-state">No hay productos para mostrar con este filtro.</p>
-                }
-            </div>
-
-            <div class="cart-panel">
-                <h3>Carrito</h3>
-
-                @if (!string.IsNullOrEmpty(stockError))
-                {
-                    <div class="alert alert-danger" role="alert">
-                        <strong>⚠️ No se pudo completar la venta</strong>
-                        <p>@stockError</p>
-                    </div>
-                }
-
-                @if (!string.IsNullOrEmpty(quantityError))
-                {
-                    <div class="alert alert-danger" role="alert">@quantityError</div>
-                }
-
-                <div id="sales-discount-error" role="alert" aria-live="assertive">
-                    @if (!string.IsNullOrEmpty(discountError))
-                    {
-                        <div class="alert alert-danger">@discountError</div>
-                    }
-                </div>
-
-                @if (currentSale.Items.Any())
-                {
-                    <div class="cart-items">
-                        @foreach (var item in currentSale.Items)
-                        {
-                            <div class="cart-item d-flex flex-wrap align-items-start gap-2" @key="item">
-                                <div class="item-info" style="flex: 1 1 12rem; min-width: 0;">
-                                    <strong>@item.ProductName</strong>
-                                    <div class="d-flex align-items-center gap-1 flex-wrap">
-                                        <button type="button" class="btn btn-secondary btn-sm"
-                                                aria-label="@($"Disminuir cantidad de {item.ProductName}")"
-                                                @onclick="() => DecrementQuantity(item)">−</button>
-                                        <input @key="(item.Quantity, quantityEditVersion)" type="text" inputmode="numeric"
-                                               class="form-control" style="width: 5rem;"
-                                               aria-label="@($"Cantidad de {item.ProductName}")"
-                                               value="@item.Quantity" @onchange="e => EditQuantity(item, e)" />
-                                        <button type="button" class="btn btn-secondary btn-sm"
-                                                aria-label="@($"Aumentar cantidad de {item.ProductName}")"
-                                                @onclick="() => IncrementQuantity(item)">+</button>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="@($"sale-item-notes-{item.ProductId}")">Observación (opcional)</label>
-                                        <input id="@($"sale-item-notes-{item.ProductId}")" type="text" class="form-control"
-                                               aria-describedby="@($"sale-item-notes-help-{item.ProductId}")"
-                                               @bind:get="item.Notes" @bind:set="value => EditNotes(item, value)" />
-                                        <small id="@($"sale-item-notes-help-{item.ProductId}")">Aplica a toda la cantidad de esta línea.</small>
-                                    </div>
-                                    <div @key="discountEditVersion">
-                                        <div class="form-group">
-                                            <label for="@($"sale-item-discount-type-{item.ProductId}")">Descuento de línea</label>
-                                            <select id="@($"sale-item-discount-type-{item.ProductId}")" class="form-control"
-                                                    aria-describedby="sales-discount-help sales-discount-error"
-                                                    value="@((int)item.DiscountType)" @onchange="e => EditDiscountType(item, e)">
-                                                <option value="0">Sin descuento</option>
-                                                <option value="1">Porcentaje (%)</option>
-                                                <option value="2">Importe fijo ($ por línea)</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="@($"sale-item-discount-value-{item.ProductId}")">Valor del descuento de línea (@(item.DiscountType == DiscountType.Percentage ? "%" : "$"))</label>
-                                            <input id="@($"sale-item-discount-value-{item.ProductId}")" type="text" inputmode="decimal"
-                                                   class="form-control" disabled="@(item.DiscountType == DiscountType.None)"
-                                                   aria-describedby="sales-discount-help sales-discount-error"
-                                                   value="@item.DiscountValue" @onchange="e => EditDiscountValue(item, e)" />
-                                        </div>
-                                    </div>
-                                    <div class="item-price">
-                                        <div>Bruto de línea: $@item.GrossSubtotal</div>
-                                        <div>Descuento de línea: $@item.DiscountAmount</div>
-                                        <strong>Subtotal final de línea: $@item.Subtotal</strong>
-                                    </div>
-                                </div>
-                                <button class="btn-remove" aria-label="@($"Quitar {item.ProductName}")"
-                                        @onclick="() => RemoveFromCart(item)">❌</button>
-                            </div>
-                        }
-                    </div>
-
-                    <p id="sales-discount-help">
-                        El importe fijo de línea se descuenta una vez, no por unidad. El descuento de venta se aplica después de los de línea.
-                        Usá «@CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator» como separador decimal, sin separador de miles.
-                        Cambiar el tipo reinicia el valor a cero.
-                    </p>
-                    <div @key="discountEditVersion">
-                        <div class="form-group">
-                            <label for="sale-discount-type">Descuento de toda la venta</label>
-                            <select id="sale-discount-type" class="form-control"
-                                    aria-describedby="sales-discount-help sales-discount-error"
-                                    value="@((int)currentSale.DiscountType)" @onchange="e => EditDiscountType(null, e)">
-                                <option value="0">Sin descuento</option>
-                                <option value="1">Porcentaje (%)</option>
-                                <option value="2">Importe fijo ($)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="sale-discount-value">Valor del descuento de venta (@(currentSale.DiscountType == DiscountType.Percentage ? "%" : "$"))</label>
-                            <input id="sale-discount-value" type="text" inputmode="decimal" class="form-control"
-                                   disabled="@(currentSale.DiscountType == DiscountType.None)"
-                                   aria-describedby="sales-discount-help sales-discount-error"
-                                   value="@currentSale.DiscountValue" @onchange="e => EditDiscountValue(null, e)" />
-                        </div>
-                    </div>
-                    <div class="cart-total">
-                        <div>Subtotal tras descuentos de línea: $@currentSale.Subtotal</div>
-                        <div>Descuento de venta: $@currentSale.DiscountAmount</div>
-                        <h2>Total final: $@currentSale.Total</h2>
-                        @if (currentSale.Total > 0m)
-                        {
-                            <p id="sale-payment-help">Distribuí el total entre medios distintos. Usá «@CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator» como separador decimal, sin separador de miles.</p>
-                            @foreach (var allocation in allocations)
-                            {
-                                <div class="form-group" @key="allocation">
-                                    <label for="@($"sale-payment-amount-{allocation.Method}")">@PaymentMethodLabel(allocation.Method): importe aplicado</label>
-                                    <input id="@($"sale-payment-amount-{allocation.Method}")" type="text" inputmode="decimal" class="form-control"
-                                           value="@allocation.AmountInput" @oninput="e => EditPaymentAmount(allocation, e)"
-                                           aria-describedby="sale-payment-help sale-payment-error" />
-                                    @if (allocation.Method == PaymentMethod.Cash)
-                                    {
-                                        <label for="sale-cash-received">Efectivo recibido (obligatorio)</label>
-                                        <input id="sale-cash-received" type="text" inputmode="decimal" class="form-control"
-                                               value="@allocation.TenderInput" @oninput="e => EditCashReceived(allocation, e)"
-                                               aria-describedby="sale-payment-help sale-payment-error" />
-                                        @if (!allocation.InvalidTender && allocation.ReceivedAmount >= allocation.Amount)
-                                        {
-                                            <div>Vuelto: $@(allocation.ReceivedAmount.Value - allocation.Amount)</div>
-                                        }
-                                    }
-                                    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => RemovePayment(allocation)">
-                                        Quitar @PaymentMethodLabel(allocation.Method)
-                                    </button>
-                                </div>
-                            }
-                            @if (AvailableMethods.Any())
-                            {
-                                <div class="form-group">
-                                    <label for="sale-payment-method">Agregar medio de pago</label>
-                                    <select id="sale-payment-method" class="form-control" @bind="addPaymentMethod">
-                                        @foreach (var method in AvailableMethods)
-                                        {
-                                            <option value="@method">@PaymentMethodLabel(method)</option>
-                                        }
-                                    </select>
-                                    <button type="button" class="btn btn-secondary" disabled="@(Remaining <= 0m)" @onclick="AddPayment">Agregar pago</button>
-                                </div>
-                            }
-                            <div>Asignado: $@Assigned / Total: $@currentSale.Total / Restante: $@Remaining</div>
-                            <div id="sale-payment-error" role="alert" aria-live="polite" class="text-danger">@PaymentError</div>
-                        }
-                        else
-                        {
-                            <div>Total cero: no requiere pagos ni registra un pago.</div>
-                        }
-                    </div>
-
-                    <button class="btn btn-success btn-large" disabled="@(!CanCheckout)" @onclick="CompleteSale">
-                        ✅ Cobrar
-                    </button>
-                    <button class="btn btn-secondary" @onclick="ClearCart">Limpiar</button>
-                }
-                else
-                {
-                    <p class="empty-cart">Carrito vacío</p>
-                }
-            </div>
-        </div>
-    }
+        <p class="page-header__subtitle">Tocá o hacé clic en los productos para sumarlos al pedido. El stock de recetas se valida al confirmar el cobro.</p>
+    </div>
 </div>
 
+@if (!registerOpen)
+{
+    <Banner Variant="danger" Title="La caja está cerrada. Abrí la caja para empezar a vender.">
+        <Actions>
+            <button type="button" class="btn btn--primary btn--sm" @onclick="GoToCash">Ir a Caja</button>
+        </Actions>
+    </Banner>
+}
+else
+{
+    if (!string.IsNullOrEmpty(stockError))
+    {
+        <div class="mb-4">
+            <Banner Variant="danger" Title="No se pudo completar la venta">@stockError</Banner>
+        </div>
+    }
+
+    var activeProducts = products.Where(p => p.IsActive).ToList();
+    var filtered = FilteredProducts.ToList();
+
+    <div class="pos-layout">
+        <section class="stack" aria-label="Catálogo de productos">
+            <search class="card card--compact stack stack--sm">
+                <div class="toolbar">
+                    <div class="search-wrap">
+                        <span class="search-wrap__icon"><Icon Name="search" Size="18" /></span>
+                        <label for="pos-search" class="visually-hidden">Buscar producto por nombre</label>
+                        <input id="pos-search" type="search" class="input" autocomplete="off" autocorrect="off" spellcheck="false"
+                               placeholder="Buscar por nombre (ej.: café, hamburguesa, limonada…)"
+                               @bind="nameSearch" @bind:event="oninput" />
+                    </div>
+                    @if (nameSearch.Length > 0)
+                    {
+                        <button type="button" class="btn btn--sm" @onclick="ClearSearch">Limpiar</button>
+                    }
+                </div>
+
+                <div class="chip-row" role="group" aria-label="Filtrar por categoría">
+                    <button type="button" class="chip" aria-pressed="@(categoryFilter == string.Empty ? "true" : "false")"
+                            @onclick="@(() => categoryFilter = string.Empty)">Todos (@activeProducts.Count)</button>
+                    @foreach (var category in categories)
+                    {
+                        var id = category.Id.ToString();
+                        <button type="button" class="chip" aria-pressed="@(categoryFilter == id ? "true" : "false")"
+                                @onclick="@(() => categoryFilter = id)">@category.Name (@activeProducts.Count(p => p.CategoryId == category.Id))</button>
+                    }
+                    @if (activeProducts.Any(p => !p.CategoryId.HasValue))
+                    {
+                        <button type="button" class="chip" aria-pressed="@(categoryFilter == UncategorizedFilter ? "true" : "false")"
+                                @onclick="@(() => categoryFilter = UncategorizedFilter)">Sin categoría</button>
+                    }
+                </div>
+            </search>
+
+            @if (filtered.Count == 0)
+            {
+                <div class="empty-state">
+                    <div class="empty-state__icon"><Icon Name="products" Size="24" /></div>
+                    <div class="stack stack--sm">
+                        <h3>@(activeProducts.Count == 0 ? "No hay productos activos" : "Sin coincidencias en el catálogo")</h3>
+                        <p class="text-sm text-secondary">
+                            @(activeProducts.Count == 0
+                                ? "Activá o creá productos en el módulo de Catálogo para comenzar a vender."
+                                : "Probá limpiando la búsqueda o eligiendo otra categoría.")
+                        </p>
+                    </div>
+                    @if (activeProducts.Count > 0)
+                    {
+                        <button type="button" class="btn" @onclick="ResetFilters">Mostrar todos los productos</button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="pos-catalog-grid" role="list">
+                    @foreach (var product in filtered)
+                    {
+                        <div role="listitem" @key="product.Id">
+                            <ProductTile Product="product" CategoryName="@CategoryNameOf(product)"
+                                         InCartQuantity="@QuantityInCart(product.Id)"
+                                         Availability="@AvailabilityOf(product)"
+                                         OnAdd="AddToCart" OnBlocked="ShowBlockedReason" />
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <CartPanel Sale="currentSale" QuantityEditVersion="quantityEditVersion" MaxQuantity="MaxQuantityOf"
+                   OnIncrement="IncrementQuantity" OnDecrement="DecrementQuantity"
+                   OnQuantityChanged="EditQuantity" OnRemove="RemoveFromCart"
+                   OnEditLine="OpenLineOptions" OnEditSaleDiscount="OpenSaleDiscount"
+                   OnClear="ClearCartWithNotice" OnCheckout="OpenCheckout" />
+    </div>
+
+    <LineOptionsDialog @ref="lineDialog" Apply="ApplyLineOptions" />
+    <SaleDiscountDialog @ref="discountDialog" Apply="ApplySaleDiscount" />
+    <CheckoutDialog @ref="checkoutDialog" OnConfirm="CompleteSale" />
+}
+
+<Toast @ref="toast" />
+
 @code {
+    private const string UncategorizedFilter = "uncategorized";
+    private const string RejectedSuffix = " Se mantuvo el carrito anterior.";
+
     private List<Product> products = new();
     private List<ProductCategory> categories = new();
     private string categoryFilter = string.Empty;
     private string nameSearch = string.Empty;
     private Sale currentSale = new();
-    private readonly List<PaymentAllocation> allocations = new();
-    private PaymentMethod addPaymentMethod = PaymentMethod.Cash;
-
-    private sealed class PaymentAllocation
-    {
-        public PaymentMethod Method { get; init; }
-        public decimal Amount { get; set; }
-        public string AmountInput { get; set; } = string.Empty;
-        public bool InvalidAmount { get; set; }
-        public decimal? ReceivedAmount { get; set; }
-        public string TenderInput { get; set; } = string.Empty;
-        public bool InvalidTender { get; set; }
-    }
-
-    private IEnumerable<PaymentMethod> AvailableMethods => Enum.GetValues<PaymentMethod>()
-        .Where(method => allocations.All(a => a.Method != method));
-
-    private decimal Assigned
-    {
-        get
-        {
-            try { return allocations.Aggregate(0m, (sum, a) => checked(sum + a.Amount)); }
-            catch (OverflowException) { return decimal.MaxValue; }
-        }
-    }
-
-    private decimal Remaining => currentSale.Total - Assigned;
-    private bool HasInvalidInput => allocations.Any(a => a.InvalidAmount || a.InvalidTender);
-    private List<SalePayment> CurrentPayments() => currentSale.Total == 0m ? new() : allocations.Select(a => new SalePayment
-    {
-        PaymentMethod = a.Method,
-        Amount = a.Amount,
-        ReceivedAmount = a.Method == PaymentMethod.Cash ? a.ReceivedAmount : null
-    }).ToList();
-
-    private string PaymentError => currentSale.Total == 0m ? string.Empty
-        : HasInvalidInput ? "Corregí los importes y el efectivo recibido antes de cobrar."
-        : GastroApp.Services.SaleService.ValidatePayments(CurrentPayments(), currentSale.Total).ErrorMessage;
-    private bool CanCheckout => currentSale.Items.Count > 0 && PaymentError == string.Empty
-        && GastroApp.Services.SaleService.ValidatePayments(CurrentPayments(), currentSale.Total).IsValid;
     private string stockError = string.Empty;
-    private string quantityError = string.Empty;
     private int quantityEditVersion;
-    private string discountError = string.Empty;
-    private int discountEditVersion;
+
+    private Toast toast = default!;
+    private LineOptionsDialog lineDialog = default!;
+    private SaleDiscountDialog discountDialog = default!;
+    private CheckoutDialog checkoutDialog = default!;
+
+    // Seam for the receipt (S10, T5): the sale exactly as SaleService stored it (Id, date, payments, change).
+    private Sale? lastCompletedSale;
 
     // Los filtros sólo proyectan el catálogo; no modifican productos ni el carrito.
     private IEnumerable<Product> FilteredProducts => products.Where(p =>
         p.IsActive
         && (categoryFilter == string.Empty
-            || (categoryFilter == "uncategorized" ? !p.CategoryId.HasValue : p.CategoryId?.ToString() == categoryFilter))
+            || (categoryFilter == UncategorizedFilter ? !p.CategoryId.HasValue : p.CategoryId?.ToString() == categoryFilter))
         && p.Name.Contains(nameSearch.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         if (!AuthService.IsAuthenticated)
         {
@@ -300,8 +172,30 @@
 
         products = ProductService.GetAll();
         categories = CategoryService.GetAll();
-        await Task.CompletedTask;
     }
+
+    // Seam for stock availability (S8, T4): today every product is available and the atomic checkout
+    // validation is the only stock check. T4 returns blocked tiles (with the missing ingredient) from here.
+    private TileAvailability AvailabilityOf(Product product) => TileAvailability.Available;
+
+    // Seam for stock availability (S8, T4): maximum units of the line's product the cart may hold; null = no cap.
+    private int? MaxQuantityOf(SaleItem item) => null;
+
+    private string CategoryNameOf(Product product) =>
+        categories.FirstOrDefault(c => c.Id == product.CategoryId)?.Name ?? "Sin categoría";
+
+    private int QuantityInCart(int productId) =>
+        (int)Math.Min(int.MaxValue, currentSale.Items.Where(i => i.ProductId == productId).Sum(i => (long)i.Quantity));
+
+    private void ClearSearch() => nameSearch = string.Empty;
+
+    private void ResetFilters()
+    {
+        nameSearch = string.Empty;
+        categoryFilter = string.Empty;
+    }
+
+    private void ShowBlockedReason(string reason) => toast.Show(reason, "warn");
 
     private void AddToCart(Product product)
     {
@@ -316,8 +210,6 @@
         else
         {
             stockError = string.Empty;
-            quantityError = string.Empty;
-            discountError = string.Empty;
             currentSale.Items.Add(new SaleItem
             {
                 ProductId = product.Id,
@@ -325,7 +217,6 @@
                 Price = product.Price,
                 Quantity = 1
             });
-            RefreshPaymentsForTotal();
         }
     }
 
@@ -334,18 +225,11 @@
         if (!currentSale.Items.Contains(item)) return;
         if (item.Quantity == int.MaxValue)
         {
-            quantityError = "La cantidad no puede superar el máximo permitido.";
+            RejectQuantityEdit("La cantidad no puede superar el máximo permitido.");
             return;
         }
 
-        var candidate = CopyLine(item);
-        candidate.Quantity++;
-        if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
-
-        item.Quantity++;
-        RefreshPaymentsForTotal();
-        stockError = string.Empty;
-        quantityError = string.Empty;
+        ApplyQuantity(item, item.Quantity + 1);
     }
 
     private void DecrementQuantity(SaleItem item)
@@ -357,35 +241,41 @@
             return;
         }
 
-        var candidate = CopyLine(item);
-        candidate.Quantity--;
-        if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
-
-        item.Quantity--;
-        RefreshPaymentsForTotal();
-        stockError = string.Empty;
-        quantityError = string.Empty;
+        ApplyQuantity(item, item.Quantity - 1);
     }
 
-    private void EditQuantity(SaleItem item, ChangeEventArgs e)
+    private void EditQuantity((SaleItem Item, string? Value) change)
     {
-        if (!currentSale.Items.Contains(item)) return;
-        if (!int.TryParse(e.Value?.ToString(), out var quantity) || quantity <= 0)
+        if (!currentSale.Items.Contains(change.Item)) return;
+        if (!int.TryParse(change.Value, out var quantity) || quantity <= 0)
         {
-            quantityError = "La cantidad debe ser un entero positivo. Se mantuvo la cantidad anterior.";
-            // Recrear el editor restaura el valor visible aunque el modelo no haya cambiado.
-            quantityEditVersion++;
+            RejectQuantityEdit("La cantidad debe ser un entero positivo. Se mantuvo la cantidad anterior.");
             return;
         }
 
+        ApplyQuantity(change.Item, quantity);
+    }
+
+    private void ApplyQuantity(SaleItem item, int quantity)
+    {
         var candidate = CopyLine(item);
         candidate.Quantity = quantity;
-        if (!CanApplyCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue)) return;
+        var error = ValidateCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue);
+        if (error is not null)
+        {
+            RejectQuantityEdit(error + RejectedSuffix);
+            return;
+        }
 
         item.Quantity = quantity;
-        RefreshPaymentsForTotal();
         stockError = string.Empty;
-        quantityError = string.Empty;
+    }
+
+    // Un rechazo recrea los editores de cantidad para restaurar el valor visible del modelo.
+    private void RejectQuantityEdit(string message)
+    {
+        quantityEditVersion++;
+        toast.Show(message, "warn");
     }
 
     private static SaleItem CopyLine(SaleItem item) => new()
@@ -399,208 +289,76 @@
         DiscountValue = item.DiscountValue
     };
 
-    private void RejectDiscountEdit(string message)
-    {
-        discountError = $"{message} Se mantuvo el carrito anterior.";
-        // Recrear sólo los editores restaura entradas rechazadas sin tocar notas ni filtros.
-        discountEditVersion++;
-        quantityEditVersion++;
-    }
-
-    private bool CanApplyCartChange(SaleItem? original, SaleItem? candidate,
-        DiscountType saleType, decimal saleValue)
+    // Valida el carrito candidato sin mutarlo; devuelve el mensaje de error o null.
+    private string? ValidateCartChange(SaleItem? original, SaleItem? candidate, DiscountType saleType, decimal saleValue)
     {
         if (candidate != null)
         {
-            var lineValidation = GastroApp.Services.SaleService.ValidateDiscount(candidate.DiscountType,
+            var max = MaxQuantityOf(candidate);
+            if (max.HasValue && candidate.Quantity > max.Value)
+                return $"No hay stock suficiente para {candidate.ProductName}.";
+
+            var lineValidation = SaleService.ValidateDiscount(candidate.DiscountType,
                 candidate.DiscountValue, candidate.GrossSubtotal, $"El descuento de {candidate.ProductName}");
             if (!lineValidation.IsValid)
-            {
-                RejectDiscountEdit(lineValidation.ErrorMessage);
-                return false;
-            }
+                return lineValidation.ErrorMessage;
         }
 
         // La base candidata usa los importes del modelo; no se cambia el carrito para validarla.
         var subtotal = currentSale.Items.Sum(i => i == original ? candidate?.Subtotal ?? 0m : i.Subtotal);
-        var saleValidation = GastroApp.Services.SaleService.ValidateDiscount(saleType, saleValue,
-            subtotal, "El descuento de la venta");
-        if (!saleValidation.IsValid)
-        {
-            RejectDiscountEdit(saleValidation.ErrorMessage);
-            return false;
-        }
-
-        discountError = string.Empty;
-        return true;
+        var saleValidation = SaleService.ValidateDiscount(saleType, saleValue, subtotal, "El descuento de la venta");
+        return saleValidation.IsValid ? null : saleValidation.ErrorMessage;
     }
 
-    private void EditDiscountType(SaleItem? item, ChangeEventArgs e)
+    private string? ApplyLineOptions(SaleItem item, string? notes, DiscountType type, decimal value)
     {
-        if (item != null && !currentSale.Items.Contains(item)) return;
-        if (!int.TryParse(e.Value?.ToString(), out var type))
-        {
-            RejectDiscountEdit("El tipo de descuento es inválido.");
-            return;
-        }
+        if (!currentSale.Items.Contains(item)) return "La línea ya no está en el carrito.";
 
-        ApplyDiscountEdit(item, (DiscountType)type, 0m);
-    }
+        var candidate = CopyLine(item);
+        candidate.DiscountType = type;
+        candidate.DiscountValue = value;
+        var error = ValidateCartChange(item, candidate, currentSale.DiscountType, currentSale.DiscountValue);
+        if (error is not null) return error + RejectedSuffix;
 
-    private void EditDiscountValue(SaleItem? item, ChangeEventArgs e)
-    {
-        if (item != null && !currentSale.Items.Contains(item)) return;
-        const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
-            | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
-        if (!decimal.TryParse(e.Value?.ToString(), styles, CultureInfo.CurrentCulture, out var value))
-        {
-            RejectDiscountEdit("El valor del descuento debe ser un número decimal válido, sin separador de miles.");
-            return;
-        }
-
-        ApplyDiscountEdit(item, item?.DiscountType ?? currentSale.DiscountType, value);
-    }
-
-    private void ApplyDiscountEdit(SaleItem? item, DiscountType type, decimal value)
-    {
-        var candidate = item == null ? null : CopyLine(item);
-        if (candidate != null)
-        {
-            candidate.DiscountType = type;
-            candidate.DiscountValue = value;
-        }
-
-        if (!CanApplyCartChange(item, candidate,
-            item == null ? type : currentSale.DiscountType,
-            item == null ? value : currentSale.DiscountValue)) return;
-
-        if (item == null)
-        {
-            currentSale.DiscountType = type;
-            currentSale.DiscountValue = value;
-        }
-        else
-        {
-            item.DiscountType = type;
-            item.DiscountValue = value;
-        }
-
-        discountEditVersion++;
-        RefreshPaymentsForTotal();
+        item.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        item.DiscountType = type;
+        item.DiscountValue = value;
         stockError = string.Empty;
-        quantityError = string.Empty;
+        StateHasChanged(); // el diálogo es quien dispara el evento: el carrito de la página debe redibujarse
+        return null;
     }
 
-    private void EditNotes(SaleItem item, string? value)
+    private string? ApplySaleDiscount(DiscountType type, decimal value)
     {
-        if (!currentSale.Items.Contains(item)) return;
-        item.Notes = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        var error = ValidateCartChange(null, null, type, value);
+        if (error is not null) return error + RejectedSuffix;
+
+        currentSale.DiscountType = type;
+        currentSale.DiscountValue = value;
+        stockError = string.Empty;
+        StateHasChanged();
+        return null;
     }
 
     private void RemoveFromCart(SaleItem item)
     {
         if (!currentSale.Items.Contains(item)) return;
-        if (!CanApplyCartChange(item, null, currentSale.DiscountType, currentSale.DiscountValue)) return;
+        var error = ValidateCartChange(item, null, currentSale.DiscountType, currentSale.DiscountValue);
+        if (error is not null)
+        {
+            RejectQuantityEdit(error + RejectedSuffix);
+            return;
+        }
 
         currentSale.Items.Remove(item);
-        RefreshPaymentsForTotal();
-        stockError = string.Empty;
-        quantityError = string.Empty;
-    }
-
-    private static string PaymentMethodLabel(PaymentMethod method) => method switch
-    {
-        PaymentMethod.Cash => "Efectivo",
-        PaymentMethod.DebitCard => "Tarjeta de débito",
-        PaymentMethod.CreditCard => "Tarjeta de crédito",
-        PaymentMethod.Transfer => "Transferencia",
-        PaymentMethod.MercadoPago => "Mercado Pago",
-        PaymentMethod.Other => "Otro",
-        _ => "Medio inválido"
-    };
-
-    private static bool TryParseAmount(string? input, out decimal amount)
-    {
-        const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
-            | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
-        amount = 0m;
-        return !string.IsNullOrWhiteSpace(input)
-            && decimal.TryParse(input, styles, CultureInfo.CurrentCulture, out amount);
-    }
-
-    private void AddPayment()
-    {
-        if (Remaining <= 0m || !AvailableMethods.Contains(addPaymentMethod)) return;
-        var amount = Remaining;
-        allocations.Add(new PaymentAllocation
-        {
-            Method = addPaymentMethod,
-            Amount = amount,
-            AmountInput = amount.ToString(CultureInfo.CurrentCulture),
-            InvalidTender = addPaymentMethod == PaymentMethod.Cash
-        });
-        addPaymentMethod = AvailableMethods.FirstOrDefault();
         stockError = string.Empty;
     }
 
-    private void RemovePayment(PaymentAllocation allocation)
-    {
-        allocations.Remove(allocation);
-        addPaymentMethod = allocation.Method;
-        stockError = string.Empty;
-    }
+    private Task OpenLineOptions(SaleItem item) => lineDialog.ShowAsync(item);
 
-    private void EditPaymentAmount(PaymentAllocation allocation, ChangeEventArgs e)
-    {
-        if (!allocations.Contains(allocation)) return;
-        allocation.AmountInput = e.Value?.ToString() ?? string.Empty;
-        allocation.InvalidAmount = !TryParseAmount(allocation.AmountInput, out var amount)
-            || amount <= 0m || amount > currentSale.Total;
-        if (!allocation.InvalidAmount)
-            allocation.Amount = amount;
-        // Un cambio de importe puede invalidar el efectivo previamente aceptado.
-        if (allocation.Method == PaymentMethod.Cash)
-            UpdateTender(allocation);
-        stockError = string.Empty;
-    }
+    private Task OpenSaleDiscount() => discountDialog.ShowAsync(currentSale);
 
-    private void EditCashReceived(PaymentAllocation allocation, ChangeEventArgs e)
-    {
-        if (!allocations.Contains(allocation)) return;
-        allocation.TenderInput = e.Value?.ToString() ?? string.Empty;
-        UpdateTender(allocation);
-        stockError = string.Empty;
-    }
-
-    private static void UpdateTender(PaymentAllocation allocation)
-    {
-        allocation.InvalidTender = !TryParseAmount(allocation.TenderInput, out var received)
-            || received < allocation.Amount;
-        if (!allocation.InvalidTender)
-            allocation.ReceivedAmount = received;
-    }
-
-    private void RefreshPaymentsForTotal()
-    {
-        // Un total cero nunca conserva pagos locales; otros cambios se revalidan contra el total actual.
-        if (currentSale.Total == 0m)
-            allocations.Clear();
-        else
-            foreach (var allocation in allocations.Where(a => a.Method == PaymentMethod.Cash))
-                UpdateTender(allocation);
-    }
-
-    private void ClearCart()
-    {
-        currentSale = new Sale();
-        allocations.Clear();
-        addPaymentMethod = PaymentMethod.Cash;
-        stockError = string.Empty;
-        quantityError = string.Empty;
-        discountError = string.Empty;
-    }
-
-    private void CompleteSale()
+    private async Task OpenCheckout()
     {
         if (!AuthService.IsAuthenticated)
         {
@@ -609,29 +367,48 @@
         }
         if (!currentSale.Items.Any()) return;
 
-        RefreshPaymentsForTotal();
-        if (!CanCheckout)
-        {
-            stockError = PaymentError;
-            return;
-        }
+        stockError = string.Empty;
+        await checkoutDialog.ShowAsync(currentSale);
+    }
 
-        // Crear pagos nuevos desde las asignaciones aceptadas, nunca desde texto inválido.
+    private void ClearCart()
+    {
+        currentSale = new Sale();
+        stockError = string.Empty;
+    }
+
+    private void ClearCartWithNotice()
+    {
+        ClearCart();
+        toast.Show("Se vació el carrito.");
+    }
+
+    // Devuelve el mensaje de error del servicio, o null cuando la venta quedó registrada.
+    private string? CompleteSale(List<SalePayment> payments)
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return "La sesión expiró. Iniciá sesión nuevamente.";
+        }
+        if (!currentSale.Items.Any()) return "La venta debe contener al menos un producto.";
+
+        // Pagos nuevos desde las asignaciones aceptadas por el diálogo, nunca desde texto inválido.
         var checkoutSale = new Sale
         {
             Items = currentSale.Items,
             DiscountType = currentSale.DiscountType,
-            DiscountValue = currentSale.DiscountValue
+            DiscountValue = currentSale.DiscountValue,
+            Payments = payments
         };
-        checkoutSale.Payments = CurrentPayments();
 
         // Validar descuentos, pago, elegibilidad y stock antes de registrar la venta.
         var (isValid, errorMessage) = SaleService.ValidateSale(checkoutSale);
-
         if (!isValid)
         {
             stockError = errorMessage;
-            return;
+            StateHasChanged();
+            return errorMessage;
         }
 
         // Venta validada; Add vuelve a validar antes de cualquier mutación.
@@ -642,15 +419,26 @@
         catch (UnauthorizedAccessException)
         {
             Navigation.NavigateTo("/login");
-            return;
+            return "La sesión expiró. Iniciá sesión nuevamente.";
         }
         catch (InvalidOperationException ex)
         {
             stockError = ex.Message;
-            return;
+            StateHasChanged();
+            return ex.Message;
         }
 
+        OnSaleCompleted(checkoutSale);
+        return null;
+    }
+
+    // Seam for the post-checkout receipt (S10, T5): runs once, after the sale is stored and before the cart resets.
+    private void OnSaleCompleted(Sale sale)
+    {
+        lastCompletedSale = sale;
         ClearCart();
+        StateHasChanged();
+        toast.Show($"Venta #{sale.Id} registrada · {PosFormat.Money(sale.Total)}");
     }
 
     private void GoToCash()

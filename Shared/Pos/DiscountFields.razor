@@ -1,0 +1,43 @@
+@* Discount type + value pair shared by the line and the sale-discount dialogs.
+   Changing the type resets the value (same rule as the old POS); "Sin descuento" disables the value. *@
+@using GastroApp.Models
+
+<div class="form-grid">
+    <div class="field">
+        <label class="field__label" for="@($"{IdPrefix}-type")">Tipo de descuento</label>
+        <select id="@($"{IdPrefix}-type")" class="select" value="@((int)Type)" @onchange="HandleTypeChanged">
+            <option value="0">Sin descuento</option>
+            <option value="1">Porcentaje (%)</option>
+            <option value="2">@FixedLabel</option>
+        </select>
+    </div>
+    <div class="field">
+        <label class="field__label" for="@($"{IdPrefix}-value")">Valor (@(Type == DiscountType.Percentage ? "%" : "$"))</label>
+        <input id="@($"{IdPrefix}-value")" type="text" inputmode="decimal" class="input tnum" placeholder="0"
+               disabled="@(Type == DiscountType.None)" autocomplete="off"
+               @bind:get="Value" @bind:set="HandleValueChanged" @bind:event="oninput" />
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string IdPrefix { get; set; } = "discount";
+
+    [Parameter] public DiscountType Type { get; set; }
+    [Parameter] public EventCallback<DiscountType> TypeChanged { get; set; }
+
+    /// <summary>Raw text typed by the user; parsed by the owner with <see cref="PosFormat.TryReadDiscountValue"/>.</summary>
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter] public string FixedLabel { get; set; } = "Importe fijo ($)";
+
+    private async Task HandleTypeChanged(ChangeEventArgs e)
+    {
+        var type = int.TryParse(e.Value?.ToString(), out var parsed) && Enum.IsDefined(typeof(DiscountType), parsed)
+            ? (DiscountType)parsed : DiscountType.None;
+        await TypeChanged.InvokeAsync(type);
+        await ValueChanged.InvokeAsync(string.Empty);
+    }
+
+    private Task HandleValueChanged(string? value) => ValueChanged.InvokeAsync(value ?? string.Empty);
+}

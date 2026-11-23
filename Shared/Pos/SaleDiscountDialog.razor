@@ -1,0 +1,80 @@
+@* Dialog for the general (whole sale) discount, prototype openSaleDiscountModal, with quick percentage shortcuts.
+   The page validates and applies the change (Apply returns an error message or null). *@
+@using GastroApp.Models
+@using System.Globalization
+
+<ModalDialog @ref="modal" Title="Descuento de toda la venta" Subtitle="@Subtitle">
+    <ChildContent>
+    <form id="sale-disc-form" class="stack" @onsubmit="Save">
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <Banner Variant="danger">@error</Banner>
+        }
+        <DiscountFields IdPrefix="sale-disc" FixedLabel="Importe fijo ($)"
+                        @bind-Type="discountType" @bind-Value="discountValue" />
+        <div class="flex-wrap-gap">
+            <span class="text-xs text-muted">Atajos rápidos:</span>
+            @foreach (var pct in QuickPercentages)
+            {
+                <button type="button" class="btn btn--sm" @onclick="() => ApplyQuick(pct)">@(pct == 100 ? "100% (Cortesía)" : $"{pct}%")</button>
+            }
+        </div>
+        <p class="text-xs text-muted">
+            Se aplica después de los descuentos de línea.
+            Usá «@PosFormat.DecimalSeparator» como separador decimal, sin separador de miles.
+        </p>
+    </form>
+    </ChildContent>
+    <Footer>
+        <button class="btn" value="cancel">Cancelar</button>
+        <button type="submit" form="sale-disc-form" class="btn btn--primary">Aplicar</button>
+    </Footer>
+</ModalDialog>
+
+@code {
+    private static readonly int[] QuickPercentages = { 5, 10, 15, 100 };
+
+    private ModalDialog modal = default!;
+    private DiscountType discountType;
+    private string discountValue = string.Empty;
+    private string error = string.Empty;
+    private decimal subtotal;
+
+    /// <summary>Applies the sale discount; returns an error message, or null when applied.</summary>
+    [Parameter, EditorRequired] public Func<DiscountType, decimal, string?> Apply { get; set; } = default!;
+
+    private string Subtitle => $"Se aplica sobre el subtotal tras descuentos de línea ({PosFormat.Money(subtotal)}).";
+
+    public Task ShowAsync(Sale sale)
+    {
+        subtotal = sale.Subtotal;
+        discountType = sale.DiscountType;
+        discountValue = sale.DiscountType == DiscountType.None ? string.Empty : PosFormat.InputText(sale.DiscountValue);
+        error = string.Empty;
+        return modal.ShowAsync();
+    }
+
+    private void ApplyQuick(int percentage)
+    {
+        discountType = DiscountType.Percentage;
+        discountValue = percentage.ToString(CultureInfo.CurrentCulture);
+        error = string.Empty;
+    }
+
+    private async Task Save()
+    {
+        if (!PosFormat.TryReadDiscountValue(discountType, discountValue, out var value))
+        {
+            error = PosFormat.InvalidDiscountValueMessage;
+            return;
+        }
+
+        var message = Apply(discountType, value);
+        if (message is not null)
+        {
+            error = message;
+            return;
+        }
+        await modal.CloseAsync("saved");
+    }
+}

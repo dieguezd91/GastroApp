@@ -1,0 +1,135 @@
+@* Native modal <dialog> (prototype openModal): showModal() through wwwroot/js/dialog.js, returnValue reset,
+   light-dismiss with a fallback for browsers without `closedby`, and initial focus on [autofocus] (or the first
+   body control). The body is rendered only while open, so every opening starts from fresh child state.
+
+   Usage:
+     <ModalDialog @ref="dialog" Title="Cobrar venta" Subtitle="..." Size="lg" LightDismiss="false" OnClosed="HandleClosed">
+         <ChildContent><form id="my-form" @onsubmit="Save">...</form></ChildContent>
+         <Footer>
+             <button value="cancel" class="btn" autofocus>Cancelar</button>   (closes natively, returnValue "cancel")
+             <button type="submit" form="my-form" class="btn btn--primary">Guardar</button>
+         </Footer>
+     </ModalDialog>
+     await dialog.ShowAsync();  ...  await dialog.CloseAsync("saved");
+
+   The footer is a <form method="dialog">: a plain <button value="x"> closes the dialog with returnValue "x"
+   without a server round trip; use type="button" for buttons that must NOT close it. OnClosed receives the
+   returnValue ("cancel" for Esc, backdrop click or the header ✕). *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<dialog @ref="dialog" class="@CssClass" aria-labelledby="@titleId">
+    @if (isOpen)
+    {
+        <div class="modal__header">
+            <div>
+                <h2 id="@titleId">@Title</h2>
+                @if (!string.IsNullOrEmpty(Subtitle))
+                {
+                    <p class="card__desc">@Subtitle</p>
+                }
+            </div>
+            <form method="dialog">
+                <button class="btn btn--ghost btn--icon" value="cancel" aria-label="Cerrar diálogo"><Icon Name="close" Size="18" /></button>
+            </form>
+        </div>
+        <div class="modal__body">@ChildContent</div>
+        @if (Footer is not null)
+        {
+            <form method="dialog" class="modal__footer">@Footer</form>
+        }
+    }
+</dialog>
+
+@code {
+    private static int nextId;
+
+    private ElementReference dialog;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<ModalDialog>? self;
+    private readonly string titleId = $"modal-title-{Interlocked.Increment(ref nextId)}";
+    private bool isOpen;
+    private bool pendingShow;
+    private int generation; // one per ShowAsync, so the close of an earlier opening can never close a later one
+    private bool disposed;
+
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>md (default) | lg</summary>
+    [Parameter] public string Size { get; set; } = "md";
+
+    /// <summary>Backdrop click closes the dialog (Esc always does). Disable for forms with unsaved input.</summary>
+    [Parameter] public bool LightDismiss { get; set; } = true;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Content of the <c>.modal__footer</c> (a <c>form method="dialog"</c>).</summary>
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    /// <summary>Raised after the dialog closed, with its returnValue ("cancel" when none was set).</summary>
+    [Parameter] public EventCallback<string> OnClosed { get; set; }
+
+    public bool IsOpen => isOpen;
+
+    private string CssClass => Size == "lg" ? "modal modal--lg" : "modal";
+
+    public async Task ShowAsync()
+    {
+        if (disposed) return;
+        isOpen = true;
+        pendingShow = true;
+        generation++;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async Task CloseAsync(string returnValue = "cancel")
+    {
+        if (!isOpen || module is null) return;
+        try { await module.InvokeVoidAsync("close", dialog, returnValue); }
+        catch (JSDisconnectedException) { }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!pendingShow || disposed) return;
+        pendingShow = false;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/dialog.js");
+            self ??= DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("open", dialog, self, LightDismiss, generation);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; nothing to show.
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnNativeClosed(int closedGeneration, string returnValue)
+    {
+        if (closedGeneration != generation) return; // stale: the dialog was shown again meanwhile
+        await InvokeAsync(() =>
+        {
+            isOpen = false;
+            StateHasChanged();
+        });
+        await OnClosed.InvokeAsync(string.IsNullOrEmpty(returnValue) ? "cancel" : returnValue);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        self?.Dispose();
+        if (module is null) return;
+        try
+        {
+            await module.InvokeVoidAsync("dispose", dialog);
+            await module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+}

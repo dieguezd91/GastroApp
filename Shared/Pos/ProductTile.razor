@@ -1,0 +1,59 @@
+@* Catalog tile (prototype .pos-tile). A blocked tile stays focusable with aria-disabled="true" and reports
+   why through OnBlocked, so the reason can be shown/announced instead of silently ignoring the press. *@
+@using GastroApp.Models
+
+<button type="button" class="pos-tile @StateClass" aria-disabled="@(Availability.IsBlocked ? "true" : null)"
+        aria-label="@AccessibleLabel" @onclick="HandleClick">
+    <span class="pos-tile__cat">@CategoryName</span>
+    <span class="pos-tile__name">@Product.Name</span>
+    <span class="pos-tile__foot">
+        <span class="pos-tile__price">@PosFormat.Money(Product.Price)</span>
+        <span class="flex-wrap-gap">
+            @if (InCartQuantity > 0)
+            {
+                <span class="pos-tile__qty-pill" aria-hidden="true">@InCartQuantity</span>
+            }
+            @if (!string.IsNullOrEmpty(Availability.BadgeLabel))
+            {
+                <Badge Variant="@Availability.BadgeVariant" Label="@Availability.BadgeLabel"
+                       Icon="@(Availability.IsBlocked ? "alertOctagon" : "alertTriangle")" />
+            }
+        </span>
+    </span>
+</button>
+
+@code {
+    [Parameter, EditorRequired] public Product Product { get; set; } = default!;
+
+    [Parameter] public string CategoryName { get; set; } = "Sin categoría";
+
+    /// <summary>Units of this product already in the cart.</summary>
+    [Parameter] public int InCartQuantity { get; set; }
+
+    [Parameter] public TileAvailability Availability { get; set; } = TileAvailability.Available;
+
+    [Parameter] public EventCallback<Product> OnAdd { get; set; }
+
+    /// <summary>Raised instead of <see cref="OnAdd"/> when the tile is blocked; carries the reason.</summary>
+    [Parameter] public EventCallback<string> OnBlocked { get; set; }
+
+    private string StateClass => Availability.IsBlocked ? "pos-tile--no-stock"
+        : InCartQuantity > 0 ? "pos-tile--in-cart"
+        : !string.IsNullOrEmpty(Availability.BadgeLabel) ? "pos-tile--low-stock"
+        : string.Empty;
+
+    private string AccessibleLabel
+    {
+        get
+        {
+            var text = $"{(Availability.IsBlocked ? "No disponible" : "Agregar")} {Product.Name}, {PosFormat.Money(Product.Price)}";
+            if (InCartQuantity > 0) text += $", {InCartQuantity} en carrito";
+            if (!string.IsNullOrEmpty(Availability.Reason)) text += $", {Availability.Reason}";
+            return text;
+        }
+    }
+
+    private Task HandleClick() => Availability.IsBlocked
+        ? OnBlocked.InvokeAsync(Availability.Reason ?? "Producto no disponible.")
+        : OnAdd.InvokeAsync(Product);
+}

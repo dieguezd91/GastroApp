@@ -1,0 +1,105 @@
+@* Non-intrusive notification (prototype showToast): a native popover="manual" in the bottom-right top layer
+   with an explicit close button, paused while it holds focus, and replaced by the next toast.
+   Place one <Toast @ref="toast" /> per page and call toast.Show("Mensaje", "warn").
+   While a modal <dialog> is open the visual toast is suppressed; the message is still announced through the
+   live regions rendered here (assertive for "danger", polite otherwise). *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="toast-region" role="region" aria-label="Notificaciones">
+    @if (current is { } toast)
+    {
+        <div @key="toast.Id" @ref="toastElement" id="@toast.Id" popover="manual" class="toast toast--@toast.Variant">
+            <span class="toast__text">@toast.Message</span>
+            <button type="button" class="toast__close" aria-label="Cerrar notificación" @onclick="Dismiss">Cerrar</button>
+        </div>
+    }
+</div>
+<div class="visually-hidden" aria-live="polite" aria-atomic="true">@politeText</div>
+<div class="visually-hidden" aria-live="assertive" aria-atomic="true">@assertiveText</div>
+
+@code {
+    private sealed record ToastMessage(string Id, string Message, string Variant, int DurationMs);
+
+    private ToastMessage? current;
+    private ElementReference toastElement;
+    private ToastMessage? pending;
+    private string politeText = string.Empty;
+    private string assertiveText = string.Empty;
+    private int counter;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<Toast>? self;
+    private bool disposed;
+
+    /// <summary>
+    /// Shows <paramref name="message"/>, replacing any visible toast.
+    /// <paramref name="variant"/> is ok | warn | danger; <paramref name="durationMs"/> &lt;= 0 keeps it until closed.
+    /// </summary>
+    public void Show(string message, string variant = "ok", int durationMs = 4800)
+    {
+        if (disposed || string.IsNullOrWhiteSpace(message)) return;
+        _ = InvokeAsync(() =>
+        {
+            var toast = new ToastMessage($"toast-{++counter}", message, variant, durationMs);
+            current = pending = toast;
+            if (variant == "danger") { assertiveText = message; politeText = string.Empty; }
+            else { politeText = message; assertiveText = string.Empty; }
+            StateHasChanged();
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (pending is not { } toast || disposed) return;
+        pending = null;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/toast.js");
+            self ??= DotNetObjectReference.Create(this);
+            var shown = await module.InvokeAsync<bool>("present", toastElement, toast.DurationMs, self, toast.Id);
+            if (!shown && current?.Id == toast.Id)
+            {
+                current = null; // suppressed under a modal; the live region already announced it
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; nothing to present.
+        }
+    }
+
+    private async Task Dismiss()
+    {
+        var toast = current;
+        current = null;
+        politeText = assertiveText = string.Empty;
+        if (module is not null && toast is not null)
+        {
+            try { await module.InvokeVoidAsync("dismiss", toastElement); }
+            catch (JSException) { }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    [JSInvokable]
+    public Task OnExpired(string id)
+    {
+        if (current?.Id != id) return Task.CompletedTask; // stale timer from a replaced toast
+        return InvokeAsync(() =>
+        {
+            current = null;
+            politeText = assertiveText = string.Empty;
+            StateHasChanged();
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        self?.Dispose();
+        if (module is null) return;
+        try { await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+}

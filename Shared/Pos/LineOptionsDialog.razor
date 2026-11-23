@@ -1,0 +1,82 @@
+@* Light native dialog for the secondary line controls (observation + line discount), prototype openLineOptionsModal.
+   The page validates and applies the change (Apply returns an error message or null) so cart rules stay in one place. *@
+@using GastroApp.Models
+
+<ModalDialog @ref="modal" Title="@(item?.ProductName ?? "Línea")" Subtitle="@Subtitle" OnClosed="HandleClosed">
+    <ChildContent>
+    @if (item is not null)
+    {
+        <form id="line-opt-form" class="stack" @onsubmit="Save">
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <Banner Variant="danger">@error</Banner>
+            }
+            <div class="field">
+                <label class="field__label" for="line-note">Observación (opcional)</label>
+                <span id="line-note-hint" class="field__hint">Aplica a toda la cantidad de esta línea (ej.: sin cebolla, punto jugoso).</span>
+                <input id="line-note" type="text" class="input" autocomplete="off" placeholder="Ej.: Sin sal, para llevar"
+                       aria-describedby="line-note-hint" @bind="notes" @bind:event="oninput" />
+            </div>
+
+            <fieldset class="fieldset stack stack--sm">
+                <legend>Descuento de línea</legend>
+                <DiscountFields IdPrefix="line-disc" FixedLabel="Importe fijo ($ por línea)"
+                                @bind-Type="discountType" @bind-Value="discountValue" />
+                <p class="text-xs text-muted">
+                    El importe fijo se descuenta una vez sobre el bruto total de esta línea (máximo @PosFormat.Money(item.GrossSubtotal)).
+                    Usá «@PosFormat.DecimalSeparator» como separador decimal, sin separador de miles.
+                </p>
+            </fieldset>
+        </form>
+    }
+    </ChildContent>
+    <Footer>
+        <button class="btn" value="cancel">Cancelar</button>
+        <button type="submit" form="line-opt-form" class="btn btn--primary">Guardar en línea</button>
+    </Footer>
+</ModalDialog>
+
+@code {
+    private ModalDialog modal = default!;
+    private SaleItem? item;
+    private string? notes;
+    private DiscountType discountType;
+    private string discountValue = string.Empty;
+    private string error = string.Empty;
+
+    /// <summary>Applies notes + discount to the line; returns an error message, or null when applied.</summary>
+    [Parameter, EditorRequired] public Func<SaleItem, string?, DiscountType, decimal, string?> Apply { get; set; } = default!;
+
+    private string Subtitle => item is null ? string.Empty
+        : $"Línea de {item.Quantity} u. · Bruto {PosFormat.Money(item.GrossSubtotal)}";
+
+    public Task ShowAsync(SaleItem line)
+    {
+        item = line;
+        notes = line.Notes;
+        discountType = line.DiscountType;
+        discountValue = line.DiscountType == DiscountType.None ? string.Empty : PosFormat.InputText(line.DiscountValue);
+        error = string.Empty;
+        return modal.ShowAsync();
+    }
+
+    private async Task Save()
+    {
+        if (item is null) return;
+        if (!PosFormat.TryReadDiscountValue(discountType, discountValue, out var value))
+        {
+            error = PosFormat.InvalidDiscountValueMessage;
+            return;
+        }
+
+        var message = Apply(item, notes, discountType, value);
+        if (message is not null)
+        {
+            error = message;
+            return;
+        }
+        await modal.CloseAsync("saved");
+    }
+
+    private void HandleClosed(string _) => item = null;
+}
