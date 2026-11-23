@@ -24,11 +24,11 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 | T5 | S10 | worker: post-checkout receipt | 095ce25 |
 | T6 | S6, S7 | worker: Caja + Historial de cajas | 771071b |
 | T7 | S5, S6, S7 | worker: Catálogo tabs (Productos + Categorías) | 7bf08ee |
-| T8 | S9 | worker: recipe→product cost drift + one-click sync (service + UI) + harness | — |
-| T9 | S5, S6, S7 | worker: Inventario tabs (Stock, Movimientos, Conteo físico) | — |
-| T10 | S6, S7 | worker: Recetas workspace | — |
-| T11 | S5, S6, S7 | worker: Compras tabs (Facturas workspace + Proveedores) | — |
-| T12 | S6, S7 | worker: Historial de ventas (refund workspace) + Resumen | — |
+| T8 | S9 | worker: recipe→product cost drift + one-click sync (service + UI) + harness | 9bb2d40 |
+| T9 | S5, S6, S7 | worker: Inventario tabs (Stock, Movimientos, Conteo físico) | 0407b68 |
+| T10 | S6, S7 | worker: Recetas workspace | 347a0d5 |
+| T11 | S5, S6, S7 | worker: Compras tabs (Facturas workspace + Proveedores) | 4bda9c3 |
+| T12 | S6, S7 | worker: Historial de ventas (refund workspace) + Resumen | e5a9f27 |
 | T13 | all | gentle-ai-verify over the branch; docs (`README.md`, `Docs/Architecture/`) | — |
 
 ## Log
@@ -43,3 +43,8 @@ No `data.json` edits; no push (main deploys to Render). Spanish UI, English code
 - L9: T7 done (7bf08ee). Pages/Products and Pages/ProductCategories stay separate components (verify-auth-isolation pins their classes and methods by reflection: ShowAddForm, EditProduct, SaveProduct, DeleteProduct, EditCategory, SaveCategory, DeleteCategory) and render Shared/Catalog/CatalogView. T8 seam: Shared/Catalog/ProductCostDrift (RecipeCost decimal?, OnSync). New UI behavior: product delete asks confirmation; blank name / price<=0 show a banner instead of returning silently. Parent follow-ups: NavMenu active state for tab sub-routes (/product-categories, /stock/count, /ingredients/{id}/movements, /suppliers); legacy Bootstrap .card leaks flex-direction:column into .card.toolbar.
 - L10: T6 done (771071b). Omitted: preset denominations / "Simular conteo exacto" (verify-cash-count pins a single empty count row on init), opener on Apertura KPI (CashRegister has no opener). verify-cash-count pins the inline style overflow-x:auto on the ledger wrapper. Own movements make the count stale, as on HEAD.
 - L11: T8-T12 workers stopped on a provider quota error with partial edits in the worktree; resumed in their own sessions after the user said "continua".
+- L12: T8 done (9bb2d40). Uses Recipe.UnitCost (cost per portion = total / yield); drift at cent precision; sync only sets Cost, admin actor. verify-recipe-cost-sync.ps1 56/56 (RED 37 failures before). Follow-up found (pre-existing, not changed): SaleService.RecipeRequirements deducts the full recipe quantity per unit sold, not divided by yield, so recipes with yield > 1 over-deduct stock; also affects T4 availability, which mirrors checkout.
+- L13: T9 done (0407b68). Pages stay separate (reflection pins) inside Shared/Inventory/InventoryView; new route /ingredients/movements (all ingredients). verify-stock-count 162/162 with the nav check replaced. Switching tabs mid-count discards the selection (each tab is a page).
+- L14: T10 done (347a0d5). Preview = RecipeService.CalculateCosts on a scratch Recipe copy (mutates only the copy, no save). Kept as before: duplicate ingredient lines; RecalculateCost calls CalculateCosts then Update (second pass), so the variation badge ends green after a manual recalculate (pre-existing follow-up).
+- L15: T11 done (4bda9c3). Invoice lines typed in a compatible non-base unit are stored converted to the ingredient unit (500 gr @ 0.1 -> 0.5 kg @ 100) because RecipeService reads the last invoice price per base unit. Invoice/supplier deletes ask confirmation; supplier delete warns invoices become Sin proveedor. Parent: NavMenu active state for tab sub-routes fixed with Shared/SectionNavLink (commit before T11).
+- L16: T12 done (e5a9f27). Kept from HEAD: filters apply on Aplicar filtros, refund default destination Merma, refundSuccess text format (pinned). Added: Sugerir reparto (fills per-method amounts; service still enforces exact sum), Summary cancel confirm dialog.
