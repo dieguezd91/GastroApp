@@ -1,3 +1,96 @@
 /* dashboard view styles, ported from prototypes/ui-ux/styles/views.css. */
 @layer views {
+  /* Cash status hero */
+  .cash-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-inline-start: 5px solid var(--action-collect);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .cash-hero--closed {
+    border-inline-start-color: var(--crimson-600);
+  }
+
+  .hero-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4) var(--space-6);
+    margin-block-start: var(--space-2);
+  }
+
+  .hero-metric__label {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  .hero-metric__value {
+    font-size: var(--text-kpi);
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* "Requiere atención" list */
+  .alert-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+  }
+
+  .alert-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    padding: 0.65rem 0;
+  }
+
+  .alert-row:not(:last-child) {
+    border-block-end: 1px solid var(--stone-200);
+  }
+
+  .alert-row__main {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    min-inline-size: 0;
+    flex: 1 1 14rem;
+  }
+
+  .alert-row__icon {
+    margin-block-start: 2px;
+  }
+
+  /* Discreet secondary shortcuts */
+  .secondary-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    background-color: var(--stone-50);
+    border: 1px solid var(--border-subtle);
+    font-size: var(--text-sm);
+  }
+
+  .secondary-strip__title {
+    text-transform: uppercase;
+  }
 }

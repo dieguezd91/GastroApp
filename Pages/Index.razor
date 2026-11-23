@@ -1,93 +1,307 @@
 @page "/"
+@using System.Globalization
+@using GastroApp.Models
 @using GastroApp.Services
 @inject CashRegisterService CashService
 @inject SaleService SaleService
+@inject IngredientService IngredientService
+@inject RecipeService RecipeService
+@inject ProductService ProductService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
-<PageTitle>Dashboard - GastroApp</PageTitle>
+<PageTitle>@(isAdmin ? "Panel operativo" : "Inicio") - GastroApp</PageTitle>
 
-<div class="dashboard">
-    <!-- Estado de Caja y Acción Principal -->
-    <div class="dashboard-header">
-        @if (cashRegister != null && cashRegister.IsOpen)
-        {
-            <div class="cash-status open">
-                <div class="status-indicator">
-                    <span class="status-dot"></span>
-                    <h2>Caja Abierta</h2>
-                </div>
-                <div class="cash-metrics">
-                    <div class="metric">
-                        <span class="metric-label">Inicio</span>
-                        <span class="metric-value">@cashRegister.OpenDate.ToString("HH:mm")</span>
-                    </div>
-                    <div class="metric">
-                        <span class="metric-label">Inicial</span>
-                        <span class="metric-value">$@cashRegister.InitialAmount</span>
-                    </div>
-                    <div class="metric highlight">
-                        <span class="metric-label">Ventas Hoy</span>
-                        <span class="metric-value">$@SaleService.GetTodayTotal()</span>
-                    </div>
-                </div>
-            </div>
-            <a href="/sales" class="btn-action-primary">
-                <span class="btn-icon">💰</span>
-                <span class="btn-text">VENDER</span>
-            </a>
-        }
-        else
-        {
-            <div class="cash-status closed">
-                <div class="status-indicator">
-                    <span class="status-dot"></span>
-                    <h2>Caja Cerrada</h2>
-                </div>
-                <p class="status-message">Abrí la caja para comenzar</p>
-            </div>
-            @if (AuthService.IsInRole(Models.UserRole.Admin))
-            {
-                <a href="/cash" class="btn-action-secondary">
-                    <span class="btn-icon">🔓</span>
-                    <span class="btn-text">Abrir Caja</span>
-                </a>
-            }
-        }
-    </div>
-
-    <!-- Accesos Rápidos -->
-    @if (AuthService.IsInRole(Models.UserRole.Admin))
+@if (AuthService.IsAuthenticated)
+{
+    @if (!isAdmin)
     {
-        <div class="quick-access">
-            <h3 class="section-title">Accesos Rápidos</h3>
-            <div class="quick-grid">
-                <a href="/products" class="quick-card">
-                    <span class="quick-icon">📦</span>
-                    <span>Productos</span>
+        @* EMPLOYEE: cash status, shift metrics and a direct path to the POS. *@
+        <div class="page-header">
+            <div>
+                <h1>Hola, @AuthService.CurrentUser?.Username</h1>
+                <p class="page-header__subtitle">Vista operativa de turno · Rol Empleado</p>
+            </div>
+        </div>
+
+        <div class="stack stack--lg">
+            <section class="cash-hero @(isOpen ? "" : "cash-hero--closed")" aria-label="Estado de la caja actual">
+                <div class="stack stack--sm">
+                    <div class="flex-wrap-gap">
+                        @if (isOpen)
+                        {
+                            <Badge Variant="ok" Icon="checkCircle" Label="Caja abierta" />
+                            <span class="text-sm text-secondary">Sesión #@cashRegister!.Id · Apertura @cashRegister.OpenDate.ToString("HH:mm")</span>
+                        }
+                        else
+                        {
+                            <Badge Variant="danger" Icon="alertOctagon" Label="Caja cerrada" />
+                        }
+                    </div>
+                    <h2>@(isOpen ? "Todo listo para tomar pedidos y cobrar" : "La caja todavía no está abierta")</h2>
+                    <p class="text-sm text-secondary">
+                        @(isOpen
+                            ? "Podés entrar al Punto de Venta para cargar productos, aplicar descuentos y cobrar con efectivo o medios digitales."
+                            : "Pedile a un Administrador que realice la apertura de caja para habilitar las ventas del turno.")
+                    </p>
+                </div>
+                <div>
+                    <a href="/sales" class="btn btn--collect btn--lg">
+                        <Icon Name="pos" Size="20" />
+                        <span>@(isOpen ? "Ir al Punto de Venta" : "Ver Punto de Venta")</span>
+                    </a>
+                </div>
+            </section>
+
+            <section class="grid-kpi" aria-label="Indicadores del turno">
+                <KpiCard Label="Ventas del turno" Value="@shiftSales.Count.ToString(Ar)"
+                         Meta="@(isOpen ? $"Sesión #{cashRegister!.Id}" : "Sin sesión activa")" />
+                <KpiCard Label="Total vendido en el turno" Value="@(netShiftTotal is null ? "—" : Ars(netShiftTotal.Value))"
+                         Meta="@ShiftTotalMeta" />
+                <KpiCard Label="Ingredientes sin stock" Value="@outOfStockCount.ToString(Ar)"
+                         Meta="@(stockAlerts.Count > 0 ? "Verificá disponibilidad al cargar pedidos" : "Sin faltantes informados")">
+                    <StatusContent>
+                        @if (outOfStockCount > 0)
+                        {
+                            <Badge Variant="warn" Icon="alertTriangle" Label="Atención" />
+                        }
+                        else
+                        {
+                            <Badge Variant="ok" Icon="check" Label="OK" />
+                        }
+                    </StatusContent>
+                </KpiCard>
+            </section>
+
+            @if (!isOpen)
+            {
+                <Banner Variant="warn" Title="Permisos de Empleado">
+                    La apertura, los movimientos manuales y el cierre de caja son exclusivos del rol Administrador. El cobro queda bloqueado hasta que se abra la caja.
+                </Banner>
+            }
+        </div>
+    }
+    else
+    {
+        @* ADMIN: cash hero + KPIs -> priority list + latest sales -> secondary shortcuts. *@
+        <div class="page-header">
+            <div>
+                <h1>Panel operativo</h1>
+                <p class="page-header__subtitle">Estado del turno y prioridades del día</p>
+            </div>
+            <div class="page-header__actions">
+                <a href="/cash" class="btn">
+                    <Icon Name="cash" />
+                    <span>@(isOpen ? "Caja y arqueo" : "Abrir caja")</span>
                 </a>
-                <a href="/recipes" class="quick-card">
-                    <span class="quick-icon">📖</span>
-                    <span>Recetas</span>
-                </a>
-                <a href="/cash" class="quick-card">
-                    <span class="quick-icon">💵</span>
-                    <span>Caja</span>
-                </a>
-                <a href="/summary" class="quick-card">
-                    <span class="quick-icon">📊</span>
-                    <span>Resumen</span>
+                <a href="/sales" class="btn btn--collect">
+                    <Icon Name="pos" />
+                    <span>Vender (POS)</span>
                 </a>
             </div>
         </div>
+
+        <div class="stack stack--lg">
+            <section class="cash-hero @(isOpen ? "" : "cash-hero--closed")" aria-label="Estado operativo principal">
+                <div class="stack stack--sm">
+                    <div class="flex-wrap-gap">
+                        @if (isOpen)
+                        {
+                            <Badge Variant="ok" Icon="checkCircle" Label="@($"Caja abierta · Sesión #{cashRegister!.Id}")" />
+                            <span class="text-xs text-secondary">Desde @cashRegister.OpenDate.ToString("HH:mm") · Fondo inicial @Ars(cashRegister.InitialAmount)</span>
+                        }
+                        else
+                        {
+                            <Badge Variant="danger" Icon="alertOctagon" Label="Caja cerrada" />
+                            <span class="text-xs text-secondary">Abrí la caja para habilitar ventas en el POS.</span>
+                        }
+                    </div>
+                    <div class="hero-metrics">
+                        <div>
+                            <p class="hero-metric__label">@(isOpen ? "Esperado en caja" : "Estado de cobro")</p>
+                            <p class="hero-metric__value">@(isOpen ? Ars(expectedCash) : "Bloqueado")</p>
+                        </div>
+                        <div>
+                            <p class="hero-metric__label">Ventas netas del turno</p>
+                            <p class="hero-metric__value">@(netShiftTotal is null ? "—" : Ars(netShiftTotal.Value))</p>
+                        </div>
+                        <div>
+                            <p class="hero-metric__label">Operaciones</p>
+                            <p class="hero-metric__value">@shiftSales.Count.ToString(Ar)</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-wrap-gap">
+                    @if (isOpen)
+                    {
+                        <a href="/cash" class="btn btn--primary">Ir a arqueo y cierre</a>
+                    }
+                    else
+                    {
+                        <a href="/cash" class="btn btn--collect btn--lg">Abrir caja ahora</a>
+                    }
+                </div>
+            </section>
+
+            <div class="grid-2">
+                <section class="card stack" aria-labelledby="dash-alerts-title">
+                    <div class="row-between">
+                        <div>
+                            <h2 id="dash-alerts-title" class="card__title">Requiere atención (@attention.Count)</h2>
+                            <p class="card__desc">@stockAlerts.Count stock · @costSpikeRecipes.Count receta(s) · @lowMarginProducts.Count margen &lt; @LowMarginThresholdPct%</p>
+                        </div>
+                        @if (stockAlerts.Count > 0)
+                        {
+                            <a href="/ingredients" class="btn btn--ghost btn--sm">Ver stock</a>
+                        }
+                    </div>
+
+                    @if (attention.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <div class="empty-state__icon"><Icon Name="checkCircle" Size="24" /></div>
+                            <div class="stack stack--sm">
+                                <h3>Sin desvíos operativos</h3>
+                                <p class="text-sm text-secondary">Stock, costos de recetas y márgenes están dentro de lo esperado.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="alert-list">
+                            @foreach (var item in attention.Take(AttentionLimit))
+                            {
+                                <li class="alert-row">
+                                    <div class="alert-row__main">
+                                        <span class="alert-row__icon @(item.Danger ? "text-danger" : "text-warn")"><Icon Name="@item.IconName" Size="17" /></span>
+                                        <div>
+                                            <p class="text-sm fw-700">@item.Title</p>
+                                            <p class="text-xs text-muted">@item.Meta</p>
+                                        </div>
+                                    </div>
+                                    <a href="@item.Href" class="btn btn--sm">@item.Cta</a>
+                                </li>
+                            }
+                        </ul>
+                        @if (attention.Count > AttentionLimit)
+                        {
+                            <p class="text-xs text-muted">Mostrando @AttentionLimit de @attention.Count.</p>
+                        }
+                    }
+                </section>
+
+                <section class="card stack" aria-labelledby="dash-recent-title">
+                    <div class="row-between">
+                        <div>
+                            <h2 id="dash-recent-title" class="card__title">Últimas ventas del turno</h2>
+                            <p class="card__desc">
+                                Ticket promedio: <strong class="tnum">@(AverageTicket is null ? "—" : Ars(AverageTicket.Value))</strong>
+                                @if (refundedShiftTotal > 0)
+                                {
+                                    <text> · Devuelto: @Ars(refundedShiftTotal)</text>
+                                }
+                            </p>
+                        </div>
+                        <a href="/sales/history" class="btn btn--ghost btn--sm">Historial completo</a>
+                    </div>
+
+                    @if (recentSales.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <div class="empty-state__icon"><Icon Name="receipt" Size="24" /></div>
+                            <div class="stack stack--sm">
+                                <h3>@(isOpen ? "Sin ventas en esta sesión" : "Sin turno activo")</h3>
+                                <p class="text-sm text-secondary">@(isOpen ? "Las ventas registradas en el POS aparecerán acá." : "Abrí la caja para empezar a registrar ventas.")</p>
+                            </div>
+                            @if (isOpen)
+                            {
+                                <div class="mt-2"><a href="/sales" class="btn btn--collect btn--sm">Ir al POS</a></div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="dash-recent-title">
+                            <table class="data-table data-table--stack">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Venta</th>
+                                        <th scope="col">Estado</th>
+                                        <th scope="col" class="col-num">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var sale in recentSales)
+                                    {
+                                        <tr>
+                                            <th scope="row">#@sale.Id <span class="text-xs text-muted fw-600">· @sale.Date.ToString("HH:mm") · @(sale.CreatedByUsername ?? "Sin registro")</span></th>
+                                            <td data-label="Estado"><Badge Variant="@StatusVariant(sale)" Label="@StatusLabel(sale)" /></td>
+                                            <td data-label="Total" class="col-num fw-700">@Ars(sale.Total)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
+            </div>
+
+            <section class="secondary-strip" aria-label="Accesos directos secundarios">
+                <span class="text-xs fw-700 text-muted secondary-strip__title">Accesos rápidos:</span>
+                <div class="flex-wrap-gap">
+                    <a href="/products" class="btn btn--sm"><Icon Name="products" Size="15" /> Productos (@activeProductCount)</a>
+                    <a href="/ingredients" class="btn btn--sm"><Icon Name="ingredients" Size="15" /> Stock (@stockAlerts.Count alertas)</a>
+                    <a href="/recipes" class="btn btn--sm"><Icon Name="recipes" Size="15" /> Recetas (@recipeCount)</a>
+                    <a href="/summary" class="btn btn--sm"><Icon Name="summary" Size="15" /> Resumen del día</a>
+                </div>
+            </section>
+        </div>
     }
-</div>
+}
 
 @code {
+    // Matches Product.MarginColor: below 30% is "low margin"; a recipe is flagged at >= 30% cost variation
+    // (RecipeService sets CostIndicator = "red" at exactly that threshold).
+    private const decimal LowMarginThresholdPct = 30m;
+    private const int AttentionLimit = 4;
+    private const int RecentSalesLimit = 4;
+
+    // Built by hand so the format never depends on the ICU data available in the host.
+    private static readonly NumberFormatInfo Ar = new()
+    {
+        NumberDecimalSeparator = ",",
+        NumberGroupSeparator = ".",
+        CurrencyDecimalSeparator = ",",
+        CurrencyGroupSeparator = "."
+    };
+
+    private sealed record AttentionItem(bool Danger, string IconName, string Title, string Meta, string Cta, string Href);
+
     private Models.CashRegister? cashRegister;
     private bool isOpen => cashRegister?.IsOpen ?? false;
+    private bool isAdmin;
 
-    protected override async Task OnInitializedAsync()
+    private List<Sale> shiftSales = new();
+    private List<Sale> recentSales = new();
+    private decimal? netShiftTotal;
+    private decimal refundedShiftTotal;
+    private decimal expectedCash;
+    private List<StockAlert> stockAlerts = new();
+    private int outOfStockCount;
+    private List<Recipe> costSpikeRecipes = new();
+    private List<Product> lowMarginProducts = new();
+    private List<AttentionItem> attention = new();
+    private int activeProductCount;
+    private int recipeCount;
+
+    private decimal? AverageTicket =>
+        netShiftTotal is { } net && shiftSales.Count > 0 ? net / shiftSales.Count : null;
+
+    private string ShiftTotalMeta => refundedShiftTotal > 0
+        ? $"Descuenta {Ars(refundedShiftTotal)} en devoluciones"
+        : isOpen ? "Sin devoluciones en el turno" : "Sin sesión activa";
+
+    protected override void OnInitialized()
     {
         if (!AuthService.IsAuthenticated)
         {
@@ -95,7 +309,96 @@
             return;
         }
 
+        isAdmin = AuthService.IsInRole(UserRole.Admin);
         cashRegister = CashService.GetCurrent();
-        await Task.CompletedTask;
+
+        LoadShift();
+        stockAlerts = IngredientService.GetStockAlerts();
+        outOfStockCount = stockAlerts.Count(a => a.Level == StockAlertLevel.OutOfStock);
+
+        if (isAdmin)
+            LoadAdminAttention();
     }
+
+    // Shift = sales booked to the open register. Closed register: no active shift, nothing to show.
+    private void LoadShift()
+    {
+        if (!isOpen)
+        {
+            netShiftTotal = null;
+            return;
+        }
+
+        var registerId = cashRegister!.Id;
+        shiftSales = SaleService.GetAll()
+            .Where(s => s != null && s.CashRegisterId == registerId && s.Status != SaleStatus.Cancelled)
+            .OrderByDescending(s => s.Date).ThenByDescending(s => s.Id)
+            .ToList();
+        recentSales = SaleService.GetAll()
+            .Where(s => s != null && s.CashRegisterId == registerId)
+            .OrderByDescending(s => s.Date).ThenByDescending(s => s.Id)
+            .Take(RecentSalesLimit)
+            .ToList();
+
+        var summary = CashService.GetCurrentPaymentSummary();
+        refundedShiftTotal = summary.RefundedTotal ?? 0m;
+        netShiftTotal = summary.State == CashPaymentSummaryState.Unavailable
+            ? null
+            : shiftSales.Sum(s => s.Total) - refundedShiftTotal;
+        expectedCash = CashService.GetExpectedCash(registerId);
+    }
+
+    private void LoadAdminAttention()
+    {
+        costSpikeRecipes = RecipeService.GetAll().Where(r => r.CostIndicator == "red").ToList();
+        // Cost 0/null means "unknown cost" in Product.Margin, so those products are not flagged.
+        lowMarginProducts = ProductService.GetAll()
+            .Where(p => p.IsActive && p.Price > 0m && p.Cost is > 0m && p.Margin < LowMarginThresholdPct)
+            .ToList();
+        activeProductCount = ProductService.GetAll().Count(p => p.IsActive);
+        recipeCount = RecipeService.GetAll().Count;
+
+        attention = stockAlerts.Select(a => (Severity: a.Level == StockAlertLevel.OutOfStock ? 1 : 2,
+                Item: new AttentionItem(
+                    a.Level == StockAlertLevel.OutOfStock,
+                    a.Level == StockAlertLevel.OutOfStock ? "alertOctagon" : "alertTriangle",
+                    $"{a.Name} ({(a.Level == StockAlertLevel.OutOfStock ? "Agotado" : "Bajo mínimo")})",
+                    $"Actual: {Qty(a.CurrentStock)} {a.Unit} · mín. {Qty(a.MinStock)} {a.Unit}",
+                    "Ajustar stock",
+                    "/ingredients")))
+            .Concat(costSpikeRecipes.Select(r => (Severity: 2,
+                Item: new AttentionItem(
+                    true, "recipes",
+                    $"Costo de {r.Name} con variación ≥ 30%",
+                    $"Costo por porción: {Ars(r.UnitCost)}",
+                    "Revisar receta", "/recipes"))))
+            .Concat(lowMarginProducts.Select(p => (Severity: 3,
+                Item: new AttentionItem(
+                    false, "tag",
+                    $"Margen bajo en {p.Name} ({Qty(Math.Round(p.Margin, 1))}%)",
+                    $"Precio {Ars(p.Price)} · costo {Ars(p.Cost!.Value)}",
+                    "Revisar precio", "/products"))))
+            .OrderBy(x => x.Severity)
+            .Select(x => x.Item)
+            .ToList();
+    }
+
+    private static string Ars(decimal amount) =>
+        (amount < 0m ? "-$ " : "$ ") + Math.Abs(amount).ToString("#,##0.##", Ar);
+
+    private static string Qty(decimal value) => value.ToString("#,##0.###", Ar);
+
+    private SaleDisplayStatus DisplayStatus(Sale sale) =>
+        SaleService.GetDisplayStatus(sale.Id) ?? SaleDisplayStatus.Collected;
+
+    private string StatusLabel(Sale sale) => SaleService.GetDisplayStatusLabel(DisplayStatus(sale));
+
+    private string StatusVariant(Sale sale) => DisplayStatus(sale) switch
+    {
+        SaleDisplayStatus.Collected => "ok",
+        SaleDisplayStatus.PartiallyRefunded => "warn",
+        SaleDisplayStatus.Refunded => "info",
+        SaleDisplayStatus.Cancelled => "danger",
+        _ => "neutral"
+    };
 }

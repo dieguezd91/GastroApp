@@ -1,0 +1,25 @@
+@* KPI card (.kpi-card), ported from kpiCard() in prototypes/ui-ux/js/utils/ui.js.
+   Optional StatusContent sits at the end of the label row. *@
+<article class="kpi-card">
+    <div class="kpi-card__label">
+        <span>@Label</span>
+        @StatusContent
+    </div>
+    <p class="kpi-card__value tnum">@Value</p>
+    @if (!string.IsNullOrEmpty(Meta))
+    {
+        <p class="kpi-card__meta">@Meta</p>
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+
+    /// <summary>Optional secondary line under the value.</summary>
+    [Parameter] public string? Meta { get; set; }
+
+    /// <summary>Optional status content (usually a <see cref="Badge"/>) shown next to the label.</summary>
+    [Parameter] public RenderFragment? StatusContent { get; set; }
+}
