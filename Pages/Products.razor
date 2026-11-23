@@ -101,6 +101,7 @@
                             @foreach (var product in visible)
                             {
                                 var health = CatalogFormat.MarginHealth(product);
+                                var drift = ProductService.GetRecipeCostDrift(product);
                                 <tr @key="product.Id">
                                     <th scope="row">
                                         <div class="flex-wrap-gap">
@@ -110,7 +111,9 @@
                                                 <Badge Variant="neutral" Label="Inactivo" />
                                             }
                                         </div>
-                                        <ProductCostDrift ProductName="@product.Name" />
+                                        <ProductCostDrift ProductName="@product.Name" ProductCost="product.Cost"
+                                                          RecipeCost="@(drift is { HasDrift: true } ? drift.RecipeCost : null)"
+                                                          OnSync="() => SyncProductCost(product)" />
                                     </th>
                                     <td data-label="Categoría">@CategoryName(product)</td>
                                     <td data-label="Precio / Costo" class="col-num">
@@ -355,6 +358,22 @@
 
         LoadProducts();
         toast?.Show(updated.IsActive ? $"«{updated.Name}» activo: disponible en el POS." : $"«{updated.Name}» pausado: ya no se vende en el POS.");
+    }
+
+    private void SyncProductCost(Product product)
+    {
+        if (!EnsureAdmin()) return;
+        errorMessage = string.Empty;
+        try
+        {
+            var synced = ProductService.SyncCostFromRecipe(product.Id, AuthService.CurrentUser);
+            LoadProducts();
+            toast?.Show($"Costo de «{synced.Name}» sincronizado con la receta: {CatalogFormat.Money(synced.Cost ?? 0m)}.");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
     }
 
     private async Task ConfirmDelete(Product product)

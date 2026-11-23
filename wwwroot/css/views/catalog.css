@@ -24,8 +24,19 @@
     margin-block-start: var(--space-2);
   }
 
+  .catalog-drift__msg {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
   .catalog-drift__sync {
     min-block-size: 1.75rem;
     padding: 0.15rem 0.55rem;
+  }
+
+  /* The exact-name contract takes its own line so the warning and the button stay compact. */
+  .catalog-drift__note {
+    flex-basis: 100%;
   }
 }

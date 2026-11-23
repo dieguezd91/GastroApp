@@ -1,19 +1,26 @@
-@* Seam for S9 (task T8): the drift warning + one-click sync that sits under the product name in the catalog row.
-   It renders nothing until the page passes RecipeCost (the last recipe-calculated unit cost) and OnSync, so the
-   Products page can adopt it without touching the row layout. The drift rule itself belongs to the service (T8). *@
+@* S9 (T8): drift warning + one-click sync under the product name in the catalog row. The drift rule lives in
+   ProductService.GetRecipeCostDrift; the page passes RecipeCost only when the saved cost differs from the latest
+   recipe calculation, so nothing renders otherwise. The recipe is matched by exact product name (current contract). *@
 @if (RecipeCost is { } recipeCost)
 {
-    <div class="catalog-drift">
-        <span class="text-xs text-warn fw-600">Receta: @CatalogFormat.Money(recipeCost)</span>
+    <div class="catalog-drift" role="group" aria-label="@($"Costo desfasado de {ProductName}")">
+        <span class="text-xs text-warn fw-600 catalog-drift__msg">
+            <Icon Name="alertTriangle" Size="14" />
+            Costo desfasado: @(ProductCost.HasValue ? $"guardado {CatalogFormat.Money(ProductCost.Value)}" : "sin costo guardado") · receta @CatalogFormat.Money(recipeCost)
+        </span>
         <button type="button" class="btn btn--sm catalog-drift__sync" aria-label="@($"Sincronizar costo de {ProductName} con la receta")"
-                @onclick="OnSync">Sincronizar</button>
+                @onclick="OnSync">Sincronizar costo</button>
+        <span class="text-xs text-muted catalog-drift__note">La receta se asocia por nombre exacto («@ProductName»): mayúsculas y espacios cuentan.</span>
     </div>
 }
 
 @code {
     [Parameter] public string ProductName { get; set; } = string.Empty;
 
-    /// <summary>Unit cost from the product's recipe; null (default) hides the warning.</summary>
+    /// <summary>The product's saved cost; null when it has none.</summary>
+    [Parameter] public decimal? ProductCost { get; set; }
+
+    /// <summary>Unit (per portion) cost from the product's recipe; null (default) hides the warning.</summary>
     [Parameter] public decimal? RecipeCost { get; set; }
 
     [Parameter] public EventCallback OnSync { get; set; }
