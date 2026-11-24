@@ -46,7 +46,7 @@ else
                         <td data-label="Ítems">
                             @foreach (var item in invoice.Items)
                             {
-                                <div class="text-xs">@item.IngredientName: <strong>@PurchasingFormat.Qty(item.Quantity, item.Unit)</strong> × @PurchasingFormat.Money(item.UnitPrice)</div>
+                                <div class="text-xs">@PurchasingFormat.ItemName(item): <strong>@PurchasingFormat.Qty(item.Quantity, item.Unit)</strong> × @PurchasingFormat.Money(item.UnitPrice)</div>
                             }
                         </td>
                         <td data-label="Total" class="col-num fw-700">@PurchasingFormat.Money(invoice.Total)</td>

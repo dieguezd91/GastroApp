@@ -25,6 +25,10 @@ public static class PurchasingFormat
     /// <summary>"2,5": up to four decimals, no trailing zeros, decimal comma independent of the host culture.</summary>
     public static string Number(decimal value) => value.ToString("0.####", CultureInfo.InvariantCulture).Replace('.', ',');
 
+    /// <summary>Name of an invoice line: the one stored on the line, else "Ingrediente eliminado (#id)".</summary>
+    public static string ItemName(InvoiceItem item) =>
+        string.IsNullOrWhiteSpace(item.IngredientName) ? IngredientService.DeletedName(item.IngredientId) : item.IngredientName;
+
     /// <summary>"2,5 kg".</summary>
     public static string Qty(decimal value, string unit) => $"{Number(value)} {unit}";
 

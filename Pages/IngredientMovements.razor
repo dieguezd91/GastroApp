@@ -13,7 +13,7 @@
 {
     <InventoryView ActiveTab="InventoryTab.Movements" AlertCount="alertCount">
         <ChildContent>
-            @if (IngredientId.HasValue && ingredient == null)
+            @if (IngredientId.HasValue && ingredient == null && !IsDeleted())
             {
                 <Banner Variant="danger">
                     <ChildContent>@(notFoundMessage ?? $"No existe un ingrediente con el ID {IngredientId}.") <a href="/ingredients/movements">Ver los movimientos de todos los ingredientes</a></ChildContent>
@@ -21,6 +21,19 @@
             }
             else
             {
+                @if (IsDeleted())
+                {
+                    <section class="card card--compact row-between" aria-label="Ingrediente eliminado">
+                        <div>
+                            <h2 class="card__title">Historial de stock: @DeletedTitle()</h2>
+                            <p class="text-sm text-secondary">El ingrediente ya no existe; se conserva su historial de movimientos.</p>
+                        </div>
+                        <div class="flex-wrap-gap">
+                            <Badge Variant="neutral" Label="Eliminado" />
+                            <a href="/ingredients/movements" class="btn btn--sm">Ver todos los ingredientes</a>
+                        </div>
+                    </section>
+                }
                 @if (ingredient != null)
                 {
                     var status = InventoryFormat.StatusOf(ingredient);
@@ -71,6 +84,10 @@
                                 @foreach (var option in allIngredients)
                                 {
                                     <option value="@option.Id">@option.Name (@option.Unit)</option>
+                                }
+                                @foreach (var deletedId in deletedIds)
+                                {
+                                    <option value="@deletedId">@IngredientService.DeletedName(deletedId)</option>
                                 }
                             </select>
                         </div>
@@ -190,6 +207,8 @@
 
     private Ingredient? ingredient;
     private List<Ingredient> allIngredients = new();
+    // IDs of deleted ingredients that still have movements (their history is kept).
+    private List<int> deletedIds = new();
     private int alertCount;
     private string? notFoundMessage;
     // Movements that match the applied filters, newest first (one ingredient, or every ingredient without an id).
@@ -206,12 +225,13 @@
     {
         if (!EnsureAdmin()) return;
         allIngredients = IngredientService.GetAll().OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        deletedIds = IngredientService.GetDeletedIngredientIdsWithHistory();
         alertCount = IngredientService.GetStockAlerts().Count;
         ingredient = IngredientId.HasValue ? IngredientService.GetById(IngredientId.Value) : null;
         notFoundMessage = null;
         legacyBalance = null;
         movements = new();
-        if (IngredientId.HasValue && ingredient == null)
+        if (IngredientId.HasValue && ingredient == null && !IsDeleted())
         {
             notFoundMessage = $"No existe un ingrediente con el ID {IngredientId}.";
             return;
@@ -266,8 +286,7 @@
             filter.Types = new[] { type };
         movements = IngredientId.HasValue
             ? IngredientService.GetMovements(IngredientId.Value, filter)
-            : allIngredients.SelectMany(i => IngredientService.GetMovements(i.Id, filter))
-                .OrderByDescending(m => m.Date).ThenByDescending(m => m.Id).ToList();
+            : IngredientService.GetAllMovements(filter);
     }
 
     private void ApplyFilters()
@@ -309,8 +328,14 @@
         pageNumber = Math.Min(TotalPages(), pageNumber + 1);
     }
 
+    // A deleted ingredient keeps its movements but has no name left: they show "Ingrediente eliminado (#id)".
     private string IngredientName(StockMovement movement) =>
-        allIngredients.FirstOrDefault(i => i.Id == movement.IngredientId)?.Name ?? $"#{movement.IngredientId}";
+        allIngredients.FirstOrDefault(i => i.Id == movement.IngredientId)?.Name ?? IngredientService.DeletedName(movement.IngredientId);
+
+    // /ingredients/{id}/movements of an ingredient that was deleted but still has history.
+    private bool IsDeleted() => IngredientId.HasValue && ingredient == null && deletedIds.Contains(IngredientId.Value);
+
+    private string DeletedTitle() => IngredientService.DeletedName(IngredientId ?? 0);
 
     private string SignedQuantity(StockMovement movement) => $"{movement.Quantity.ToString("+0.####;-0.####;0")} {movement.Unit}";
 

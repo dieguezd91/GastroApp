@@ -140,8 +140,11 @@ public class SaleService
                 throw new InvalidOperationException("El registro de stock consumido es inválido.");
 
             var ingredient = _storage.Ingredients.FirstOrDefault(i => i.Id == entry.IngredientId);
-            if (ingredient == null || ingredient.Unit != entry.Unit)
-                throw new InvalidOperationException("El ingrediente ya no existe o cambió de unidad.");
+            // A deleted ingredient has no stock to restore: its entry is skipped and records nothing, so the
+            // cancellation (which has no alternative route) is never blocked by it. A changed unit still rejects.
+            if (ingredient == null) continue;
+            if (ingredient.Unit != entry.Unit)
+                throw new InvalidOperationException("El ingrediente cambió de unidad.");
 
             try
             {
@@ -747,8 +750,10 @@ public class SaleService
                     || string.IsNullOrWhiteSpace(entry.Unit))
                     throw new InvalidOperationException("El registro de stock consumido es inválido.");
                 var ingredient = _storage.Ingredients.FirstOrDefault(i => i.Id == entry.IngredientId);
-                if (ingredient == null || ingredient.Unit != entry.Unit)
-                    throw new InvalidOperationException("El ingrediente ya no existe o cambió de unidad.");
+                // Same rule as a cancellation: a deleted ingredient is skipped (nothing to restock, no movement).
+                if (ingredient == null) continue;
+                if (ingredient.Unit != entry.Unit)
+                    throw new InvalidOperationException("El ingrediente cambió de unidad.");
                 try
                 {
                     var quantity = checked(entry.Quantity * line.Quantity / item.Quantity);

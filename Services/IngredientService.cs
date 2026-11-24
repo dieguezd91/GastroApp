@@ -42,6 +42,13 @@ public class IngredientService
 
     public Ingredient? GetById(int id) => _storage.Ingredients.FirstOrDefault(i => i.Id == id);
 
+    // Historical records keep the ID of an ingredient that was deleted later; screens show this label for it
+    // (unless the record stores a name of its own).
+    public static string DeletedName(int id) => $"Ingrediente eliminado (#{id})";
+
+    // The live name, or the deleted-ingredient label.
+    public string DisplayName(int id) => GetById(id)?.Name ?? DeletedName(id);
+
     // A new ingredient is created without stock: stock only enters through purchases (invoice receipts), manual
     // adjustments, waste and physical counts. A non-zero CurrentStock is rejected so no opening balance is recorded.
     public void Add(Ingredient ingredient, User? actor = null)
@@ -150,11 +157,25 @@ public class IngredientService
     // ---- Queries (detached copies, never mutate) ----
 
     // Newest first (Date, then Id descending). Unknown ingredients yield an empty list.
-    public List<StockMovement> GetMovements(int ingredientId, StockMovementFilter? filter = null)
+    public List<StockMovement> GetMovements(int ingredientId, StockMovementFilter? filter = null) =>
+        QueryMovements(m => m.IngredientId == ingredientId, filter);
+
+    // Every movement of the ledger, including those of ingredients that no longer exist. Same order and filter.
+    public List<StockMovement> GetAllMovements(StockMovementFilter? filter = null) => QueryMovements(_ => true, filter);
+
+    // IDs that have movements but no ingredient (deleted later), ascending: the ledger keeps their history.
+    public List<int> GetDeletedIngredientIdsWithHistory()
+    {
+        var live = _storage.Ingredients.Where(i => i != null).Select(i => i.Id).ToHashSet();
+        return _storage.StockMovements.Where(m => m != null && !live.Contains(m.IngredientId))
+            .Select(m => m.IngredientId).Distinct().OrderBy(id => id).ToList();
+    }
+
+    private List<StockMovement> QueryMovements(Func<StockMovement, bool> scope, StockMovementFilter? filter)
     {
         var types = filter?.Types is { Count: > 0 } selected ? selected.ToHashSet() : null;
         return _storage.StockMovements
-            .Where(m => m != null && m.IngredientId == ingredientId && (types == null || types.Contains(m.Type))
+            .Where(m => m != null && scope(m) && (types == null || types.Contains(m.Type))
                 && InDayRange(m.Date, filter?.From, filter?.To))
             .OrderByDescending(m => m.Date).ThenByDescending(m => m.Id)
             .Select(m => m.Clone()).ToList();
@@ -217,27 +238,28 @@ public class IngredientService
         catch (OverflowException) { return null; }
     }
 
-    // Deleting would orphan recipes, invoices, sale snapshots or the ledger: those ingredients are deactivated
-    // instead (S13). An unknown ingredient stays a no-op.
+    // History never blocks a deletion: movements, invoice lines and sale consumption snapshots are kept exactly as
+    // they are, and the screens that show them fall back to the stored name or "Ingrediente eliminado (#id)".
+    // Only a current recipe that uses the ingredient rejects it, naming the recipes; nothing changes then.
+    // IDs are never reused (monotonic counter), so a later ingredient cannot inherit that history.
+    // An unknown ingredient stays a no-op.
     public void Delete(int id)
     {
         var ingredient = GetById(id);
-        if (ingredient != null)
-        {
-            if (IsReferenced(id))
-                throw new InvalidOperationException("El ingrediente tiene registros asociados; desactívelo en lugar de eliminarlo.");
-            _storage.Ingredients.Remove(ingredient);
-            _storage.SaveToFile();
-        }
-    }
+        if (ingredient == null) return;
 
-    private bool IsReferenced(int id) =>
-        HasMovements(id)
-        || _storage.Recipes.Any(r => r?.Ingredients?.Any(i => i != null && i.IngredientId == id) == true)
-        || _storage.Invoices.Any(inv => inv?.Items?.Any(i => i != null && i.IngredientId == id) == true)
-        || _storage.Sales.Any(s => s != null
-            && (s.StockConsumption?.Any(c => c != null && c.IngredientId == id) == true
-                || s.Items?.Any(line => line?.StockConsumption?.Any(c => c != null && c.IngredientId == id) == true) == true));
+        var recipeNames = _storage.Recipes
+            .Where(r => r != null && r.Ingredients?.Any(i => i != null && i.IngredientId == id) == true)
+            .Select(r => string.IsNullOrWhiteSpace(r.Name) ? $"#{r.Id}" : r.Name)
+            .Distinct().OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        if (recipeNames.Count == 1)
+            throw new InvalidOperationException($"No se puede eliminar: lo usa la receta {recipeNames[0]}. Quitalo de esa receta primero.");
+        if (recipeNames.Count > 1)
+            throw new InvalidOperationException($"No se puede eliminar: lo usan las recetas {string.Join(", ", recipeNames)}. Quitalo de esas recetas primero.");
+
+        _storage.Ingredients.Remove(ingredient);
+        _storage.SaveToFile();
+    }
 
     // Obtener último precio conocido desde facturas
     public decimal? GetLastPrice(int ingredientId)

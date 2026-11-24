@@ -276,9 +276,7 @@ harina.CurrentStock = savedStock;
 harina.Unit = "g";
 Invalid(() => Refund(s8, "x", [RL(0, 1)], [RP(PaymentMethod.Cash, 100m)], admin), "ingredient changed unit", "unidad");
 harina.Unit = "kg";
-storage.Ingredients.RemoveAt(0);
-Invalid(() => Refund(s8, "x", [RL(0, 1)], [RP(PaymentMethod.Cash, 100m)], admin), "ingredient deleted");
-storage.Ingredients.Insert(0, harina);
+// An ingredient deleted after the sale no longer blocks the refund: see the "ingredient deleted after the sale" section below.
 var harinaBeforeS8 = harina.CurrentStock;
 Refund(s8, "una unidad", [RL(0, 1)], [RP(PaymentMethod.Cash, 100m)], admin);
 Check(harina.CurrentStock == harinaBeforeS8 + 0.5m, "restock quantity is per unit snapshot * q / line quantity");
@@ -476,6 +474,57 @@ try
         "closed register FinalAmount, ExpectedAmount and CashCount unchanged by the refund");
     var closedPay = t6c.Cash.GetPaymentSummary(closedId); var openPay = t6c.Cash.GetPaymentSummary(open6.Id);
     Check(closedPay.RegisteredTotal == 150m && closedPay.RefundedTotal == 0m && openPay.RefundedTotal == 150m && openPay.NetTotal == -150m, "payment summaries: receipts stay in the closed register, refund nets the open one");
+}
+finally { Directory.SetCurrentDirectory(root); }
+
+// ---- S3: an ingredient deleted after the sale (history is kept, the ingredient is gone) ----
+// Decision: restocking a line returns only what still exists. The entry of a deleted ingredient is skipped and records
+// nothing (there is no stock to restore and no movement to attach to a missing ingredient); the refund or cancellation
+// itself, its money and the other ingredients are unaffected. A changed unit still rejects (unchanged behavior).
+try
+{
+    var dir = Path.Combine(root, "ingdel"); Directory.CreateDirectory(dir); Directory.SetCurrentDirectory(dir);
+    var st = new DataStorageService();
+    st.Users = [new User { Id = 10, Username = "fixture-admin", PasswordHash = hash, Role = UserRole.Admin }];
+    var dAdmin = st.Users[0];
+    st.Ingredients = [new Ingredient { Id = 1, Name = "Harina", Unit = "kg", CurrentStock = 100m }, new Ingredient { Id = 2, Name = "Huevos", Unit = "unidad", CurrentStock = 200m }];
+    st.Products = [new Product { Id = 1, Name = "Pizza", Price = 100m }];
+    st.Recipes = [new Recipe { Id = 1, Name = "Pizza", Ingredients = [
+        new RecipeIngredient { RecipeId = 1, IngredientId = 1, Quantity = 0.5m, Unit = "kg" },
+        new RecipeIngredient { RecipeId = 1, IngredientId = 2, Quantity = 2m, Unit = "unidad" }] }];
+    var dInvoices = new InvoiceService(st); var dIngredients = new IngredientService(st, dInvoices); var dRecipes = new RecipeService(st, dInvoices);
+    var dSales = new SaleService(st); dSales.SetRecipeService(dRecipes); dSales.SetIngredientService(dIngredients);
+    var dCash = new CashRegisterService(st, dSales); dCash.Open(100m);
+    var dPizza = st.Products[0];
+    var d1 = Simple([Line(dPizza, 2)], CashPay(200m)); dSales.Add(d1);
+    var d2 = Simple([Line(dPizza, 1)], CashPay(100m)); dSales.Add(d2);
+    var d3 = Simple([Line(dPizza, 1)], CashPay(100m)); dSales.Add(d3);
+    string MovesOf(int id) => JsonSerializer.Serialize(st.StockMovements.Where(m => m.IngredientId == id));
+    var harinaMoves = MovesOf(1); var huevosStock = st.Ingredients[1].CurrentStock; var movementTotal = st.StockMovements.Count;
+    st.Recipes[0].Ingredients.RemoveAll(i => i.IngredientId == 1);   // a recipe uses it => deletion would be rejected
+    dIngredients.Delete(1);
+    Check(st.Ingredients.All(i => i.Id != 1) && MovesOf(1) == harinaMoves && st.StockMovements.Count == movementTotal, "ingredient deleted after the sale: its movements stay untouched");
+
+    var refund1 = dSales.Refund(d1.Id, "devuelto", [RL(0, 1)], [RP(PaymentMethod.Cash, 100m)], dAdmin);
+    var added = st.StockMovements.Skip(movementTotal).ToList();
+    Check(refund1.Lines.Single().Disposition == RefundDisposition.Restock && st.SaleRefunds.Count == 1 && st.CashMovements.Any(m => m.Type == CashMovementType.Refund && m.Amount == 100m),
+        "Restock refund of a line whose ingredient was deleted is accepted: refund and cash recorded");
+    Check(added.Count == 1 && added[0].IngredientId == 2 && added[0].Type == StockMovementType.RefundReturn && added[0].Quantity == 2m && added[0].RefundId == refund1.Id && st.Ingredients[0].CurrentStock == huevosStock + 2m && MovesOf(1) == harinaMoves,
+        "the deleted ingredient is skipped (no movement, no stock); the remaining ingredient is restocked in proportion");
+    var beforeCancel = st.StockMovements.Count; var huevosBeforeCancel = st.Ingredients[0].CurrentStock;
+    dSales.Cancel(d2.Id, "error", dAdmin);
+    var cancelAdded = st.StockMovements.Skip(beforeCancel).ToList();
+    Check(d2.Status == SaleStatus.Cancelled && cancelAdded.Count == 1 && cancelAdded[0].IngredientId == 2 && cancelAdded[0].Type == StockMovementType.SaleCancellationReturn && st.Ingredients[0].CurrentStock == huevosBeforeCancel + 2m && MovesOf(1) == harinaMoves,
+        "cancelling a sale with a deleted ingredient is accepted: the sale is voided, the existing ingredient is restored, the deleted one is skipped");
+    st.Recipes[0].Ingredients.RemoveAll(i => i.IngredientId == 2); dIngredients.Delete(2);
+    var beforeEmpty = st.StockMovements.Count;
+    var refund3 = dSales.Refund(d3.Id, "devuelto", [RL(0, 1)], [RP(PaymentMethod.Cash, 100m)], dAdmin);
+    Check(st.StockMovements.Count == beforeEmpty && st.SaleRefunds.Count == 2 && refund3.Total == 100m, "when every ingredient of the line is deleted the refund is recorded with no stock movement");
+    var d4 = Simple([Line(dPizza, 1)], CashPay(100m)); dSales.Add(d4);
+    Check(d4.StockConsumption != null && d4.StockConsumption.Count == 0 && st.StockMovements.Count == beforeEmpty, "PRESERVE: a new sale of a product whose recipe lost its ingredients consumes nothing");
+    var d5 = Simple([Line(dPizza, 1)], CashPay(100m)); dSales.Add(d5);
+    dSales.Cancel(d5.Id, "sin consumo", dAdmin);
+    Check(d5.Status == SaleStatus.Cancelled && st.StockMovements.Count == beforeEmpty, "cancelling a sale that consumed nothing records no movement");
 }
 finally { Directory.SetCurrentDirectory(root); }
 

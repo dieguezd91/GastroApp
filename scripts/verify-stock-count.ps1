@@ -381,6 +381,24 @@ if (pageType != null)
     Check(Call(ap, "OnParametersSet") == null && Get(ap, "detail") == null && Msg(ap, "detailMessage") == null, "list route clears the detail");
     Check(Call(ap, "ShowDetail", 2) == null && anav.Destination == "/stock/count/2" && Call(ap, "CloseDetail") == null && anav.Destination == "/stock/count", "show and close detail navigate without forcing a reload");
 
+    // S3: counts keep their stored ingredient names after the ingredient is deleted (history is kept, the ingredient is gone).
+    storage.SaveToFile(); var countsBeforeDelete = JsonSerializer.Serialize(new { storage.StockCounts, storage.StockMovements }); var salId = sal.Id;
+    ingredients.Delete(salId);
+    Check(ingredients.GetById(salId) == null && JsonSerializer.Serialize(new { storage.StockCounts, storage.StockMovements }) == countsBeforeDelete, "deleting a counted ingredient keeps every count and movement byte-identical");
+    var delCountId = storage.StockCounts.First(c => c.Lines.Any(l => l.IngredientId == salId)).Id;
+    SetId(ap, delCountId);
+    var deletedDetail = (StockCount?)null; Exception? deletedFailure = Call(ap, "OnParametersSet");
+    deletedDetail = (StockCount?)Get(ap, "detail");
+    Check(deletedFailure == null && deletedDetail != null && deletedDetail.Lines.Any(l => l.IngredientId == salId && l.IngredientName == "Sal") && Msg(ap, "detailMessage") == null, "count detail with a deleted ingredient loads and shows its stored name");
+    SetId(ap, null);
+    var (fresh, _) = NewPage(uiAdmin); var listFailure = Call(fresh, "OnParametersSet");
+    Check(listFailure == null && Rows(fresh).Count > 0 && Rows(fresh).Cast<object>().All(r => (int)rowType.GetProperty("Id")!.GetValue(r)! != salId), "a freshly loaded new-count list no longer offers the deleted ingredient and loads without exceptions");
+    var deletedRoute = Call(ap, "ShowDetail", delCountId);
+    Check(deletedRoute == null && anav.Destination == "/stock/count/" + delCountId, "PRESERVE: the detail navigation still works after the deletion");
+    var ghostPreviewFailure = (Exception?)null;
+    try { counts.Preview([new StockCountLineInput { IngredientId = salId, CountedStock = 1m }]); } catch (Exception ex) { ghostPreviewFailure = ex; }
+    Check(ghostPreviewFailure is InvalidOperationException && ghostPreviewFailure.Message == "El ingrediente no existe.", "a new count cannot include a deleted ingredient (stale selection is rejected with a message)");
+
     // Source wiring.
     string Src(string path) => File.ReadAllText(Path.Combine(args[0], path.Replace('/', Path.DirectorySeparatorChar)));
     var pageSource = Src("Pages/StockCount.razor"); var navSource = Src("Shared/NavMenu.razor"); var program = Src("Program.cs");

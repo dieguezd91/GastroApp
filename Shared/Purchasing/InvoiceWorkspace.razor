@@ -165,7 +165,7 @@
                                 added[ingredient.Id] = already + converted.Value;
                             }
                             <tr @key="item">
-                                <th scope="row">@item.IngredientName</th>
+                                <th scope="row">@PurchasingFormat.ItemName(item)</th>
                                 <td data-label="Cantidad" class="col-num">@PurchasingFormat.Qty(item.Quantity, item.Unit)</td>
                                 <td data-label="Precio unit." class="col-num">@PurchasingFormat.Money(item.UnitPrice)</td>
                                 <td data-label="Stock">
@@ -185,7 +185,7 @@
                                 </td>
                                 <td data-label="Subtotal" class="col-num fw-700">@PurchasingFormat.Money(item.Subtotal)</td>
                                 <td class="col-actions">
-                                    <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Quitar {item.IngredientName}")"
+                                    <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Quitar {PurchasingFormat.ItemName(item)}")"
                                             @onclick="() => OnRemove.InvokeAsync(item)">
                                         <Icon Name="trash" Size="15" />
                                     </button>

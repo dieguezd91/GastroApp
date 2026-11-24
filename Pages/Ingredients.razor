@@ -326,7 +326,8 @@
 
     <ModalDialog @ref="deleteDialog" Title="@($"¿Eliminar «{pendingDelete?.Name}»?")" OnClosed="HandleDeleteClosed">
         <ChildContent>
-            <p>Solo se pueden eliminar ingredientes sin movimientos, recetas ni facturas asociadas. Si los tiene, desactivalo en lugar de eliminarlo.</p>
+            <p>El ingrediente desaparece del stock, de las alertas y de los selectores. Su historial (movimientos, ventas y facturas) se conserva y seguirá visible como «Ingrediente eliminado».</p>
+            <p class="text-sm text-secondary">Si alguna receta lo usa no se puede eliminar: quitalo de la receta primero. Si solo querés dejar de usarlo, desactivalo.</p>
         </ChildContent>
         <Footer>
             <button value="cancel" class="btn" autofocus>Cancelar</button>

@@ -132,7 +132,11 @@ catch (Exception ex) { Check(false, "alert checks aborted: " + ex.GetType().Name
 
 // ---- S13: integrity guards ----
 const string UnitMessage = "No se puede cambiar la unidad de un ingrediente con stock o movimientos.";
-const string DeleteMessage = "El ingrediente tiene registros asociados; desact\u00edvelo en lugar de eliminarlo.";
+// S2: deletion is rejected only while a current recipe uses the ingredient, naming the recipes (sorted by name).
+string RecipeBlock(params string[] names) => names.Length == 1
+    ? $"No se puede eliminar: lo usa la receta {names[0]}. Quitalo de esa receta primero."
+    : $"No se puede eliminar: lo usan las recetas {string.Join(", ", names)}. Quitalo de esas recetas primero.";
+string Deleted(int id) => $"Ingrediente eliminado (#{id})";
 var harina = Make("Harina", "kg", 100m, 10m);
 var azucar = Make("Azucar", "kg", 2m); ingredients.RegisterWaste(azucar.Id, 2m, WasteCategory.Otro, "todo", admin);
 var sal = Make("Sal", "kg", 0m);
@@ -155,12 +159,34 @@ var ventaAgregada = Make("EnVentaAgregada", "kg", 0m); var ventaLinea = Make("En
 storage.Sales.Add(new Sale { Id = storage.GetNextSaleId(), Items = [new SaleItem { ProductId = 1, ProductName = "Pizza", Price = 1m, Quantity = 1 }], StockConsumption = [new SaleStockConsumption { IngredientId = ventaAgregada.Id, Quantity = 1m, Unit = "kg" }] });
 storage.Sales.Add(new Sale { Id = storage.GetNextSaleId(), Items = [new SaleItem { ProductId = 1, ProductName = "Pizza", Price = 1m, Quantity = 1, StockConsumption = [new SaleStockConsumption { IngredientId = ventaLinea.Id, Quantity = 1m, Unit = "kg" }] }, new SaleItem { ProductId = 2, ProductName = "Legado", Price = 1m, Quantity = 1 }], StockConsumption = null });
 var libre = Make("Libre", "kg", 0m);
-foreach (var (target, why) in new[] { (receta, "a recipe"), (factura, "an invoice item"), (ventaAgregada, "a sale consumption snapshot"), (ventaLinea, "a sale line consumption snapshot"), (azucar, "stock movements"), (harina, "recipes' stock and movements") })
-    Invalid(() => ingredients.Delete(target.Id), "delete of an ingredient referenced by " + why, DeleteMessage);
-Check(storage.Ingredients.Contains(receta) && storage.Ingredients.Contains(azucar), "rejected deletes keep the ingredient listed");
-var freeId = libre.Id;
-ingredients.Delete(freeId);
-Check(storage.Ingredients.All(i => i.Id != freeId) && !File.ReadAllText("data.json").Contains("\"Libre\""), "an unreferenced ingredient is deleted and saved");
+// S2: a recipe that uses the ingredient blocks the deletion and names itself; nothing changes (objects, ledger, counters, file bytes).
+Invalid(() => ingredients.Delete(receta.Id), "delete of an ingredient used by a recipe", RecipeBlock("Pizza"));
+var enDos = Make("EnDosRecetas", "kg", 0m);
+storage.Recipes.Add(new Recipe { Id = 3, Name = "Flan", Ingredients = [new RecipeIngredient { RecipeId = 3, IngredientId = enDos.Id, Quantity = 1m, Unit = "kg" }] });
+storage.Recipes.Add(new Recipe { Id = 2, Name = "Caldo de huesos", Ingredients = [new RecipeIngredient { RecipeId = 2, IngredientId = enDos.Id, Quantity = 1m, Unit = "kg" }, new RecipeIngredient { RecipeId = 2, IngredientId = enDos.Id, Quantity = 2m, Unit = "kg" }] });
+Invalid(() => ingredients.Delete(enDos.Id), "delete of an ingredient used by two recipes (listed once each, sorted by name)", RecipeBlock("Caldo de huesos", "Flan"));
+Check(storage.Ingredients.Contains(receta) && storage.Ingredients.Contains(enDos), "rejected deletes keep the ingredient listed");
+// S1: history alone (movements, invoice items, sale consumption snapshots) never blocks; every record stays byte-identical.
+string History() => JsonSerializer.Serialize(new { storage.StockMovements, storage.Sales, storage.SaleRefunds, storage.Invoices, storage.StockCounts, storage.Recipes, storage.CashMovements });
+string FileHistory() { var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText("data.json"))!.AsObject(); return string.Join("|", new[] { "StockMovements", "Sales", "SaleRefunds", "Invoices", "StockCounts", "Recipes", "CashMovements" }.Select(k => node[k]?.ToJsonString())); }
+var deletedIds = new List<int>();
+foreach (var (target, why) in new[] { (factura, "an invoice item"), (ventaAgregada, "a sale consumption snapshot"), (ventaLinea, "a sale line consumption snapshot"), (azucar, "stock movements") })
+{
+    storage.SaveToFile();
+    var historyBefore = History(); var fileBefore = FileHistory(); var movementsOfTarget = Mv(target.Id).Length; var ledger = storage.StockMovements.Count; var targetId = target.Id; var remaining = storage.Ingredients.Count - 1;
+    ingredients.Delete(targetId); deletedIds.Add(targetId);
+    Check(storage.Ingredients.All(i => i.Id != targetId) && storage.Ingredients.Count == remaining && ingredients.GetById(targetId) == null, "delete of an ingredient with " + why + " succeeds");
+    Check(History() == historyBefore && FileHistory() == fileBefore && storage.StockMovements.Count == ledger && Mv(targetId).Length == movementsOfTarget, "after deleting an ingredient with " + why + " movements, sales, invoices, refunds, counts and recipes are byte-identical in memory and in data.json");
+}
+Check(deletedIds.Count == 4 && Mv(azucar.Id).Length > 0, "deleted fixtures keep their movements");
+var fresh = Make("Posterior", "kg", 0m);
+Check(fresh.Id > deletedIds.Max() && Mv(fresh.Id).Length == 0 && ingredients.GetMovements(fresh.Id).Count == 0, "ids are never reused: a new ingredient does not inherit the history of a deleted one");
+Check(ingredients.DisplayName(fresh.Id) == "Posterior" && ingredients.DisplayName(deletedIds[0]) == Deleted(deletedIds[0]) && IngredientService.DeletedName(7) == Deleted(7), "DisplayName: live name, else 'Ingrediente eliminado (#id)'");
+var allMovements = ingredients.GetAllMovements();
+Check(allMovements.Count == storage.StockMovements.Count && allMovements.Any(m => m.IngredientId == azucar.Id) && allMovements.Select(m => m.Id).SequenceEqual(allMovements.OrderByDescending(m => m.Date).ThenByDescending(m => m.Id).Select(m => m.Id)),
+    "GetAllMovements lists every movement, deleted ingredients included, newest first");
+Check(ingredients.GetAllMovements(new StockMovementFilter { Types = [StockMovementType.Waste] }).All(m => m.Type == StockMovementType.Waste) && ingredients.GetAllMovements(new StockMovementFilter { Types = [StockMovementType.Waste] }).Any(m => m.IngredientId == azucar.Id), "GetAllMovements honors the filter");
+Check(ingredients.GetDeletedIngredientIdsWithHistory().Contains(azucar.Id) && !ingredients.GetDeletedIngredientIdsWithHistory().Contains(fresh.Id) && !ingredients.GetDeletedIngredientIdsWithHistory().Contains(98765), "ids that have movements but no ingredient are reported once, ordered");
 var beforeUnknown = State(); ingredients.Delete(98765);
 Check(State() == beforeUnknown, "PRESERVE: Delete of an unknown ingredient stays a no-op");
 
@@ -259,10 +285,18 @@ if (pageType != null)
     // Delete guard.
     Call(p, "OnInitializedAsync");
     var beforeDelete = State();
-    Check(Call(p, "DeleteIngredient", receta.Id) == null && Str(p, "deleteError") == DeleteMessage && (int)Get(p, "deleteErrorId")! == receta.Id && State() == beforeDelete && storage.Ingredients.Contains(receta), "deleting a referenced ingredient shows the guard message next to it and changes nothing");
+    Check(Call(p, "DeleteIngredient", receta.Id) == null && Str(p, "deleteError") == RecipeBlock("Pizza") && (int)Get(p, "deleteErrorId")! == receta.Id && State() == beforeDelete && storage.Ingredients.Contains(receta), "deleting an ingredient used by a recipe shows the recipe-naming message next to it and changes nothing");
     var disposable = Make("Descartable", "kg", 0m); storage.SaveToFile();
     Check(Call(p, "DeleteIngredient", disposable.Id) == null && storage.Ingredients.All(i => i.Id != disposable.Id) && Str(p, "deleteError") == null && (int)Get(p, "deleteErrorId")! == 0, "deleting an unreferenced ingredient works and clears the error");
     Check(Call(p, "DeleteIngredient", 98765) == null && Str(p, "deleteError") == null, "PRESERVE: deleting an unknown ingredient stays a no-op in the page");
+    var withHistory = Make("ConHistoria", "kg", 5m); ingredients.RegisterWaste(withHistory.Id, 1m, WasteCategory.Otro, "prueba", admin); storage.SaveToFile();
+    var historyId = withHistory.Id; var historyPageBefore = History(); var historyFileBefore = FileHistory();
+    Check(Call(p, "DeleteIngredient", historyId) == null && storage.Ingredients.All(i => i.Id != historyId) && Str(p, "deleteError") == null && (int)Get(p, "deleteErrorId")! == 0 && History() == historyPageBefore && FileHistory() == historyFileBefore && Mv(historyId).Length == 2,
+        "deleting an ingredient with history works in the page and keeps its movements, sales and invoices byte-identical");
+    deletedIds.Add(historyId);
+    var dialogSource = Src("Pages/Ingredients.razor");
+    Check(dialogSource.Contains("desaparece del stock, de las alertas y de los selectores") && dialogSource.Contains("se conserva") && dialogSource.Contains("quitalo de la receta primero") && !dialogSource.Contains("Solo se pueden eliminar ingredientes sin movimientos"),
+        "S4: the delete dialog explains that history is kept but the ingredient leaves stock, alerts and pickers, and that a recipe blocks it");
 
     // Adjust dialog.
     Check(Call(p, "ShowStockAdjust", harina) == null && (int)Get(p, "adjustIngredientId")! == harina.Id && Get(p, "adjustNewStock") == null && Str(p, "adjustReason") == null && !(bool)Get(p, "adjustConfirmed")!, "adjust dialog opens empty for the ingredient");
@@ -421,6 +455,27 @@ if (movementsType != null)
     Check(Get(missing, "ingredient") == null && Str(missing, "notFoundMessage") == "No existe un ingrediente con el ID 98765." && mnav.Destination == null && RowIds(missing).Length == 0, "unknown ingredient shows a Spanish message");
     Check(Call(hp, "OnParametersSet") == null && Get(hp, "ingredient") != null, "parameter change reloads");
 
+    // S3: the Movimientos tab keeps working for deleted ingredients (movements are kept, the ingredient is gone).
+    var goneId = azucar.Id; var goneMovements = Mv(goneId);
+    var gp = MovePage(uiAdmin, goneId, out var gnav);
+    Check(Call(gp, "OnParametersSet") == null && gnav.Destination == null && Get(gp, "ingredient") == null && Str(gp, "notFoundMessage") == null && RowIds(gp).SequenceEqual(ingredients.GetMovements(goneId).Select(m => m.Id)) && RowIds(gp).Length == goneMovements.Length,
+        "/ingredients/{id}/movements of a deleted ingredient lists its history, without the not-found message and without exceptions");
+    Check((string)Func(gp, "IngredientName", goneMovements[0])! == Deleted(goneId) && (string)Func(gp, "DeletedTitle")! == Deleted(goneId) && (bool)Func(gp, "IsDeleted")!, "deleted ingredient: the row and the header show 'Ingrediente eliminado (#id)'");
+    Set(gp, "filterType", nameof(StockMovementType.Waste));
+    Check(Call(gp, "ApplyFilters") == null && RowIds(gp).Length == goneMovements.Count(m => m.Type == StockMovementType.Waste) && Str(gp, "historyError") == null, "filters keep working on the history of a deleted ingredient");
+    var ap2 = (object)NewPage(movementsType, uiAdmin, out _);
+    Check(Call(ap2, "OnParametersSet") == null && RowIds(ap2).Length == storage.StockMovements.Count && RowIds(ap2).Intersect(goneMovements.Select(m => m.Id)).Count() == goneMovements.Length,
+        "the all-ingredients list includes the movements of deleted ingredients");
+    Check(((System.Collections.IEnumerable)Get(ap2, "deletedIds")!).Cast<int>().Contains(goneId) && (string)Func(ap2, "IngredientName", goneMovements[0])! == Deleted(goneId) && (string)Func(ap2, "IngredientName", Mv(cacao.Id)[0])! == "Cacao",
+        "the ingredient filter offers deleted ingredients with history and names live ones normally");
+    Set(ap2, "filterType", nameof(StockMovementType.Waste));
+    Check(Call(ap2, "ApplyFilters") == null && RowIds(ap2).Intersect(goneMovements.Where(m => m.Type == StockMovementType.Waste).Select(m => m.Id)).Any(), "cause filter in the all-ingredients list includes deleted ingredients");
+    foreach (var (auth, destination) in new[] { (uiAnon, "/login"), (uiEmployee, "/unauthorized") })
+    {
+        var np = MovePage(auth, goneId, out var nnav);
+        Check(Call(np, "OnParametersSet") == null && nnav.Destination == destination && RowIds(np).Length == 0, "PRESERVE: " + destination + " circuits still load nothing for a deleted ingredient id");
+    }
+
     // Mid-session demotion.
     var dp = MovePage(uiSecond, cacao.Id, out var dnav); Call(dp, "OnParametersSet");
     var loadedBefore = Get(dp, "movements"); admin2.Role = UserRole.Employee;
@@ -456,6 +511,19 @@ if (invoicesType != null)
         var np = NewPage(invoicesType, auth, out var nnav); Set(np, "editingInvoice", good); var guardedInvoice = State();
         Check(Call(np, "SaveInvoice") == null && nnav.Destination == destination && State() == guardedInvoice, "PRESERVE: " + destination + " circuits cannot save invoices");
     }
+    // S3: invoices keep their stored names; a draft that picked an ingredient deleted meanwhile degrades with the existing messages.
+    var ghostId = deletedIds[0];
+    Check(Call(ip, "ShowAddForm") == null && Call(ip, "SelectIngredient", ghostId) == null && Str(ip, "itemUnit") == "", "invoices page: picking a deleted ingredient id does not throw and offers no unit");
+    Set(ip, "itemQuantityText", "1"); Set(ip, "itemUnitPriceText", "5");
+    Check(Call(ip, "AddItem") == null && Str(ip, "builderError") == "El ingrediente seleccionado ya no existe." && ((Invoice)Get(ip, "editingInvoice")!).Items.Count == 0, "invoices page: adding a deleted ingredient shows 'ya no existe' and adds nothing");
+    var storedNameItem = new InvoiceItem { IngredientId = ghostId, IngredientName = "Nombre guardado", Quantity = 1m, Unit = "kg", UnitPrice = 5m };
+    var blankNameItem = new InvoiceItem { IngredientId = ghostId, IngredientName = "  ", Quantity = 1m, Unit = "kg", UnitPrice = 5m };
+    var purchasingFormat = asm.GetType("GastroApp.Shared.Purchasing.PurchasingFormat")!;
+    string? ItemName(InvoiceItem item) => (string?)purchasingFormat.GetMethod("ItemName", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, new object[] { item });
+    Check(ItemName(storedNameItem) == "Nombre guardado" && ItemName(blankNameItem) == Deleted(ghostId), "invoice lines of a deleted ingredient show the stored name, else 'Ingrediente eliminado (#id)'");
+    decimal? lastPriceOfDeleted = -1m; Exception? lastPriceFailure = null;
+    try { lastPriceOfDeleted = ingredients.GetLastPrice(ghostId); } catch (Exception ex) { lastPriceFailure = ex; }
+    Check(lastPriceFailure == null && lastPriceOfDeleted == invoices.GetLastPriceForIngredient(ghostId) && lastPriceOfDeleted == 0m, "last price of a deleted ingredient comes from its kept invoice lines without throwing");
     var invoicesSource = Src("Pages/Invoices.razor");
     Check(invoicesSource.Contains("InvoiceService.Add(editingInvoice, AuthService.CurrentUser)") && invoicesSource.Contains("catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)") && invoicesSource.Contains("@invoiceError"), "Invoices page guards InvoiceService.Add and renders the error");
 }
@@ -463,6 +531,7 @@ if (invoicesType != null)
 // ---- Docs ----
 var stockDoc = File.Exists(Path.Combine(repoRoot, "Docs", "Architecture", "Stock.md")) ? Src("Docs/Architecture/Stock.md") : "";
 Check(stockDoc.Contains("## Physical counts") && stockDoc.Contains("Saldo previo sin historial") && stockDoc.Contains("GetStockAlerts") && stockDoc.Contains("negative"), "Stock.md documents the ledger, alerts, negative stock policy, previous balance and a Physical counts heading");
+Check(stockDoc.Contains("Ingrediente eliminado (#id)") && stockDoc.Contains("Quitalo de esa receta primero") && !stockDoc.Contains("registros asociados") && stockDoc.Contains("never reused") && stockDoc.Contains("skipped"), "S8: Stock.md documents deleting with history, the recipe block, the deleted-ingredient label and the restock skip");
 var salesDoc = Src("Docs/Architecture/Sales.md");
 Check(!salesDoc.Contains("still saves after each successful ingredient deduction") && salesDoc.Contains("Stock.md"), "Sales.md no longer describes TryRemoveStock and points to Stock.md");
 var features = Src("IMPLEMENTED_FEATURES.md");
