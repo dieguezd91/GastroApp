@@ -2,10 +2,10 @@
   "Products": [
     {
       "Id": 1,
-      "Name": "Caf\u00E9",
+      "Name": "Café",
       "Price": 150,
       "Cost": 50,
-      "Margin": 66.666666666666666666666666670,
+      "Margin": 66.66666666666667,
       "MarginColor": "green"
     },
     {
@@ -59,7 +59,7 @@
       "Name": "Garron",
       "Unit": "kg",
       "IsActive": true,
-      "CurrentStock": 3,
+      "CurrentStock": 0,
       "MinStock": 0,
       "StockIndicator": "green"
     },
@@ -83,55 +83,7 @@
       "Name": "ejemplo de proveedor 2"
     }
   ],
-  "Invoices": [
-    {
-      "Id": 1,
-      "Date": "2026-02-04T15:01:48.9837106-03:00",
-      "SupplierId": 1,
-      "InvoiceNumber": "A0001",
-      "Notes": "",
-      "Items": [
-        {
-          "InvoiceId": 1,
-          "IngredientId": 2,
-          "IngredientName": "Garron",
-          "Quantity": 1,
-          "Unit": "kg",
-          "UnitPrice": 1000,
-          "Subtotal": 1000
-        },
-        {
-          "InvoiceId": 1,
-          "IngredientId": 3,
-          "IngredientName": "Vinagre",
-          "Quantity": 5,
-          "Unit": "lt",
-          "UnitPrice": 6000,
-          "Subtotal": 30000
-        }
-      ],
-      "Total": 31000
-    },
-    {
-      "Id": 2,
-      "Date": "2026-02-04T23:38:38.9404519-03:00",
-      "SupplierId": 1,
-      "InvoiceNumber": "A-0001-123123",
-      "Notes": "",
-      "Items": [
-        {
-          "InvoiceId": 2,
-          "IngredientId": 2,
-          "IngredientName": "Garron",
-          "Quantity": 3,
-          "Unit": "kg",
-          "UnitPrice": 1500,
-          "Subtotal": 4500
-        }
-      ],
-      "Total": 4500
-    }
-  ],
+  "Invoices": [],
   "Recipes": [
     {
       "Id": 1,
@@ -155,11 +107,11 @@
           "Quantity": 0.125,
           "Unit": "lt",
           "UnitPrice": 6000,
-          "Subtotal": 750.000
+          "Subtotal": 750.0
         }
       ],
-      "TotalCost": 2750.000,
-      "UnitCost": 550.000,
+      "TotalCost": 2750.0,
+      "UnitCost": 550.0,
       "LastCalculatedCost": 0,
       "LastCalculatedAt": null,
       "CostIndicator": "red"
