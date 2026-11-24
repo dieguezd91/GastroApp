@@ -29,6 +29,26 @@ public static class PurchasingFormat
     public static string ItemName(InvoiceItem item) =>
         string.IsNullOrWhiteSpace(item.IngredientName) ? IngredientService.DeletedName(item.IngredientId) : item.IngredientName;
 
+    /// <summary>"21%", "10,5%": an IVA rate as shown to the user.</summary>
+    public static string Percent(decimal rate) => Number(rate) + "%";
+
+    /// <summary>"10.5": the invariant text of a rate, used as the value of its select option.</summary>
+    public static string RateKey(decimal rate) => Number(rate).Replace(',', '.');
+
+    /// <summary>"Factura A".</summary>
+    public static string TypeLabel(InvoiceType type) => $"Factura {type}";
+
+    /// <summary>Shown for invoices stored before the invoice type existed: never reinterpreted, their price is their cost.</summary>
+    public const string LegacyTypeLabel = "Tipo no informado · precio final";
+
+    /// <summary>Legend text printed on a factura A (empty for None).</summary>
+    public static string LegendLabel(InvoiceLegend legend) => legend switch
+    {
+        InvoiceLegend.OperacionSujetaARetencion => "OPERACIÓN SUJETA A RETENCIÓN",
+        InvoiceLegend.PagoEnCbuInformada => "PAGO EN CBU INFORMADA",
+        _ => string.Empty
+    };
+
     /// <summary>"2,5 kg".</summary>
     public static string Qty(decimal value, string unit) => $"{Number(value)} {unit}";
 
@@ -79,7 +99,7 @@ public static class PurchasingFormat
     }
 
     /// <summary>One-line live preview of the line being composed (stock impact and subtotal).</summary>
-    public static string LinePreview(Ingredient? ingredient, string unit, string? quantityText, string? priceText)
+    public static string LinePreview(Ingredient? ingredient, string unit, string? quantityText, string? priceText, InvoiceType? type = null, decimal vatRate = 0m)
     {
         if (ingredient == null)
             return "Elegí un ingrediente para ver la unidad compatible y el impacto en stock.";
@@ -96,7 +116,14 @@ public static class PurchasingFormat
         var text = $"Impacto en stock: +{Qty(converted.Value, ingredient.Unit)} (de {Qty(ingredient.CurrentStock, ingredient.Unit)} a {Qty(ingredient.CurrentStock + converted.Value, ingredient.Unit)})";
         if (TryParseDecimal(priceText, out var price) && price > 0m)
         {
-            text += $" · Subtotal: {Money(quantity * price)}";
+            if (type == InvoiceType.A)
+            {
+                // Factura A: the typed price is net, so the preview shows the net subtotal and the IVA at the chosen rate.
+                var net = quantity * price;
+                text += $" · Subtotal neto: {Money(net)} · IVA {Percent(vatRate)}: {Money(Math.Round(net * vatRate / 100m, 2, MidpointRounding.AwayFromZero))}";
+            }
+            else
+                text += $" · Subtotal: {Money(quantity * price)}";
             if (converts) text += $" · Se registra a {Money(BuildItem(ingredient, quantity, unit, price)!.UnitPrice)} por {ingredient.Unit}";
         }
         return text;

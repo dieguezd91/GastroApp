@@ -2,7 +2,11 @@
    with a running total and the stock impact of every line. The unit control is poka-yoke (§4): it only offers units
    UnitConverter can convert to the ingredient's unit, `unidad` is fixed and weight / volume get a 2-option segmented
    control. A line typed in another compatible unit is stored in the ingredient's unit (see PurchasingFormat.BuildItem).
+   Fiscal data (docs/Architecture/Purchasing.md): the invoice type is derived from the business and the supplier and shown
+   read-only; on factura A the typed price is net and every line has an IVA rate, on B it is final and an informative
+   IVA contenido may be given, on C it is final and no VAT field exists. Other taxes are listed below the lines.
    The page owns the state and every service write; this component only renders it and raises callbacks. *@
+@using System.Globalization
 @using GastroApp.Models
 @using GastroApp.Services
 @inject IngredientService IngredientService
@@ -12,6 +16,18 @@
     IReadOnlyList<string> options = selected == null ? Array.Empty<string>() : PurchasingFormat.UnitOptions(selected.Unit);
     var added = new Dictionary<int, decimal>(); // stock already added to each ingredient by the lines above
     var canSave = CanSave();
+    var type = Invoice.Type;
+    var isA = type == InvoiceType.A;
+    var isB = type == InvoiceType.B;
+    var unitName = string.IsNullOrEmpty(Unit) ? "unidad" : Unit;
+    var priceLabel = type switch
+    {
+        InvoiceType.A => $"Precio neto por {unitName} (sin IVA)",
+        InvoiceType.B => $"Precio final por {unitName} (IVA incluido)",
+        InvoiceType.C => $"Precio final por {unitName}",
+        _ => $"Precio por {unitName} ($)"
+    };
+    var hasContainedVat = PurchasingFormat.TryParseDecimal(ContainedVatText, out var containedVat);
 }
 
 <div class="page-header">
@@ -30,9 +46,19 @@
         <Banner Variant="danger">@FormError</Banner>
     }
 
+    @if (BusinessCondition == null)
+    {
+        <Banner Variant="warn">Configurá la condición frente al IVA del negocio en <a href="/settings/fiscal">Datos fiscales</a> antes de registrar facturas.</Banner>
+    }
+
     @if (Suppliers.Count == 0)
     {
         <Banner Variant="warn">No hay proveedores cargados. Creá uno en <a href="/suppliers">Proveedores</a> para poder registrar la factura.</Banner>
+    }
+
+    @if (!string.IsNullOrEmpty(TypeNotice))
+    {
+        <Banner Variant="info">@TypeNotice</Banner>
     }
 
     <div class="form-grid">
@@ -42,18 +68,59 @@
         </div>
         <div class="field">
             <label class="field__label" for="invoice-supplier">Proveedor <span class="field__req" aria-hidden="true">*</span></label>
-            <select id="invoice-supplier" class="select" @bind="Invoice.SupplierId">
+            <select id="invoice-supplier" class="select" @bind:get="Invoice.SupplierId" @bind:set="HandleSupplier">
                 <option value="0">Seleccionar...</option>
                 @foreach (var supplier in Suppliers)
                 {
-                    <option value="@supplier.Id">@supplier.Name</option>
+                    <option value="@supplier.Id" disabled="@(!supplier.HasFiscalData)">@supplier.Name@(supplier.HasFiscalData ? string.Empty : " (datos fiscales incompletos)")</option>
                 }
             </select>
         </div>
+        @if (type.HasValue)
+        {
+            <div class="field">
+                <span class="field__label" id="invoice-type-label">Tipo de factura</span>
+                <output id="invoice-type" class="unit-static" aria-labelledby="invoice-type-label">@PurchasingFormat.TypeLabel(type.Value)</output>
+                <span class="field__hint">
+                    @if (isA)
+                    {
+                        <text>Se deriva de la condición del negocio y del proveedor. El precio se carga neto (sin IVA) y cada ítem lleva su alícuota.</text>
+                    }
+                    else if (isB)
+                    {
+                        <text>Se deriva de la condición del negocio y del proveedor. El precio se carga final (IVA incluido).</text>
+                    }
+                    else
+                    {
+                        <text>Se deriva de la condición del negocio y del proveedor. El precio se carga final: la factura C no discrimina IVA.</text>
+                    }
+                </span>
+            </div>
+        }
         <div class="field">
             <label class="field__label" for="invoice-number">Número de factura (opcional)</label>
             <input id="invoice-number" type="text" class="input" autocomplete="off" placeholder="Ej: A-0001-12345678" @bind="Invoice.InvoiceNumber" />
         </div>
+        @if (isA)
+        {
+            <div class="field">
+                <label class="field__label" for="invoice-legend">Leyenda (opcional)</label>
+                <select id="invoice-legend" class="select" @bind="Invoice.Legend">
+                    <option value="@InvoiceLegend.None">Sin leyenda</option>
+                    <option value="@InvoiceLegend.OperacionSujetaARetencion">@PurchasingFormat.LegendLabel(InvoiceLegend.OperacionSujetaARetencion)</option>
+                    <option value="@InvoiceLegend.PagoEnCbuInformada">@PurchasingFormat.LegendLabel(InvoiceLegend.PagoEnCbuInformada)</option>
+                </select>
+            </div>
+        }
+        @if (isB)
+        {
+            <div class="field">
+                <label class="field__label" for="invoice-contained-vat">IVA contenido (informativo)</label>
+                <input id="invoice-contained-vat" type="number" min="0" step="any" inputmode="decimal" class="input tnum" placeholder="Ej: 210"
+                       @bind:get="ContainedVatText" @bind:set="HandleContainedVat" @bind:event="oninput" />
+                <span class="field__hint">Importe de IVA impreso en la factura B (RG 5614/2024). Es informativo: no es crédito fiscal y no suma al total.</span>
+            </div>
+        }
     </div>
 
     <div class="field">
@@ -75,7 +142,7 @@
                 <Banner Variant="danger">@BuilderError</Banner>
             }
 
-            <div class="invoice-builder">
+            <div class="invoice-builder @(isA ? "invoice-builder--vat" : null)">
                 <div class="field">
                     <label class="field__label" for="invoice-ingredient">Ingrediente activo</label>
                     <select id="invoice-ingredient" class="select select--compact" @bind:get="SelectedIngredientId" @bind:set="HandleIngredient">
@@ -117,10 +184,22 @@
                     }
                 </div>
                 <div class="field">
-                    <label class="field__label" for="invoice-price">Precio por @(string.IsNullOrEmpty(Unit) ? "unidad" : Unit) ($)</label>
+                    <label class="field__label" for="invoice-price">@priceLabel</label>
                     <input id="invoice-price" type="number" min="0" step="any" inputmode="decimal" class="input input--compact tnum" placeholder="Ej: 2950"
                            @bind:get="PriceText" @bind:set="HandlePrice" @bind:event="oninput" @onkeydown="HandleKey" />
                 </div>
+                @if (isA)
+                {
+                    <div class="field">
+                        <label class="field__label" for="invoice-vat-rate">Alícuota IVA</label>
+                        <select id="invoice-vat-rate" class="select select--compact" @bind:get="PurchasingFormat.RateKey(VatRate)" @bind:set="HandleVatRate">
+                            @foreach (var rate in FiscalRules.VatRates)
+                            {
+                                <option value="@PurchasingFormat.RateKey(rate)">@PurchasingFormat.Percent(rate)</option>
+                            }
+                        </select>
+                    </div>
+                }
                 <div class="invoice-builder__add">
                     <button type="button" class="btn btn--primary btn--sm btn--block" @onclick="OnAdd">
                         <Icon Name="plus" Size="15" />
@@ -130,7 +209,7 @@
             </div>
 
             <div class="live-preview-strip" aria-live="polite" id="invoice-line-preview">
-                <span>@PurchasingFormat.LinePreview(selected, Unit, QuantityText, PriceText)</span>
+                <span>@PurchasingFormat.LinePreview(selected, Unit, QuantityText, PriceText, type, VatRate)</span>
             </div>
         }
 
@@ -146,9 +225,13 @@
                         <tr>
                             <th scope="col">Ingrediente</th>
                             <th scope="col" class="col-num">Cantidad</th>
-                            <th scope="col" class="col-num">Precio unit.</th>
+                            <th scope="col" class="col-num">@(isA ? "Precio neto unit." : "Precio unit.")</th>
+                            @if (isA)
+                            {
+                                <th scope="col" class="col-num">Alícuota IVA</th>
+                            }
                             <th scope="col">Impacto en stock</th>
-                            <th scope="col" class="col-num">Subtotal</th>
+                            <th scope="col" class="col-num">@(isA ? "Subtotal neto" : "Subtotal")</th>
                             <th scope="col" class="col-actions">Quitar</th>
                         </tr>
                     </thead>
@@ -168,6 +251,10 @@
                                 <th scope="row">@PurchasingFormat.ItemName(item)</th>
                                 <td data-label="Cantidad" class="col-num">@PurchasingFormat.Qty(item.Quantity, item.Unit)</td>
                                 <td data-label="Precio unit." class="col-num">@PurchasingFormat.Money(item.UnitPrice)</td>
+                                @if (isA)
+                                {
+                                    <td data-label="Alícuota IVA" class="col-num">@(item.VatRate.HasValue ? PurchasingFormat.Percent(item.VatRate.Value) : "—")</td>
+                                }
                                 <td data-label="Stock">
                                     @if (ingredient == null)
                                     {
@@ -198,6 +285,103 @@
         }
     </fieldset>
 
+    <fieldset class="fieldset stack stack--sm">
+        <legend>Percepciones y otros impuestos (opcional)</legend>
+
+        @if (!string.IsNullOrEmpty(TaxError))
+        {
+            <Banner Variant="danger">@TaxError</Banner>
+        }
+
+        <div class="invoice-builder invoice-builder--tax">
+            <div class="field">
+                <label class="field__label" for="invoice-tax-kind">Tributo</label>
+                <select id="invoice-tax-kind" class="select select--compact" @bind:get="TaxKindKey" @bind:set="HandleTaxKind">
+                    @foreach (var kind in Enum.GetValues<InvoiceTaxKind>())
+                    {
+                        if (kind == InvoiceTaxKind.PercepcionIva && !isA) continue; // la percepción de IVA solo corresponde a facturas A
+                        <option value="@((int)kind)">@FiscalRules.Label(kind)</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label class="field__label" for="invoice-tax-detail">@TaxDetailLabel</label>
+                <input id="invoice-tax-detail" type="text" class="input input--compact" autocomplete="off" placeholder="@TaxDetailPlaceholder"
+                       @bind:get="TaxDetail" @bind:set="HandleTaxDetail" @bind:event="oninput" @onkeydown="HandleTaxKey" />
+            </div>
+            <div class="field">
+                <label class="field__label" for="invoice-tax-amount">Importe ($)</label>
+                <input id="invoice-tax-amount" type="number" min="0" step="any" inputmode="decimal" class="input input--compact tnum" placeholder="Ej: 150"
+                       @bind:get="TaxAmountText" @bind:set="HandleTaxAmount" @bind:event="oninput" @onkeydown="HandleTaxKey" />
+            </div>
+            <div class="invoice-builder__add">
+                <button type="button" class="btn btn--sm btn--block" @onclick="OnAddTax">
+                    <Icon Name="plus" Size="15" />
+                    <span>Agregar tributo</span>
+                </button>
+            </div>
+        </div>
+        <p class="text-xs text-muted">Los tributos suman al total de la factura pero no forman parte del costo de ningún ingrediente.</p>
+
+        @if (Invoice.OtherTaxes.Count > 0)
+        {
+            <div class="table-wrapper" tabindex="0" role="region" aria-label="Tributos agregados a la factura">
+                <table class="data-table data-table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Tributo</th>
+                            <th scope="col">Detalle</th>
+                            <th scope="col" class="col-num">Importe</th>
+                            <th scope="col" class="col-actions">Quitar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var tax in Invoice.OtherTaxes)
+                        {
+                            <tr @key="tax">
+                                <th scope="row">@FiscalRules.Label(tax.Kind)</th>
+                                <td data-label="Detalle">@(string.IsNullOrWhiteSpace(tax.Detail) ? "—" : tax.Detail)</td>
+                                <td data-label="Importe" class="col-num fw-700">@PurchasingFormat.Money(tax.Amount)</td>
+                                <td class="col-actions">
+                                    <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Quitar {FiscalRules.Label(tax.Kind)}")"
+                                            @onclick="() => OnRemoveTax.InvokeAsync(tax)">
+                                        <Icon Name="trash" Size="15" />
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </fieldset>
+
+    @if (Invoice.Items.Count > 0 || Invoice.OtherTaxes.Count > 0)
+    {
+        <div class="card card--compact card--subtle stack stack--sm invoice-totals" aria-live="polite">
+            @if (isA)
+            {
+                <div class="row-between text-sm"><span>Neto gravado</span><span class="tnum">@PurchasingFormat.Money(Invoice.NetTotal)</span></div>
+                @foreach (var line in Invoice.VatByRate)
+                {
+                    <div class="row-between text-sm"><span>IVA @PurchasingFormat.Percent(line.Rate) (sobre @PurchasingFormat.Money(line.Net))</span><span class="tnum">@PurchasingFormat.Money(line.Vat)</span></div>
+                }
+            }
+            else
+            {
+                <div class="row-between text-sm"><span>@(isB ? "Subtotal (IVA incluido)" : "Subtotal")</span><span class="tnum">@PurchasingFormat.Money(Invoice.NetTotal)</span></div>
+                @if (isB && hasContainedVat)
+                {
+                    <div class="row-between text-sm text-muted"><span>IVA contenido (informativo, ya incluido en el subtotal)</span><span class="tnum">@PurchasingFormat.Money(containedVat)</span></div>
+                }
+            }
+            @foreach (var tax in Invoice.OtherTaxes)
+            {
+                <div class="row-between text-sm"><span>@FiscalRules.Label(tax.Kind)@(string.IsNullOrWhiteSpace(tax.Detail) ? string.Empty : $" · {tax.Detail.Trim()}")</span><span class="tnum">@PurchasingFormat.Money(tax.Amount)</span></div>
+            }
+        </div>
+    }
+
     <div class="card card--compact card--subtle row-between invoice-total">
         <span class="text-sm fw-700">Total factura (@Invoice.Items.Count ítem(s))</span>
         <span class="fw-700 tnum invoice-total__amount">@PurchasingFormat.Money(Invoice.Total)</span>
@@ -206,7 +390,7 @@
     <div class="workspace-panel__footer">
         @if (!canSave)
         {
-            <span id="invoice-save-hint" class="text-sm text-muted invoice-save-hint">Elegí un proveedor y agregá al menos un ítem para guardar.</span>
+            <span id="invoice-save-hint" class="text-sm text-muted invoice-save-hint">@(BusinessCondition == null ? "Configurá los datos fiscales del negocio para poder guardar." : "Elegí un proveedor y agregá al menos un ítem para guardar.")</span>
         }
         <button type="button" class="btn" @onclick="OnCancel">Cancelar</button>
         <button type="button" class="btn btn--primary btn--lg" disabled="@(!canSave)" aria-describedby="@(canSave ? null : "invoice-save-hint")" @onclick="OnSave">Guardar factura e ingresar stock</button>
@@ -223,14 +407,26 @@
     /// <summary>Active ingredients the builder can pick from.</summary>
     [Parameter] public IReadOnlyList<Ingredient> Ingredients { get; set; } = Array.Empty<Ingredient>();
 
+    /// <summary>The business's own condition frente al IVA; null while it is not configured (invoices cannot be registered).</summary>
+    [Parameter] public TaxCondition? BusinessCondition { get; set; }
+
+    /// <summary>Notice shown when changing the supplier changed the invoice type and removed what was typed.</summary>
+    [Parameter] public string? TypeNotice { get; set; }
+
     /// <summary>Error of the whole form (the service rejected the invoice).</summary>
     [Parameter] public string? FormError { get; set; }
 
     /// <summary>Validation error of the line picker (add).</summary>
     [Parameter] public string? BuilderError { get; set; }
 
+    /// <summary>Validation error of the other-tax picker (add).</summary>
+    [Parameter] public string? TaxError { get; set; }
+
     /// <summary>Save rule of the page, evaluated on every render: the supplier select changes the invoice without a page callback.</summary>
     [Parameter] public Func<bool> CanSave { get; set; } = () => false;
+
+    /// <summary>The supplier select goes through the page: choosing one derives the invoice type.</summary>
+    [Parameter] public EventCallback<int> SupplierIdChanged { get; set; }
 
     [Parameter] public int SelectedIngredientId { get; set; }
     [Parameter] public EventCallback<int> SelectedIngredientIdChanged { get; set; }
@@ -244,10 +440,46 @@
     [Parameter] public string PriceText { get; set; } = string.Empty;
     [Parameter] public EventCallback<string?> PriceTextChanged { get; set; }
 
+    /// <summary>Factura A: IVA rate (percent) of the line being composed.</summary>
+    [Parameter] public decimal VatRate { get; set; } = 21m;
+    [Parameter] public EventCallback<decimal> VatRateChanged { get; set; }
+
+    /// <summary>Factura B: informative IVA contenido as typed.</summary>
+    [Parameter] public string ContainedVatText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> ContainedVatTextChanged { get; set; }
+
+    [Parameter] public InvoiceTaxKind TaxKind { get; set; } = InvoiceTaxKind.PercepcionIibb;
+    [Parameter] public EventCallback<InvoiceTaxKind> TaxKindChanged { get; set; }
+
+    [Parameter] public string TaxDetail { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> TaxDetailChanged { get; set; }
+
+    [Parameter] public string TaxAmountText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string?> TaxAmountTextChanged { get; set; }
+
     [Parameter] public EventCallback OnAdd { get; set; }
     [Parameter] public EventCallback<InvoiceItem> OnRemove { get; set; }
+    [Parameter] public EventCallback OnAddTax { get; set; }
+    [Parameter] public EventCallback<InvoiceTax> OnRemoveTax { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string TaxKindKey => ((int)TaxKind).ToString(CultureInfo.InvariantCulture);
+
+    // The detail is the jurisdiction of an IIBB perception and the description of "Otros tributos"; both are required by the service.
+    private string TaxDetailLabel => TaxKind switch
+    {
+        InvoiceTaxKind.PercepcionIibb => "Jurisdicción",
+        InvoiceTaxKind.OtrosTributos => "Descripción",
+        _ => "Detalle (opcional)"
+    };
+
+    private string TaxDetailPlaceholder => TaxKind switch
+    {
+        InvoiceTaxKind.PercepcionIibb => "Ej: Córdoba",
+        InvoiceTaxKind.OtrosTributos => "Ej: Tasa municipal",
+        _ => string.Empty
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -255,11 +487,27 @@
         if (firstRender) await heading.FocusAsync();
     }
 
+    private Task HandleSupplier(int id) => SupplierIdChanged.InvokeAsync(id);
+
     private Task HandleIngredient(int id) => SelectedIngredientIdChanged.InvokeAsync(id);
 
     private Task HandleQuantity(string? value) => QuantityTextChanged.InvokeAsync(value);
 
     private Task HandlePrice(string? value) => PriceTextChanged.InvokeAsync(value);
 
+    private Task HandleVatRate(string? value) =>
+        PurchasingFormat.TryParseDecimal(value, out var rate) ? VatRateChanged.InvokeAsync(rate) : Task.CompletedTask;
+
+    private Task HandleContainedVat(string? value) => ContainedVatTextChanged.InvokeAsync(value);
+
+    private Task HandleTaxKind(string? value) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var kind) ? TaxKindChanged.InvokeAsync((InvoiceTaxKind)kind) : Task.CompletedTask;
+
+    private Task HandleTaxDetail(string? value) => TaxDetailChanged.InvokeAsync(value);
+
+    private Task HandleTaxAmount(string? value) => TaxAmountTextChanged.InvokeAsync(value);
+
     private Task HandleKey(KeyboardEventArgs e) => e.Key == "Enter" ? OnAdd.InvokeAsync() : Task.CompletedTask;
+
+    private Task HandleTaxKey(KeyboardEventArgs e) => e.Key == "Enter" ? OnAddTax.InvokeAsync() : Task.CompletedTask;
 }

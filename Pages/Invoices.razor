@@ -5,6 +5,7 @@
 @inject InvoiceService InvoiceService
 @inject SupplierService SupplierService
 @inject IngredientService IngredientService
+@inject BusinessSettingsService BusinessSettingsService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
 
@@ -15,12 +16,20 @@
     @if (showForm)
     {
         <InvoiceWorkspace Invoice="editingInvoice" Suppliers="suppliers" Ingredients="activeIngredients"
-                          FormError="@invoiceError" BuilderError="@builderError" CanSave="CanSaveInvoice"
+                          BusinessCondition="BusinessSettingsService.TaxCondition" TypeNotice="@typeNotice"
+                          FormError="@invoiceError" BuilderError="@builderError" TaxError="@taxError" CanSave="CanSaveInvoice"
+                          SupplierIdChanged="SetSupplier"
                           SelectedIngredientId="selectedIngredientId" SelectedIngredientIdChanged="SelectIngredient"
                           QuantityText="@itemQuantityText" QuantityTextChanged="SetQuantity"
                           Unit="@itemUnit" UnitChanged="SetUnit"
                           PriceText="@itemUnitPriceText" PriceTextChanged="SetUnitPrice"
-                          OnAdd="AddItem" OnRemove="RemoveItem" OnSave="SaveInvoice" OnCancel="CancelEdit" />
+                          VatRate="itemVatRate" VatRateChanged="SetVatRate"
+                          ContainedVatText="@containedVatText" ContainedVatTextChanged="SetContainedVat"
+                          TaxKind="taxKind" TaxKindChanged="SetTaxKind"
+                          TaxDetail="@taxDetail" TaxDetailChanged="SetTaxDetail"
+                          TaxAmountText="@taxAmountText" TaxAmountTextChanged="SetTaxAmount"
+                          OnAdd="AddItem" OnRemove="RemoveItem" OnAddTax="AddTax" OnRemoveTax="RemoveTax"
+                          OnSave="SaveInvoice" OnCancel="CancelEdit" />
     }
     else
     {
@@ -51,6 +60,9 @@
 }
 
 @code {
+    private const decimal DefaultVatRate = 21m;
+    private const InvoiceTaxKind DefaultTaxKind = InvoiceTaxKind.PercepcionIibb;
+
     private List<Invoice> invoices = new();
     private List<Supplier> suppliers = new();
     private List<Ingredient> activeIngredients = new();
@@ -59,12 +71,23 @@
     private bool showForm = false;
     private string? invoiceError;
     private string? builderError;
+    private string? taxError;
+    private string? typeNotice;
 
     // Para agregar items
     private int selectedIngredientId = 0;
     private string itemQuantityText = string.Empty;
     private string itemUnit = string.Empty;
     private string itemUnitPriceText = string.Empty;
+    private decimal itemVatRate = DefaultVatRate; // Factura A only: the rate of the next line
+
+    // Factura B: informative IVA contenido, parsed when saving
+    private string containedVatText = string.Empty;
+
+    // Other taxes: the row being composed
+    private InvoiceTaxKind taxKind = DefaultTaxKind;
+    private string taxDetail = string.Empty;
+    private string taxAmountText = string.Empty;
 
     private PurchasingView? purchasingView;
     private ModalDialog? deleteDialog;
@@ -119,7 +142,11 @@
         LoadData();
         invoiceError = null;
         builderError = null;
+        taxError = null;
+        typeNotice = null;
         ResetPicker();
+        ResetTaxInputs();
+        containedVatText = string.Empty;
         editingInvoice = new Invoice { Date = DateTime.Now };
         showForm = true;
     }
@@ -130,6 +157,53 @@
         itemQuantityText = string.Empty;
         itemUnit = string.Empty;
         itemUnitPriceText = string.Empty;
+        itemVatRate = DefaultVatRate;
+    }
+
+    private void ResetTaxInputs()
+    {
+        taxKind = DefaultTaxKind;
+        taxDetail = string.Empty;
+        taxAmountText = string.Empty;
+    }
+
+    // The type is derived from the business and the supplier (S3), never chosen. Null when it cannot be derived yet.
+    private InvoiceType? DerivedType(int supplierId)
+    {
+        var business = BusinessSettingsService.TaxCondition;
+        var supplier = SupplierService.GetById(supplierId);
+        if (business == null || supplier == null || !supplier.HasFiscalData) return null;
+        return FiscalRules.ExpectedInvoiceType(supplier.TaxCondition!.Value, business.Value);
+    }
+
+    private string TypeUnavailableMessage() =>
+        BusinessSettingsService.TaxCondition == null ? "Configurá la condición frente al IVA del negocio en Datos fiscales antes de registrar facturas."
+        : editingInvoice.SupplierId <= 0 ? "Seleccioná un proveedor antes de agregar ítems."
+        : "Completá el CUIT y la condición frente al IVA del proveedor antes de registrar la factura.";
+
+    private void SetSupplier(int supplierId)
+    {
+        if (!EnsureAdmin()) return;
+        editingInvoice.SupplierId = supplierId;
+        var newType = DerivedType(supplierId);
+        var typeChanged = editingInvoice.Type != newType;
+        editingInvoice.Type = newType;
+        typeNotice = null;
+        if (!typeChanged) return;
+
+        // What was typed under the previous type (net or final prices, rates, IVA contenido, perceptions) no longer applies.
+        var hadData = editingInvoice.Items.Count > 0 || editingInvoice.OtherTaxes.Count > 0
+            || editingInvoice.ContainedVat.HasValue || !string.IsNullOrWhiteSpace(containedVatText);
+        editingInvoice.Items.Clear();
+        editingInvoice.OtherTaxes.Clear();
+        editingInvoice.ContainedVat = null;
+        editingInvoice.Legend = InvoiceLegend.None;
+        containedVatText = string.Empty;
+        ResetTaxInputs();
+        builderError = null;
+        taxError = null;
+        invoiceError = null;
+        if (hadData) typeNotice = "Se quitaron los ítems porque cambió el tipo de factura.";
     }
 
     private void SelectIngredient(int ingredientId)
@@ -160,6 +234,40 @@
         var ingredient = selectedIngredientId == 0 ? null : IngredientService.GetById(selectedIngredientId);
         if (ingredient == null || !PurchasingFormat.UnitOptions(ingredient.Unit).Contains(unit)) return;
         itemUnit = unit;
+    }
+
+    private void SetVatRate(decimal rate)
+    {
+        if (!EnsureAdmin()) return;
+        // Poka-yoke: only the rates of FiscalRules.VatRates can be chosen.
+        if (!FiscalRules.VatRates.Contains(rate)) return;
+        itemVatRate = rate;
+    }
+
+    private void SetContainedVat(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        containedVatText = text ?? string.Empty;
+    }
+
+    private void SetTaxKind(InvoiceTaxKind kind)
+    {
+        if (!EnsureAdmin()) return;
+        if (!Enum.IsDefined(kind)) return;
+        taxKind = kind;
+        taxError = null;
+    }
+
+    private void SetTaxDetail(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        taxDetail = text ?? string.Empty;
+    }
+
+    private void SetTaxAmount(string? text)
+    {
+        if (!EnsureAdmin()) return;
+        taxAmountText = text ?? string.Empty;
     }
 
     private void AddItem()
@@ -196,6 +304,23 @@
             return;
         }
 
+        // The price means net or final depending on the type, so no line is taken before the type is known.
+        editingInvoice.Type ??= DerivedType(editingInvoice.SupplierId);
+        if (editingInvoice.Type == null)
+        {
+            builderError = TypeUnavailableMessage();
+            return;
+        }
+        if (editingInvoice.Type == InvoiceType.A)
+        {
+            if (!FiscalRules.VatRates.Contains(itemVatRate))
+            {
+                builderError = "Elegí una alícuota de IVA válida.";
+                return;
+            }
+            item.VatRate = itemVatRate;
+        }
+
         editingInvoice.Items.Add(item);
 
         // Reset
@@ -211,15 +336,69 @@
         builderError = null;
     }
 
+    private void AddTax()
+    {
+        if (!EnsureAdmin()) return;
+        if (!PurchasingFormat.TryParseDecimal(taxAmountText, out var amount) || amount <= 0)
+        {
+            taxError = "Ingresá un importe mayor a cero.";
+            return;
+        }
+        // The jurisdiction / description is validated by the service when saving.
+        if (taxKind == InvoiceTaxKind.PercepcionIva && editingInvoice.Type != InvoiceType.A)
+        {
+            taxError = "La percepción de IVA solo corresponde a facturas A.";
+            return;
+        }
+
+        editingInvoice.OtherTaxes.Add(new InvoiceTax { Kind = taxKind, Detail = taxDetail, Amount = amount });
+        taxError = null;
+        invoiceError = null;
+        taxDetail = string.Empty;
+        taxAmountText = string.Empty;
+    }
+
+    private void RemoveTax(InvoiceTax tax)
+    {
+        if (!EnsureAdmin()) return;
+        editingInvoice.OtherTaxes.Remove(tax);
+        taxError = null;
+    }
+
+    // Save rule, evaluated on every render: the business condition must be set and a supplier with fiscal data chosen.
+    // Everything else (type, rates, taxes) is validated by the service and surfaces in the form error.
     private bool CanSaveInvoice()
     {
-        return editingInvoice.SupplierId > 0 && editingInvoice.Items.Any();
+        if (BusinessSettingsService.TaxCondition == null) return false;
+        if (editingInvoice.SupplierId <= 0 || !editingInvoice.Items.Any()) return false;
+        var supplier = SupplierService.GetById(editingInvoice.SupplierId);
+        return supplier == null || supplier.HasFiscalData;
+    }
+
+    // Factura B only: a blank field means no IVA contenido; anything that is not a number stays in the form.
+    private bool ApplyContainedVat()
+    {
+        if (editingInvoice.Type != InvoiceType.B) return true;
+        if (string.IsNullOrWhiteSpace(containedVatText))
+        {
+            editingInvoice.ContainedVat = null;
+            return true;
+        }
+        if (!PurchasingFormat.TryParseDecimal(containedVatText, out var containedVat))
+        {
+            invoiceError = "Ingresá un IVA contenido válido.";
+            return false;
+        }
+        editingInvoice.ContainedVat = containedVat;
+        return true;
     }
 
     private void SaveInvoice()
     {
         if (!EnsureAdmin()) return;
         if (!CanSaveInvoice())
+            return;
+        if (!ApplyContainedVat())
             return;
 
         var itemCount = editingInvoice.Items.Count;
@@ -262,7 +441,11 @@
         focusListHeading = true;
         invoiceError = null;
         builderError = null;
+        taxError = null;
+        typeNotice = null;
+        containedVatText = string.Empty;
         editingInvoice = new Invoice();
         ResetPicker();
+        ResetTaxInputs();
     }
 }

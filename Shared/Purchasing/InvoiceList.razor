@@ -1,4 +1,6 @@
 @* Invoices tab panel (prototype renderPurchasing, tab "invoices"): empty state or the table of registered invoices.
+   Each invoice shows its type; factura A also breaks down neto, IVA and other taxes, and invoices stored before the
+   type existed are marked "Tipo no informado · precio final" and never reinterpreted.
    Read-only: the page owns the data and the delete flow. *@
 @using GastroApp.Models
 
@@ -33,9 +35,22 @@ else
                 @foreach (var invoice in Invoices)
                 {
                     var label = string.IsNullOrEmpty(invoice.InvoiceNumber) ? $"Factura #{invoice.Id}" : invoice.InvoiceNumber;
+                    var isA = invoice.Type == InvoiceType.A;
                     <tr @key="invoice.Id">
                         <th scope="row">
                             <div>@label</div>
+                            @if (invoice.Type.HasValue)
+                            {
+                                <Badge Variant="info" Label="@PurchasingFormat.TypeLabel(invoice.Type.Value)" />
+                            }
+                            else
+                            {
+                                <Badge Variant="neutral" Label="@PurchasingFormat.LegacyTypeLabel" />
+                            }
+                            @if (invoice.Legend != InvoiceLegend.None)
+                            {
+                                <div class="text-xs text-muted fw-600">@PurchasingFormat.LegendLabel(invoice.Legend)</div>
+                            }
                             @if (!string.IsNullOrWhiteSpace(invoice.Notes))
                             {
                                 <div class="text-xs text-muted fw-600">@invoice.Notes</div>
@@ -46,10 +61,24 @@ else
                         <td data-label="Ítems">
                             @foreach (var item in invoice.Items)
                             {
-                                <div class="text-xs">@PurchasingFormat.ItemName(item): <strong>@PurchasingFormat.Qty(item.Quantity, item.Unit)</strong> × @PurchasingFormat.Money(item.UnitPrice)</div>
+                                <div class="text-xs">@PurchasingFormat.ItemName(item): <strong>@PurchasingFormat.Qty(item.Quantity, item.Unit)</strong> × @PurchasingFormat.Money(item.UnitPrice)@(isA && item.VatRate.HasValue ? $" neto + IVA {PurchasingFormat.Percent(item.VatRate.Value)}" : string.Empty)</div>
                             }
                         </td>
-                        <td data-label="Total" class="col-num fw-700">@PurchasingFormat.Money(invoice.Total)</td>
+                        <td data-label="Total" class="col-num fw-700">
+                            <div>@PurchasingFormat.Money(invoice.Total)</div>
+                            @if (isA)
+                            {
+                                <div class="text-xs text-muted fw-600">Neto @PurchasingFormat.Money(invoice.NetTotal) · IVA @PurchasingFormat.Money(invoice.VatTotal)</div>
+                            }
+                            else if (invoice.Type == InvoiceType.B && invoice.ContainedVat.HasValue)
+                            {
+                                <div class="text-xs text-muted fw-600">IVA contenido (informativo) @PurchasingFormat.Money(invoice.ContainedVat.Value)</div>
+                            }
+                            @if (invoice.OtherTaxes.Count > 0)
+                            {
+                                <div class="text-xs text-muted fw-600">Otros tributos @PurchasingFormat.Money(invoice.OtherTaxesTotal)</div>
+                            }
+                        </td>
                         <td class="col-actions">
                             <button type="button" class="btn btn--ghost btn--icon" aria-label="@($"Eliminar {label}")" @onclick="() => OnDelete.InvokeAsync(invoice)">
                                 <Icon Name="trash" Size="15" />
