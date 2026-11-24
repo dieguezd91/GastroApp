@@ -48,8 +48,17 @@ var counts = new StockCountService(storage, ingredients);
 
 Ingredient NewIngredient(string name, string unit, decimal stock, decimal min, bool active = true)
 {
-    var i = new Ingredient { Name = name, Unit = unit, CurrentStock = stock, MinStock = min, IsActive = active };
+    // New ingredients are created without stock; a fixture with stock models data stored before that rule:
+    // the ingredient plus a legacy InitialStock movement written straight into the ledger.
+    var i = new Ingredient { Name = name, Unit = unit, MinStock = min, IsActive = active };
     ingredients.Add(i, Copy(admin));
+    if (stock != 0m)
+    {
+        i.CurrentStock = stock;
+        storage.StockMovements.Add(new StockMovement { Id = storage.GetNextStockMovementId(), IngredientId = i.Id, Date = DateTime.Now, Type = StockMovementType.InitialStock, Quantity = stock, Unit = unit,
+            PreviousStock = 0m, ResultingStock = stock, UserId = admin.Id, Username = admin.Username });
+        storage.SaveToFile();
+    }
     return i;
 }
 var harina = NewIngredient("Harina", "kg", 10m, 2m);

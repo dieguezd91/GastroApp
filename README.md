@@ -113,7 +113,7 @@ Ingredients, movements and physical counts are the tabs of the **Ingredientes e 
 - name;
 - base unit;
 - active/inactive state;
-- current stock;
+- current stock (read-only: a new ingredient starts without stock and receives it through purchase invoices, adjustments, waste or counts);
 - minimum stock threshold.
 
 Supported units are currently:

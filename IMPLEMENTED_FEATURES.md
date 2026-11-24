@@ -221,7 +221,7 @@ Admin functionality:
 - delete ingredients;
 - activate/deactivate ingredients;
 - configure a base unit;
-- define the opening stock of a new ingredient (recorded as an `InitialStock` movement);
+- create ingredients without stock (stock is loaded with purchase invoices; a non-zero stock on creation is rejected; legacy `InitialStock` movements stay readable);
 - define minimum stock;
 - adjust stock with a mandatory reason and confirmation (**Ajustar stock**);
 - register waste with category and reason (**Registrar merma**);

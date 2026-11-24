@@ -15,13 +15,13 @@ A `StockMovement` has a stable `Id`, `IngredientId`, `Date`, `Type`, a **signed*
 | `Adjustment` (4) | ± | manual | mandatory |
 | `Waste` (5) | − | manual, with `WasteCategory` | mandatory |
 | `CountAdjustment` (6) | ± | stock count | mandatory |
-| `InitialStock` (7) | + | opening balance of a new ingredient | no |
+| `InitialStock` (7) | + | opening balance of an ingredient created before the rule below (legacy, never written again) | no |
 
-Numeric values are persisted: never reorder. Spanish labels live in `StockMovementLabels`. Waste categories (independent from sales): Vencimiento, Rotura o derrame, Error de preparación, Otro.
+Numeric values are persisted: never reorder. `InitialStock` (label **Stock inicial**, origin **Alta del ingrediente**) is kept only so movements already stored stay readable. Spanish labels live in `StockMovementLabels`. Waste categories (independent from sales): Vencimiento, Rotura o derrame, Error de preparación, Otro.
 
 ## Single mutation path
 
-`CurrentStock` is only written by `IngredientService.Commit`, after `Prepare` validated a whole batch without mutating anything: unknown ingredient, incompatible unit, zero or wrongly signed quantity, missing reason or category, overflow, exhausted IDs and a decrease below zero are rejected, leaving objects, counters and `data.json` bytes unchanged. `Commit` cannot fail after `Prepare`; the caller saves once. `Update` never changes stock (the edit form shows it read-only), and `AddStock`/`TryRemoveStock` no longer exist. Loading `data.json` validates the ledger (balances, signs, links) and rejects a corrupt file; history of deleted ingredients or invoices stays loadable.
+`CurrentStock` is only written by `IngredientService.Commit`, after `Prepare` validated a whole batch without mutating anything: unknown ingredient, incompatible unit, zero or wrongly signed quantity, missing reason or category, overflow, exhausted IDs and a decrease below zero are rejected, leaving objects, counters and `data.json` bytes unchanged. `Commit` cannot fail after `Prepare`; the caller saves once. `IngredientService.Add` creates an ingredient **without stock**: a non-zero `CurrentStock` is rejected with `Un ingrediente nuevo se crea sin stock: el stock ingresa con las facturas de compra.`, leaving ingredients, ledger, counters and `data.json` unchanged, and the create form has no stock field (it links to `/invoices`). Stock enters through invoice receipts (purchases) and, afterwards, manual adjustment, waste and physical count. `Update` never changes stock (the edit form shows it read-only), and `AddStock`/`TryRemoveStock` no longer exist. Loading `data.json` validates the ledger (balances, signs, links) and rejects a corrupt file; history of deleted ingredients or invoices stays loadable.
 
 Callers pass the circuit user as `actor`; manual commands (`AdjustStock`, `RegisterWaste`, `ApplyCountAdjustments`) revalidate a live Admin through `DataStorageService.RequireLiveAdmin`.
 

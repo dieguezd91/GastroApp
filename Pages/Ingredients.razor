@@ -205,8 +205,8 @@
                 @if (editingIngredient.Id == 0)
                 {
                     <div class="field">
-                        <label class="field__label" for="ingredient-initial">Stock inicial</label>
-                        <input id="ingredient-initial" type="number" class="input tnum" step="any" placeholder="0" @bind="editingIngredient.CurrentStock" />
+                        <span class="field__label">Stock actual</span>
+                        <span class="field__hint">El ingrediente se crea sin stock. El stock se carga con las <a href="/invoices">facturas de compra</a>.</span>
                     </div>
                 }
                 else

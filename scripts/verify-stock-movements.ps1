@@ -83,23 +83,38 @@ Check(StockMovementLabels.GetLabel(WasteCategory.Vencimiento) == "Vencimiento" &
 Check(typeof(IngredientService).GetMethods(flags).All(m => m.Name != "AddStock" && m.Name != "TryRemoveStock"), "AddStock/TryRemoveStock direct mutators are gone");
 Check(storage.StockMovements.Count == 0, "fresh store has an empty ledger");
 
-// ---- InitialStock on Add ----
+// ---- Add creates ingredients without stock (S1); legacy InitialStock movements stay readable (S3) ----
+const string NoOpeningStock = "Un ingrediente nuevo se crea sin stock: el stock ingresa con las facturas de compra.";
+Invalid(() => ingredients.Add(new Ingredient { Name = "Harina", Unit = "kg", CurrentStock = 100m }, Copy(admin)), "Add with positive stock", NoOpeningStock);
+Invalid(() => ingredients.Add(new Ingredient { Name = "Huevos", Unit = "unidad", CurrentStock = 10m }, null), "Add with positive stock and no actor", NoOpeningStock);
+Invalid(() => ingredients.Add(new Ingredient { Name = "Tiny", Unit = "kg", CurrentStock = 0.0001m }), "Add with a tiny positive stock", NoOpeningStock);
+Invalid(() => ingredients.Add(new Ingredient { Name = "Neg", Unit = "kg", CurrentStock = -1m }, admin), "Add with negative stock", NoOpeningStock);
+Check(storage.Ingredients.Count == 0 && storage.StockMovements.Count == 0, "rejected creations leave no ingredient and no movement");
+Reject(() => ingredients.Add(new Ingredient { Name = "Stale", Unit = "kg", CurrentStock = 0m }, new User { Id = 10, Username = "fixture-admin", PasswordHash = "old", Role = UserRole.Admin }),
+    typeof(UnauthorizedAccessException), "stale actor on Add", "vigente");
+
+// Fixtures with stock model data stored before this rule: an ingredient plus a legacy InitialStock movement written straight into the ledger.
+Ingredient Legacy(string name, string unit, decimal stock, User? actor)
+{
+    var i = new Ingredient { Name = name, Unit = unit };
+    ingredients.Add(i, actor);
+    i.CurrentStock = stock;
+    storage.StockMovements.Add(new StockMovement { Id = storage.GetNextStockMovementId(), IngredientId = i.Id, Date = DateTime.Now, Type = StockMovementType.InitialStock, Quantity = stock, Unit = unit,
+        PreviousStock = 0m, ResultingStock = stock, UserId = actor?.Id, Username = actor?.Username });
+    storage.SaveToFile();
+    return i;
+}
 var t0 = DateTime.Now;
-var harina = new Ingredient { Name = "Harina", Unit = "kg", CurrentStock = 100m };
-ingredients.Add(harina, Copy(admin));
+var harina = Legacy("Harina", "kg", 100m, Copy(admin));
 var m0 = Mv(harina.Id).Single();
 Check(harina.CurrentStock == 100m && m0.Id == 1 && m0.Type == StockMovementType.InitialStock && m0.Quantity == 100m && m0.PreviousStock == 0m && m0.ResultingStock == 100m
     && m0.Unit == "kg" && m0.UserId == 10 && m0.Username == "fixture-admin" && m0.Date >= t0 && m0.Date <= DateTime.Now && m0.Reason == null && m0.WasteCategory == null
-    && m0.SaleId == null && m0.RefundId == null && m0.InvoiceId == null && m0.StockCountId == null, "Add with stock records InitialStock with previous 0, resulting, unit, actor and no links");
-var huevos = new Ingredient { Name = "Huevos", Unit = "unidad", CurrentStock = 10m };
-ingredients.Add(huevos, null);
-Check(Mv(huevos.Id).Single() is { Type: StockMovementType.InitialStock, Quantity: 10m, UserId: null, Username: null } && huevos.CurrentStock == 10m, "Add without actor records InitialStock with null actor");
+    && m0.SaleId == null && m0.RefundId == null && m0.InvoiceId == null && m0.StockCountId == null, "legacy InitialStock fixture: previous 0, resulting, unit, actor and no links");
+var huevos = Legacy("Huevos", "unidad", 10m, null);
+Check(Mv(huevos.Id).Single() is { Type: StockMovementType.InitialStock, Quantity: 10m, UserId: null, Username: null } && huevos.CurrentStock == 10m && ingredients.HasMovements(harina.Id) && storage.StockMovements.Count == 2, "legacy InitialStock fixture without actor has a null responsible");
 var sal = new Ingredient { Name = "Sal", Unit = "kg", CurrentStock = 0m };
 ingredients.Add(sal);
-Check(Mv(sal.Id).Length == 0 && !ingredients.HasMovements(sal.Id) && ingredients.HasMovements(harina.Id) && storage.StockMovements.Count == 2, "Add with zero stock records no movement");
-Invalid(() => ingredients.Add(new Ingredient { Name = "Neg", Unit = "kg", CurrentStock = -1m }, admin), "negative opening stock", "negativo");
-Reject(() => ingredients.Add(new Ingredient { Name = "Stale", Unit = "kg", CurrentStock = 5m }, new User { Id = 10, Username = "fixture-admin", PasswordHash = "old", Role = UserRole.Admin }),
-    typeof(UnauthorizedAccessException), "stale actor on Add", "vigente");
+Check(sal.Id > huevos.Id && sal.CurrentStock == 0m && storage.Ingredients.Contains(sal) && Mv(sal.Id).Length == 0 && !ingredients.HasMovements(sal.Id) && storage.StockMovements.Count == 2, "Add with zero stock creates the ingredient and records no movement");
 
 // ---- Update no longer changes stock ----
 var movementsBeforeUpdate = storage.StockMovements.Count;
@@ -142,7 +157,7 @@ Check(harina.CurrentStock == 95m && w1.Type == StockMovementType.Waste && w1.Qua
     && w1.Reason == "bolsa vencida" && w1.UserId == 10 && w1.Unit == "kg", "RegisterWaste records a negative quantity with category, reason and actor");
 var w2 = ingredients.RegisterWaste(huevos.Id, 1m, WasteCategory.RoturaODerrame, "se cayo", admin2);
 Check(huevos.CurrentStock == 9m && w2.WasteCategory == WasteCategory.RoturaODerrame && w2.UserId == 11 && w2.ResultingStock == 9m, "RegisterWaste of a second ingredient and category");
-var wall = new Ingredient { Name = "Azucar", Unit = "kg", CurrentStock = 2m }; ingredients.Add(wall, admin);
+var wall = Legacy("Azucar", "kg", 2m, admin);
 var wAll = ingredients.RegisterWaste(wall.Id, 2m, WasteCategory.ErrorDePreparacion, "todo", admin);
 Check(wall.CurrentStock == 0m && wAll.ResultingStock == 0m && wAll.WasteCategory == WasteCategory.ErrorDePreparacion, "waste of the whole stock is allowed and leaves zero");
 Invalid(() => ingredients.RegisterWaste(harina.Id, 0m, WasteCategory.Otro, "x", admin), "zero waste", "positiva");
@@ -286,7 +301,7 @@ Check(storage.Ingredients.All(i => !storage.StockMovements.Any(m => m.Ingredient
 Check(storage.StockMovements.Select(m => m.Id).SequenceEqual(Enumerable.Range(1, storage.StockMovements.Count)), "ledger ids are sequential and unique");
 
 // ---- Queries: filters and ordering ----
-var cacao = new Ingredient { Name = "Cacao", Unit = "kg", CurrentStock = 50m }; ingredients.Add(cacao, admin);
+var cacao = Legacy("Cacao", "kg", 50m, admin);
 ingredients.AdjustStock(cacao.Id, 60m, "a", admin); ingredients.RegisterWaste(cacao.Id, 5m, WasteCategory.Otro, "b", admin); ingredients.RegisterWaste(cacao.Id, 1m, WasteCategory.Otro, "c", admin);
 var cm = Mv(cacao.Id);
 cm[0].Date = new DateTime(2026, 3, 10, 0, 0, 0); cm[1].Date = new DateTime(2026, 3, 10, 23, 59, 59);

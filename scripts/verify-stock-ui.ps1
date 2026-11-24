@@ -62,8 +62,18 @@ void Reject(Action action, Type exception, string name, string? contains = null)
 void Invalid(Action action, string name, string contains) => Reject(action, typeof(InvalidOperationException), name, contains);
 Ingredient Make(string name, string unit, decimal stock, decimal min = 0m, bool active = true)
 {
-    var i = new Ingredient { Name = name, Unit = unit, CurrentStock = stock, MinStock = min, IsActive = active };
-    ingredients.Add(i, admin); return i;
+    // New ingredients are created without stock; a fixture with stock models data stored before that rule:
+    // the ingredient plus a legacy InitialStock movement written straight into the ledger.
+    var i = new Ingredient { Name = name, Unit = unit, MinStock = min, IsActive = active };
+    ingredients.Add(i, admin);
+    if (stock != 0m)
+    {
+        i.CurrentStock = stock;
+        storage.StockMovements.Add(new StockMovement { Id = storage.GetNextStockMovementId(), IngredientId = i.Id, Date = DateTime.Now, Type = StockMovementType.InitialStock, Quantity = stock, Unit = unit,
+            PreviousStock = 0m, ResultingStock = stock, UserId = admin.Id, Username = admin.Username });
+        storage.SaveToFile();
+    }
+    return i;
 }
 StockMovement[] Mv(int ingredientId) => storage.StockMovements.Where(m => m.IngredientId == ingredientId).OrderBy(m => m.Id).ToArray();
 void Inject(Ingredient i, StockMovementType type, decimal quantity, DateTime date)
@@ -230,12 +240,19 @@ if (pageType != null)
     Check(Str(p, "formError") == null && !(bool)Get(p, "showForm")!, "cancelling the form clears its error");
     Call(p, "ShowAddForm");
     Check((bool)Func(p, "CanChangeUnit")! == true, "a new ingredient may choose its unit");
-    var newIngredient = (Ingredient)Get(p, "editingIngredient")!; newIngredient.Name = "Levadura"; newIngredient.Unit = "gr"; newIngredient.CurrentStock = -4m;
-    var beforeNeg = State();
-    Check(Call(p, "SaveIngredient") == null && Str(p, "formError")!.Contains("negativo") && State() == beforeNeg && (bool)Get(p, "showForm")!, "negative opening stock is rejected with the service message in the form");
-    newIngredient.CurrentStock = 5m;
-    Check(Call(p, "SaveIngredient") == null && storage.Ingredients.Any(i => i.Name == "Levadura") && Mv(storage.Ingredients.Single(i => i.Name == "Levadura").Id).Single() is { Type: StockMovementType.InitialStock, Quantity: 5m, UserId: 10 }
-        && Str(p, "formError") == null, "new ingredient with opening stock records InitialStock with the admin");
+    var newIngredient = (Ingredient)Get(p, "editingIngredient")!; newIngredient.Name = "Levadura"; newIngredient.Unit = "gr";
+    const string NoOpeningStock = "Un ingrediente nuevo se crea sin stock: el stock ingresa con las facturas de compra.";
+    foreach (var tampered in new[] { -4m, 5m })
+    {
+        newIngredient.CurrentStock = tampered;
+        var beforeTampered = State(); var bytesTampered = File.ReadAllBytes("data.json");
+        Check(Call(p, "SaveIngredient") == null && Str(p, "formError") == NoOpeningStock && State() == beforeTampered && bytesTampered.SequenceEqual(File.ReadAllBytes("data.json")) && (bool)Get(p, "showForm")! && !storage.Ingredients.Any(i => i.Name == "Levadura"),
+            "a new ingredient submitted with stock " + tampered + " is rejected with the service message in the form and changes nothing");
+    }
+    newIngredient.CurrentStock = 0m;
+    var ledgerBeforeCreate = storage.StockMovements.Count;
+    Check(Call(p, "SaveIngredient") == null && storage.Ingredients.Any(i => i.Name == "Levadura" && i.Unit == "gr" && i.CurrentStock == 0m) && storage.StockMovements.Count == ledgerBeforeCreate
+        && Str(p, "formError") == null && !(bool)Get(p, "showForm")!, "a new ingredient without stock is created and records no movement");
     var blank = NewPage(pageType, uiAdmin, out _); Call(blank, "ShowAddForm"); var beforeBlank = State();
     Check(Call(blank, "SaveIngredient") == null && State() == beforeBlank && Str(blank, "formError") == "El nombre del ingrediente es obligatorio.", "blank name shows an error in the form");
 
@@ -308,8 +325,8 @@ if (pageType != null)
     finally { admin2.Role = UserRole.Admin; }
 
     var pageSource = Src("Pages/Ingredients.razor");
-    Check(!pageSource.Contains("@bind=\"editingIngredient.CurrentStock\"") || System.Text.RegularExpressions.Regex.Matches(pageSource, "@bind=\"editingIngredient\\.CurrentStock\"").Count == 1 && pageSource.IndexOf("@bind=\"editingIngredient.CurrentStock\"") > pageSource.IndexOf("editingIngredient.Id == 0"),
-        "the only editable stock input of the form is the opening stock of a new ingredient");
+    Check(!pageSource.Contains("editingIngredient.CurrentStock") && !pageSource.Contains("Stock inicial") && !pageSource.Contains("ingredient-initial") && pageSource.Contains("href=\"/invoices\"") && pageSource.Contains("facturas de compra"),
+        "the form has no stock input (new or edit) and tells the Admin that stock is loaded with purchase invoices, linking to /invoices");
     Check(pageSource.Contains("Stock negativo: requiere ajuste") && pageSource.Contains("CurrentStock < 0"), "negative balances show the visible warning text (S10)");
     Check(pageSource.Contains("href=\"/ingredients/@ingredient.Id/movements\"") && pageSource.Contains("Alertas de stock") && pageSource.Contains("Sin consumo reciente"), "history link, alerts section and unknown coverage text");
     Check(pageSource.Contains("Ajustar stock") && pageSource.Contains("Registrar merma") && pageSource.Contains("Enum.GetValues<WasteCategory>()") && pageSource.Contains("StockMovementLabels.GetLabel("), "adjust and waste dialogs with category labels from StockMovementLabels");

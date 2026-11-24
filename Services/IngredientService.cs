@@ -42,26 +42,17 @@ public class IngredientService
 
     public Ingredient? GetById(int id) => _storage.Ingredients.FirstOrDefault(i => i.Id == id);
 
-    // A positive CurrentStock is the opening balance and is recorded as an InitialStock movement.
+    // A new ingredient is created without stock: stock only enters through purchases (invoice receipts), manual
+    // adjustments, waste and physical counts. A non-zero CurrentStock is rejected so no opening balance is recorded.
     public void Add(Ingredient ingredient, User? actor = null)
     {
-        if (ingredient.CurrentStock < 0m)
-            throw new InvalidOperationException("El stock inicial no puede ser negativo.");
-        var operatorUser = _storage.FindLiveUser(actor);
-        if (actor != null && operatorUser == null)
-            throw new UnauthorizedAccessException("Se requiere un usuario vigente para registrar el stock inicial.");
+        if (actor != null && _storage.FindLiveUser(actor) == null)
+            throw new UnauthorizedAccessException("Se requiere un usuario vigente para crear ingredientes.");
+        if (ingredient.CurrentStock != 0m)
+            throw new InvalidOperationException("Un ingrediente nuevo se crea sin stock: el stock ingresa con las facturas de compra.");
 
-        var initialStock = ingredient.CurrentStock;
-        if (initialStock > 0m)
-            _storage.EnsureStockMovementCapacity();
         ingredient.Id = _storage.GetNextIngredientId();
-        ingredient.CurrentStock = 0m;
         _storage.Ingredients.Add(ingredient);
-        if (initialStock > 0m)
-            Commit(Prepare(new[]
-            {
-                new StockMovementRequest { IngredientId = ingredient.Id, Type = StockMovementType.InitialStock, Quantity = initialStock }
-            }, operatorUser, DateTime.Now));
         _storage.SaveToFile();
     }
 
