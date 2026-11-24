@@ -10,7 +10,7 @@ Branch `fix/ingredient-no-initial-stock` (from `main` 0f3931a). No push (main de
 ## Tasks
 | ID | Specs | Route | Commit |
 | --- | --- | --- | --- |
-| T1 | S1-S4 | worker: service rule + form + harness updates + docs | — |
+| T1 | S1-S4 | worker: service rule + form + harness updates + docs | 7dbc19d |
 
 ## Log
 - L1: "al crear un ingrediente, no deberia poder cargar stock inicial, el stock se carga con las compras del ingrediente. Es un poco raro el manejo de los productos porque al crear un producto no se asocia a los ingredientes pero para borrar un producto si"
