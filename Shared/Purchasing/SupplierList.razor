@@ -2,7 +2,7 @@
    Read-only: the page owns the data and the create / edit / delete flows. *@
 @using GastroApp.Models
 
-<Banner Variant="info" Title="Modelo actual">Los proveedores registran únicamente su nombre; CUIT, teléfono y condiciones quedan para iteraciones futuras.</Banner>
+<Banner Variant="info" Title="Modelo actual">Los proveedores registran nombre, CUIT y condición frente al IVA. El tipo de factura se deriva de la condición del negocio y la del proveedor.</Banner>
 
 @if (Suppliers.Count == 0)
 {
@@ -24,6 +24,8 @@ else
             <thead>
                 <tr>
                     <th scope="col">Proveedor</th>
+                    <th scope="col">CUIT</th>
+                    <th scope="col">Condición</th>
                     <th scope="col" class="col-num">Facturas registradas</th>
                     <th scope="col" class="col-actions">Acciones</th>
                 </tr>
@@ -32,7 +34,15 @@ else
                 @foreach (var supplier in Suppliers)
                 {
                     <tr @key="supplier.Id">
-                        <th scope="row">@supplier.Name</th>
+                        <th scope="row">
+                            @supplier.Name
+                            @if (!supplier.HasFiscalData)
+                            {
+                                <Badge Variant="warn" Icon="alertTriangle" Label="Datos fiscales incompletos" />
+                            }
+                        </th>
+                        <td data-label="CUIT">@FormatCuit(supplier.Cuit)</td>
+                        <td data-label="Condición">@(supplier.TaxCondition.HasValue ? FiscalRules.Label(supplier.TaxCondition.Value) : "—")</td>
                         <td data-label="Facturas" class="col-num">@InvoiceCountOf(supplier)</td>
                         <td class="col-actions">
                             <div class="flex-wrap-gap purchasing-actions">
@@ -60,4 +70,11 @@ else
     [Parameter] public EventCallback<Supplier> OnDelete { get; set; }
 
     private int InvoiceCountOf(Supplier supplier) => Invoices.Count(i => i.SupplierId == supplier.Id);
+
+    // Stored as 11 digits; shown as XX-XXXXXXXX-X. Anything else (legacy data) is shown as is, or "—" when missing.
+    private static string FormatCuit(string? cuit)
+    {
+        if (string.IsNullOrWhiteSpace(cuit)) return "—";
+        return cuit.Length == 11 && cuit.All(char.IsAsciiDigit) ? $"{cuit[..2]}-{cuit[2..10]}-{cuit[10..]}" : cuit;
+    }
 }

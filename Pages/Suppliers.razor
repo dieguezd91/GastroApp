@@ -34,6 +34,20 @@
                     <label class="field__label" for="supplier-name">Nombre del proveedor <span class="field__req" aria-hidden="true">*</span></label>
                     <input id="supplier-name" type="text" class="input" required autocomplete="off" placeholder="Ej: Distribuidora XYZ" @bind="editingSupplier.Name" />
                 </div>
+                <div class="field">
+                    <label class="field__label" for="supplier-cuit">CUIT <span class="field__req" aria-hidden="true">*</span></label>
+                    <input id="supplier-cuit" type="text" class="input" required inputmode="numeric" autocomplete="off" placeholder="Ej: 30-71234567-1" @bind="editingSupplier.Cuit" />
+                </div>
+                <div class="field">
+                    <label class="field__label" for="supplier-tax-condition">Condición frente al IVA <span class="field__req" aria-hidden="true">*</span></label>
+                    <select id="supplier-tax-condition" class="select" required @bind="editingSupplier.TaxCondition">
+                        <option value="">Seleccionar...</option>
+                        @foreach (var condition in Enum.GetValues<TaxCondition>())
+                        {
+                            <option value="@condition">@FiscalRules.Label(condition)</option>
+                        }
+                    </select>
+                </div>
             </form>
         </ChildContent>
         <Footer>
@@ -108,7 +122,9 @@
         editingSupplier = new Supplier
         {
             Id = supplier.Id,
-            Name = supplier.Name
+            Name = supplier.Name,
+            Cuit = supplier.Cuit,
+            TaxCondition = supplier.TaxCondition
         };
         formError = string.Empty;
         await OpenFormAsync();
@@ -127,13 +143,21 @@
 
         formError = string.Empty;
         var creating = editingSupplier.Id == 0;
-        if (creating)
+        try
         {
-            SupplierService.Add(editingSupplier);
+            if (creating)
+            {
+                SupplierService.Add(editingSupplier);
+            }
+            else
+            {
+                SupplierService.Update(editingSupplier);
+            }
         }
-        else
+        catch (InvalidOperationException ex)
         {
-            SupplierService.Update(editingSupplier);
+            formError = ex.Message;
+            return;
         }
 
         LoadSuppliers();

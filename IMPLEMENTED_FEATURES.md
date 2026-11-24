@@ -257,7 +257,17 @@ Route:
 
 Admin users can manage supplier records used by purchase invoices, in the **Proveedores** tab of **Proveedores y facturas**. Deleting a supplier asks for confirmation; its invoices are kept and show **Sin proveedor**.
 
-The current supplier model is intentionally small and primarily stores supplier identity information.
+A supplier stores its name, **CUIT** and **condición frente al IVA** (Responsable Inscripto, Monotributista or Exento). Both fiscal fields are required when creating or editing. The CUIT is typed with or without dashes, must have 11 digits and a valid check digit, is stored as 11 digits, shown as `XX-XXXXXXXX-X` and cannot repeat among suppliers. Suppliers saved before these fields existed are listed with the **Datos fiscales incompletos** badge until an admin completes them in **Editar**.
+
+## Fiscal Data
+
+Route:
+
+```text
+/settings/fiscal
+```
+
+Admin users open **Datos fiscales** from the sidebar footer (next to **Reiniciar datos**) and choose the business's own condición frente al IVA (Responsable Inscripto, Monotributista or Exento); until then the screen shows **Sin configurar**. Saving goes through `BusinessSettingsService.SetTaxCondition`, which re-checks a live admin and recalculates the stored recipe costs. The screen explains what each condition means for purchases (factura A with IVA as crédito fiscal, factura A with IVA as cost, factura B) and recommends confirming the tax rules with an accountant. Invoice registration against this condition is described under **Purchase Invoices**.
 
 ## Purchase Invoices
 
@@ -276,7 +286,17 @@ Admin users can create invoices with:
 - multiple ingredient items;
 - quantity;
 - unit;
-- unit price.
+- unit price;
+- IVA rate per line (factura A only), legend (factura A only), informative IVA contenido (factura B only) and other taxes.
+
+Until the business condition is set in **Datos fiscales**, the workspace shows the message `Configurá la condición frente al IVA del negocio en Datos fiscales antes de registrar facturas.` with a link to `/settings/fiscal` and cannot save. The invoice type is derived from the business and supplier conditions and shown read-only: **Factura A** (Responsable Inscripto supplier, business Responsable Inscripto or Monotributista), **Factura B** (Responsable Inscripto supplier, business Exento) or **Factura C** (Monotributista or Exento supplier). Suppliers without fiscal data are disabled in the supplier select (`datos fiscales incompletos`). Changing the supplier to one that changes the type removes the lines, other taxes and IVA contenido typed so far and says `Se quitaron los ítems porque cambió el tipo de factura.`.
+
+- **Factura A**: the typed price is net (`Precio neto por {unidad} (sin IVA)`), each line has an alícuota (0 %, 2,5 %, 5 %, 10,5 %, 21 % or 27 %; 21 % by default) and the totals show neto gravado and the IVA of each rate; optional legend `OPERACIÓN SUJETA A RETENCIÓN` or `PAGO EN CBU INFORMADA`.
+- **Factura B**: the typed price is final (`IVA incluido`) and the optional **IVA contenido (informativo)** is recorded without adding to the total.
+- **Factura C**: the typed price is final and there are no VAT fields.
+- **Other taxes**: Percepción de IVA (factura A only), Percepción de IIBB (needs a jurisdiction), Impuestos internos and Otros tributos (needs a description) can be added as rows with an amount; they add to the total and are not part of any ingredient cost.
+
+The invoice list shows the type of each invoice and, for factura A, neto, IVA and other taxes under the total. Invoices saved before these fields existed are shown as `Tipo no informado · precio final`: their price is their cost and they are never reinterpreted. See [Purchasing.md](Docs/Architecture/Purchasing.md). The tax rules should be confirmed with an accountant.
 
 Each line offers only units compatible with the ingredient and is stored converted to the ingredient's own unit (500 gr at 0.1 becomes 0.5 kg at 100), because recipe costing reads the last invoice price as a price per base unit. On creation, quantities are added to ingredient stock. Invoices are created in a full-width workspace; deleting one asks for confirmation (stock is kept).
 
@@ -397,6 +417,7 @@ SupplierService
 InvoiceService
 IngredientService
 RecipeService
+BusinessSettingsService
 ```
 
 Some relationships are configured after service construction:

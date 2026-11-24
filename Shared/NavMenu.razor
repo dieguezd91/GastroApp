@@ -84,6 +84,9 @@
         @if (AuthService.IsInRole(UserRole.Admin))
         {
             <div class="sidebar__admin-zone">
+                <NavLink class="nav-link" href="settings/fiscal">
+                    <span class="nav-link__main"><Icon Name="settings" /><span>Datos fiscales</span></span>
+                </NavLink>
                 <NavLink class="nav-link nav-link--danger" href="settings/reset">
                     <span class="nav-link__main"><Icon Name="alertTriangle" /><span>Reiniciar datos</span></span>
                 </NavLink>

@@ -1,0 +1,126 @@
+@page "/settings/fiscal"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject BusinessSettingsService BusinessSettingsService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Datos fiscales</PageTitle>
+
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    <div class="page-header">
+        <div>
+            <h1>Datos fiscales</h1>
+            <p class="page-header__subtitle">La condición frente al IVA de tu negocio define cómo se registran y se costean las facturas de compra.</p>
+        </div>
+        <div class="page-header__actions">
+            <button type="button" class="btn" @onclick="GoToDashboard">Volver al inicio</button>
+        </div>
+    </div>
+
+    <div class="stack stack--lg">
+        <section class="card stack" aria-labelledby="fiscal-condition-title">
+            <h2 id="fiscal-condition-title" class="card__title">Condición frente al IVA</h2>
+            <p>
+                Condición actual:
+                @if (BusinessSettingsService.TaxCondition is { } current)
+                {
+                    <Badge Variant="ok" Label="@FiscalRules.Label(current)" />
+                }
+                else
+                {
+                    <Badge Variant="warn" Icon="alertTriangle" Label="Sin configurar" />
+                }
+            </p>
+            <form id="fiscal-form" class="stack" novalidate @onsubmit="SaveCondition">
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <Banner Variant="danger">@errorMessage</Banner>
+                }
+                @if (!string.IsNullOrEmpty(successMessage))
+                {
+                    <Banner Variant="ok">@successMessage</Banner>
+                }
+                <div class="field">
+                    <label class="field__label" for="fiscal-tax-condition">Condición de tu negocio <span class="field__req" aria-hidden="true">*</span></label>
+                    <select id="fiscal-tax-condition" class="select" required @bind="selectedCondition">
+                        <option value="">Seleccionar...</option>
+                        @foreach (var condition in Enum.GetValues<TaxCondition>())
+                        {
+                            <option value="@condition">@FiscalRules.Label(condition)</option>
+                        }
+                    </select>
+                </div>
+                <div class="flex-wrap-gap">
+                    <button type="submit" class="btn btn--primary">Guardar condición</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card stack" aria-labelledby="fiscal-help-title">
+            <h2 id="fiscal-help-title" class="card__title">Qué cambia en las compras</h2>
+            <ul class="stack stack--sm">
+                <li><strong>Responsable Inscripto:</strong> recibís factura A de proveedores Responsables Inscriptos. El IVA discriminado es crédito fiscal, así que el costo de los ingredientes usa el precio neto.</li>
+                <li><strong>Monotributista:</strong> también recibís factura A de un proveedor Responsable Inscripto, pero el IVA no es crédito fiscal: forma parte del costo.</li>
+                <li><strong>Exento:</strong> recibís factura B de un proveedor Responsable Inscripto. El precio ya tiene el IVA incluido y todo es costo.</li>
+            </ul>
+            <p class="text-sm text-secondary">Los proveedores Monotributistas o Exentos emiten factura C. Al cambiar la condición se recalculan los costos de las recetas. Confirmá estas reglas con tu contador.</p>
+        </section>
+    </div>
+}
+
+@code {
+    private TaxCondition? selectedCondition;
+    private string? successMessage;
+    private string? errorMessage;
+
+    protected override void OnInitialized()
+    {
+        if (!EnsureAdmin()) return;
+
+        selectedCondition = BusinessSettingsService.TaxCondition;
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
+    }
+
+    private void SaveCondition()
+    {
+        if (!EnsureAdmin()) return;
+
+        successMessage = null;
+        errorMessage = null;
+        if (selectedCondition is null)
+        {
+            errorMessage = "Elegí una condición frente al IVA válida.";
+            return;
+        }
+
+        try
+        {
+            BusinessSettingsService.SetTaxCondition(selectedCondition.Value, AuthService.CurrentUser);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+            return;
+        }
+
+        successMessage = "Condición frente al IVA guardada. Se recalcularon los costos de las recetas.";
+    }
+
+    private void GoToDashboard() => Navigation.NavigateTo("/");
+}
