@@ -14,10 +14,10 @@ Branch `feat/purchase-invoice-vat` (from `main` b2b3b1e). No push (main deploys 
 ## Tasks
 | ID | Specs | Route | Commit |
 | --- | --- | --- | --- |
-| T1 | S1-S7 (domain) | DONE (worker, uncommitted; L8): models, fiscal settings + supplier + invoice validation, cost policy, persistence, seed, harness `scripts/verify-purchase-vat.ps1`, architecture doc | |
-| T2 | S1, S2, S8 | DONE (worker; L9) UI: Datos fiscales page + nav, supplier form/list | |
-| T3 | S3-S5, S7, S8 | DONE (worker; L11) UI: invoice workspace + list | |
-| T4 | S7 | DONE (parent; L12) local `data.json` cleanup | |
+| T1 | S1-S7 (domain) | DONE (worker; L8, L14) deca15d: models, fiscal settings + supplier + invoice validation, cost policy, persistence, seed, harness `scripts/verify-purchase-vat.ps1`, architecture doc | |
+| T2 | S1, S2, S8 | DONE (worker; L9) 4f4edb7 UI: Datos fiscales page + nav, supplier form/list | |
+| T3 | S3-S5, S7, S8 | DONE (worker; L11) 62d3f9b UI: invoice workspace + list | |
+| T4 | S7 | DONE (parent; L12) 96774b9 local `data.json` cleanup | |
 | T5 | all | DONE: independent verification (L13), blocker fixed (L14) | |
 
 ## Log
@@ -40,4 +40,5 @@ Branch `feat/purchase-invoice-vat` (from `main` b2b3b1e). No push (main deploys 
 - L12: T4 done by parent: backup `/tmp/data.json.before-vat-cleanup`; data.json Invoices 2 → 0, Garron CurrentStock 3 → 0 (no StockMovements existed); app smoke start served /login 200 and left data.json unchanged.
 - L13: T5 independent verify (gentle-ai-verify): S1-S8 pass, all 11 harnesses 0 failures, 68 independent probes pass; one blocker: an invoice with explicit `"OtherTaxes": null` loaded and then broke `Invoice.Total`, silently stopping every later save. Advisories: undefined enums from hand-edited files loaded silently; data.json reformatted by the T4 python rewrite (same values); seed recipe cost differs from costing until the condition is set; `InvoiceService.Update` has no fiscal validation (unused by UI); a tax added before choosing a supplier is cleared. Not verified: browser click-through (no tool), isolated HTTP flow beyond /login 200 and /settings/fiscal 302.
 - L14: parent fix for the L13 blocker and enum advisory: `DataStorageService.ValidatePurchasingFiscalData` throws `InvalidDataException` on null `OtherTaxes` or undefined invoice Type/Legend/tax Kind/supplier TaxCondition. RED: 7 new checks in verify-purchase-vat, 5 failed before the fix. GREEN: purchase-vat 355/0, fiscal-settings-ui 65/0, invoice-vat-ui 122/0, stock-ui 191/0, stock-movements 203/0, recipe-cost-sync 56/0, auth-isolation 273/0, data-reset 88/0, stock-count 167/0, sales-refunds 213/0, pos-availability 42/0; build 0 errors. Docs/Architecture/Purchasing.md updated.
+- L15: user authorized "4 commits por unidad": T1 deca15d, T2 4f4edb7, T3 62d3f9b, T4 96774b9 (2624 authored lines, mostly harnesses; T1 and T2 build alone, 0 errors). Native review over b2b3b1e..HEAD stopped at preflight with `lens_context_budget_exceeded` (no authority created, not retryable for this candidate; needs smaller committed candidates). No push.
 - L5: parent decisions: one business per installation (no multi-tenant); perceptions/other taxes are invoice-level and not allocated to unit cost; the invoice type is derived, not chosen; business condition not set blocks invoice registration.
