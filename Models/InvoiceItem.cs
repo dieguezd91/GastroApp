@@ -8,6 +8,8 @@ public class InvoiceItem
     public decimal Quantity { get; set; }
     public string Unit { get; set; } = string.Empty;
     public decimal UnitPrice { get; set; }
+    // IVA rate in percent (21 = 21%). Only factura A items carry one; the typed price is then net of IVA.
+    public decimal? VatRate { get; set; }
 
     // Helper: subtotal del item
     public decimal Subtotal => Quantity * UnitPrice;

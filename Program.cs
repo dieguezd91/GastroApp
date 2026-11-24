@@ -25,6 +25,7 @@ builder.Services.AddSingleton<InvoiceService>();
 builder.Services.AddSingleton<IngredientService>();
 builder.Services.AddSingleton<StockCountService>();
 builder.Services.AddSingleton<RecipeService>();
+builder.Services.AddSingleton<BusinessSettingsService>();
 builder.Services.AddSingleton<DataResetService>();
 
 var app = builder.Build();

@@ -28,6 +28,9 @@ public class DataStorageService
     public List<Invoice> Invoices { get; set; } = new();
     public List<Recipe> Recipes { get; set; } = new();
 
+    // The business's own fiscal data (one business per installation); only BusinessSettingsService changes it.
+    public BusinessSettings BusinessSettings { get; private set; } = new();
+
     private int _nextProductId = 1;
     private int _nextProductCategoryId = 1;
     private int _nextSaleId = 1;
@@ -188,7 +191,7 @@ public class DataStorageService
 
         // Seed de proveedores
         var provId = GetNextSupplierId();
-        Suppliers.Add(new Supplier { Id = provId, Name = "Distribuidora San Martín" });
+        Suppliers.Add(new Supplier { Id = provId, Name = "Distribuidora San Martín", Cuit = "30712345671", TaxCondition = TaxCondition.ResponsableInscripto });
 
         // Seed de factura con precios
         var facturaId = GetNextInvoiceId();
@@ -199,12 +202,13 @@ public class DataStorageService
             SupplierId = provId,
             InvoiceNumber = "A-0001-00001234",
             Notes = "Primera compra de ingredientes",
+            Type = InvoiceType.A,
             Items = new List<InvoiceItem>
             {
-                new InvoiceItem { InvoiceId = facturaId, IngredientId = harinaId, IngredientName = "Harina 000", Quantity = 10, Unit = "kg", UnitPrice = 80 },
-                new InvoiceItem { InvoiceId = facturaId, IngredientId = lecheId, IngredientName = "Leche", Quantity = 5, Unit = "lt", UnitPrice = 120 },
-                new InvoiceItem { InvoiceId = facturaId, IngredientId = huevoId, IngredientName = "Huevos", Quantity = 30, Unit = "unidad", UnitPrice = 15 },
-                new InvoiceItem { InvoiceId = facturaId, IngredientId = mantecaId, IngredientName = "Manteca", Quantity = 2, Unit = "kg", UnitPrice = 350 }
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = harinaId, IngredientName = "Harina 000", Quantity = 10, Unit = "kg", UnitPrice = 80, VatRate = 10.5m },
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = lecheId, IngredientName = "Leche", Quantity = 5, Unit = "lt", UnitPrice = 120, VatRate = 21m },
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = huevoId, IngredientName = "Huevos", Quantity = 30, Unit = "unidad", UnitPrice = 15, VatRate = 21m },
+                new InvoiceItem { InvoiceId = facturaId, IngredientId = mantecaId, IngredientName = "Manteca", Quantity = 2, Unit = "kg", UnitPrice = 350, VatRate = 21m }
             }
         });
 
@@ -265,6 +269,7 @@ public class DataStorageService
             Suppliers = Pick(Suppliers),
             Invoices = Pick(Invoices),
             Recipes = Pick(Recipes),
+            BusinessSettings = cleared ? new BusinessSettings() : BusinessSettings,
             NextProductId = _nextProductId,
             NextProductCategoryId = _nextProductCategoryId,
             NextSaleId = _nextSaleId,
@@ -359,6 +364,7 @@ public class DataStorageService
         Suppliers = new();
         Invoices = new();
         Recipes = new();
+        BusinessSettings = new();
         return backupName;
     }
 
@@ -667,6 +673,49 @@ public class DataStorageService
         }
     }
 
+    // Legacy files simply lack the fiscal fields (CLR defaults). An explicit null list or an undefined enum can only come
+    // from a hand-edited or corrupt file; loading it would break Invoice.Total and silently stop every later save.
+    private void ValidatePurchasingFiscalData()
+    {
+        foreach (var supplier in Suppliers)
+        {
+            if (supplier != null && supplier.TaxCondition.HasValue && !Enum.IsDefined(supplier.TaxCondition.Value))
+                throw new InvalidDataException("La condición frente al IVA de un proveedor no es válida.");
+        }
+        foreach (var invoice in Invoices)
+        {
+            if (invoice == null) continue;
+            if (invoice.OtherTaxes == null)
+                throw new InvalidDataException("Los tributos de una factura no pueden ser null.");
+            if ((invoice.Type.HasValue && !Enum.IsDefined(invoice.Type.Value)) || !Enum.IsDefined(invoice.Legend)
+                || invoice.OtherTaxes.Any(t => t == null || !Enum.IsDefined(t.Kind)))
+                throw new InvalidDataException("Datos fiscales de factura inválidos.");
+        }
+    }
+
+    // A missing property is a legacy file (not configured); an explicit null or an undefined condition is corruption.
+    private void LoadBusinessSettings(JsonElement root)
+    {
+        if (!root.TryGetProperty("BusinessSettings", out var element))
+        {
+            BusinessSettings = new();
+            return;
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<BusinessSettings>(element.GetRawText())
+                ?? throw new InvalidDataException("BusinessSettings no puede ser null.");
+            if (settings.TaxCondition.HasValue && !Enum.IsDefined(settings.TaxCondition.Value))
+                throw new InvalidDataException("La condición frente al IVA del negocio no es válida.");
+            BusinessSettings = settings;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("Contenido de datos fiscales inválido.", ex);
+        }
+    }
+
     public void LoadFromFile()
     {
         try
@@ -747,10 +796,14 @@ public class DataStorageService
                 Invoices = JsonSerializer.Deserialize<List<Invoice>>(invoicesElement.GetRawText()) ?? new();
             }
 
+            ValidatePurchasingFiscalData();
+
             if (root.TryGetProperty("Recipes", out var recipesElement))
             {
                 Recipes = JsonSerializer.Deserialize<List<Recipe>>(recipesElement.GetRawText()) ?? new();
             }
+
+            LoadBusinessSettings(root);
 
             if (root.TryGetProperty("NextIngredientId", out var nextIngredientIdElement))
             {

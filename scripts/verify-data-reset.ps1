@@ -56,6 +56,7 @@ users.Add(new User { Username = "fixture-employee", PasswordHash = "fixture-pass
 var admin = users.GetByUsername("admin")!;
 var adminHash = admin.PasswordHash;
 int round = 0;
+string FixtureCuit(int n) { for (var k = n; ; k++) { var ten = "20" + k.ToString("D8"); int[] w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]; var sum = 0; for (var i = 0; i < 10; i++) sum += (ten[i] - (char)48) * w[i]; var check = 11 - sum % 11; if (check == 10) continue; return ten + (check == 11 ? 0 : check); } }
 
 // Fills EVERY collection through the public services (plus the refund ledger) and leaves a register open.
 void Populate()
@@ -64,10 +65,12 @@ void Populate()
     var a = users.GetByUsername("admin")!;
     var category = new ProductCategory { Name = "Bebidas " + round }; categories.Add(category);
     var product = new Product { Name = "Café fixture " + round, Price = 150m, Cost = 50m, CategoryId = category.Id }; products.Add(product);
-    var supplier = new Supplier { Name = "Proveedor " + round }; suppliers.Add(supplier);
+    // Purchase invoices need the business condition and a supplier with fiscal data (Monotributista supplier: factura C, no VAT fields).
+    storage.BusinessSettings.TaxCondition = TaxCondition.ResponsableInscripto;
+    var supplier = new Supplier { Name = "Proveedor " + round, Cuit = FixtureCuit(round * 100), TaxCondition = TaxCondition.Monotributista }; suppliers.Add(supplier);
     var ingredient = new Ingredient { Name = "Harina fixture " + round, Unit = "kg", MinStock = 1m }; ingredients.Add(ingredient, a);
     ingredients.AdjustStock(ingredient.Id, 10m, "fixture", a);
-    invoices.Add(new Invoice { Date = DateTime.Now, SupplierId = supplier.Id, InvoiceNumber = "A-" + round,
+    invoices.Add(new Invoice { Date = DateTime.Now, SupplierId = supplier.Id, Type = InvoiceType.C, InvoiceNumber = "A-" + round,
         Items = [new InvoiceItem { IngredientId = ingredient.Id, IngredientName = ingredient.Name, Quantity = 2m, Unit = "kg", UnitPrice = 80m }] }, a);
     recipes.Add(new Recipe { Name = "Pan fixture " + round, Yield = 1,
         Ingredients = [new RecipeIngredient { IngredientId = ingredient.Id, IngredientName = ingredient.Name, Quantity = 0.5m, Unit = "kg" }] });

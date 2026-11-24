@@ -36,7 +36,10 @@ storage.Users = [new User { Id = 10, Username = "fixture-admin", PasswordHash = 
     new User { Id = 12, Username = "fixture-employee", PasswordHash = hash, Role = UserRole.Employee }];
 var admin = storage.Users[0]; var admin2 = storage.Users[1]; var employee = storage.Users[2];
 User Copy(User user) => new() { Id = user.Id, Username = user.Username, PasswordHash = user.PasswordHash, Role = user.Role };
-storage.Ingredients = []; storage.Recipes = []; storage.Invoices = []; storage.Suppliers = [];
+storage.Ingredients = []; storage.Recipes = []; storage.Invoices = [];
+// Purchase invoices need the business condition and a supplier with fiscal data (a Monotributista supplier issues factura C, no VAT fields).
+storage.Suppliers = [new Supplier { Id = 1, Name = "Proveedor", Cuit = "30712345671", TaxCondition = TaxCondition.Monotributista }];
+storage.BusinessSettings.TaxCondition = TaxCondition.ResponsableInscripto;
 storage.Products = [new Product { Id = 1, Name = "Pizza", Price = 100m }, new Product { Id = 2, Name = "Flan", Price = 50m },
     new Product { Id = 3, Name = "Agua", Price = 10m }];
 var invoices = new InvoiceService(storage);
@@ -256,7 +259,7 @@ harina.CurrentStock = harinaCapacitySaved;
 
 // ---- Invoice receipt (S7) ----
 var tInvoice = DateTime.Now;
-var inv = new Invoice { SupplierId = 1, InvoiceNumber = "A-1", Items = [
+var inv = new Invoice { SupplierId = 1, Type = InvoiceType.C, InvoiceNumber = "A-1", Items = [
     new InvoiceItem { IngredientId = harina.Id, IngredientName = "Harina", Quantity = 2m, Unit = "kg", UnitPrice = 80m },
     new InvoiceItem { IngredientId = harina.Id, IngredientName = "Harina", Quantity = 500m, Unit = "gr", UnitPrice = 0.08m },
     new InvoiceItem { IngredientId = huevos.Id, IngredientName = "Huevos", Quantity = 12m, Unit = "unidad", UnitPrice = 15m },
@@ -268,15 +271,15 @@ Check(inv.Id > 0 && receipts.Count == 3 && receipts.All(m => m.Type == StockMove
     && receipts[0] is { Quantity: 2m, PreviousStock: 95.5m, ResultingStock: 97.5m, Unit: "kg" } && receipts[1] is { Quantity: 0.5m, PreviousStock: 97.5m, ResultingStock: 98m, Unit: "kg" }
     && receipts[2] is { Quantity: 12m, PreviousStock: 4m, ResultingStock: 16m, Unit: "unidad" } && harina.CurrentStock == 98m && huevos.CurrentStock == 16m,
     "invoice creates InvoiceReceipt movements in the ingredient unit (gr converted), linked to the invoice; unknown ingredient and incompatible unit stay skipped");
-var invNoActor = new Invoice { SupplierId = 1, Items = [new InvoiceItem { IngredientId = sal.Id, Quantity = 1m, Unit = "kg", UnitPrice = 1m }] };
+var invNoActor = new Invoice { SupplierId = 1, Type = InvoiceType.C, Items = [new InvoiceItem { IngredientId = sal.Id, Quantity = 1m, Unit = "kg", UnitPrice = 1m }] };
 invoices.Add(invNoActor);
 Check(Mv(sal.Id).Last() is { Type: StockMovementType.InvoiceReceipt, UserId: null, Username: null, Quantity: 1m, PreviousStock: 0.25m, ResultingStock: 1.25m } && Mv(sal.Id).Last().InvoiceId == invNoActor.Id, "invoice without actor records a null responsible");
-Invalid(() => invoices.Add(new Invoice { SupplierId = 1, Items = [new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }, new InvoiceItem { IngredientId = huevos.Id, Quantity = 0m, Unit = "unidad" }] }, admin),
+Invalid(() => invoices.Add(new Invoice { SupplierId = 1, Type = InvoiceType.C, Items = [new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }, new InvoiceItem { IngredientId = huevos.Id, Quantity = 0m, Unit = "unidad" }] }, admin),
     "invoice with a non-positive item is rejected as a whole", "positiva");
-Reject(() => invoices.Add(new Invoice { SupplierId = 1, Items = [new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }] }, new User { Id = 10, Username = "fixture-admin", PasswordHash = "old", Role = UserRole.Admin }),
+Reject(() => invoices.Add(new Invoice { SupplierId = 1, Type = InvoiceType.C, Items = [new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }] }, new User { Id = 10, Username = "fixture-admin", PasswordHash = "old", Role = UserRole.Admin }),
     typeof(UnauthorizedAccessException), "invoice with a stale actor", "vigente");
 harina.CurrentStock = decimal.MaxValue - 0.1m;
-Invalid(() => invoices.Add(new Invoice { SupplierId = 1, Items = [new InvoiceItem { IngredientId = huevos.Id, Quantity = 1m, Unit = "unidad" }, new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }] }, admin),
+Invalid(() => invoices.Add(new Invoice { SupplierId = 1, Type = InvoiceType.C, Items = [new InvoiceItem { IngredientId = huevos.Id, Quantity = 1m, Unit = "unidad" }, new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }] }, admin),
     "invoice overflow of a later item leaves earlier items untouched", "l\u00edmite");
 harina.CurrentStock = 98m;
 var invoiceMovements = storage.StockMovements.Count(m => m.InvoiceId == inv.Id); var stockBeforeDelete = (harina.CurrentStock, huevos.CurrentStock);
@@ -288,7 +291,7 @@ var legacyNeg = new Ingredient { Name = "Legado", Unit = "kg", CurrentStock = 0m
 legacyNeg.CurrentStock = -3m; // legacy negative balance
 Invalid(() => ingredients.RegisterWaste(legacyNeg.Id, 1m, WasteCategory.Otro, "x", admin), "waste on a negative balance", "Stock insuficiente");
 Invalid(() => ingredients.AdjustStock(legacyNeg.Id, -1m, "x", admin), "adjust a negative balance to a negative target", "negativo");
-invoices.Add(new Invoice { SupplierId = 1, Items = [new InvoiceItem { IngredientId = legacyNeg.Id, Quantity = 1m, Unit = "kg", UnitPrice = 1m }] }, admin);
+invoices.Add(new Invoice { SupplierId = 1, Type = InvoiceType.C, Items = [new InvoiceItem { IngredientId = legacyNeg.Id, Quantity = 1m, Unit = "kg", UnitPrice = 1m }] }, admin);
 Check(Mv(legacyNeg.Id).Last() is { Type: StockMovementType.InvoiceReceipt, PreviousStock: -3m, ResultingStock: -2m } && legacyNeg.CurrentStock == -2m, "a receipt may repair a legacy negative balance without being rejected");
 var legacyFix = ingredients.AdjustStock(legacyNeg.Id, 4m, "regularizacion", admin);
 Check(legacyFix.Quantity == 6m && legacyFix.PreviousStock == -2m && legacyNeg.CurrentStock == 4m, "manual adjustment to a valid target repairs a negative balance");

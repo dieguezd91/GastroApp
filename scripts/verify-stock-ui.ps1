@@ -38,12 +38,15 @@ storage.Users = [new User { Id = 10, Username = "fixture-admin", PasswordHash = 
     new User { Id = 11, Username = "second-admin", PasswordHash = hash, Role = UserRole.Admin },
     new User { Id = 12, Username = "fixture-employee", PasswordHash = hash, Role = UserRole.Employee }];
 var admin = storage.Users[0]; var admin2 = storage.Users[1];
-storage.Ingredients = []; storage.Recipes = []; storage.Invoices = []; storage.Suppliers = [new Supplier { Id = 1, Name = "Proveedor" }];
+storage.Ingredients = []; storage.Recipes = []; storage.Invoices = []; storage.Suppliers = [new Supplier { Id = 1, Name = "Proveedor", Cuit = "30712345671", TaxCondition = TaxCondition.Monotributista }];
+// Purchase invoices need the business condition and a supplier with fiscal data (a Monotributista supplier issues factura C, no VAT fields).
+storage.BusinessSettings.TaxCondition = TaxCondition.ResponsableInscripto;
 storage.Products = [new Product { Id = 1, Name = "Pizza", Price = 100m }];
 var invoices = new InvoiceService(storage);
 var ingredients = new IngredientService(storage, invoices);
 invoices.SetIngredientService(ingredients);
 var suppliers = new SupplierService(storage);
+var businessSettings = new BusinessSettingsService(storage, new RecipeService(storage, invoices)); // the Invoices page reads the business condition
 var D = DateTime.Today;
 
 string State() => JsonSerializer.Serialize(new { storage.StockMovements, storage.Users, storage.Products, storage.Ingredients, storage.Suppliers,
@@ -204,7 +207,7 @@ object NewPage(Type type, AuthService auth, out TestNavigation nav)
     var page = Activator.CreateInstance(type)!; nav = new TestNavigation();
     void Inject2(string name, object value) { var p = type.GetProperty(name, flags); p?.SetValue(page, value); }
     Inject2("AuthService", auth); Inject2("Navigation", nav); Inject2("IngredientService", ingredients);
-    Inject2("InvoiceService", invoices); Inject2("SupplierService", suppliers);
+    Inject2("InvoiceService", invoices); Inject2("SupplierService", suppliers); Inject2("BusinessSettingsService", businessSettings);
     return page;
 }
 Exception? Call(object page, string method, params object?[] arguments)
@@ -500,10 +503,10 @@ if (invoicesType != null)
 {
     var ip = NewPage(invoicesType, uiAdmin, out var inav);
     Call(ip, "OnInitializedAsync"); Call(ip, "ShowAddForm");
-    var bad = new Invoice { SupplierId = 1, Items = [new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }, new InvoiceItem { IngredientId = viewIngredient.Id, Quantity = 0m, Unit = "kg" }] };
+    var bad = new Invoice { SupplierId = 1, Type = InvoiceType.C, Items = [new InvoiceItem { IngredientId = harina.Id, Quantity = 1m, Unit = "kg" }, new InvoiceItem { IngredientId = viewIngredient.Id, Quantity = 0m, Unit = "kg" }] };
     Set(ip, "editingInvoice", bad); storage.SaveToFile(); var beforeInvoice = State();
     Check(Call(ip, "SaveInvoice") == null && State() == beforeInvoice && Str(ip, "invoiceError")!.Contains("positiva") && (bool)Get(ip, "showForm")!, "an invoice rejected by the service shows its Spanish error and keeps the form");
-    var good = new Invoice { SupplierId = 1, InvoiceNumber = "A-9", Items = [new InvoiceItem { IngredientId = harina.Id, IngredientName = "Harina", Quantity = 2m, Unit = "kg", UnitPrice = 10m }] };
+    var good = new Invoice { SupplierId = 1, Type = InvoiceType.C, InvoiceNumber = "A-9", Items = [new InvoiceItem { IngredientId = harina.Id, IngredientName = "Harina", Quantity = 2m, Unit = "kg", UnitPrice = 10m }] };
     Set(ip, "editingInvoice", good); var harinaBefore = harina.CurrentStock;
     Check(Call(ip, "SaveInvoice") == null && Str(ip, "invoiceError") == null && !(bool)Get(ip, "showForm")! && harina.CurrentStock == harinaBefore + 2m && Mv(harina.Id).Last() is { Type: StockMovementType.InvoiceReceipt, UserId: 10 }, "PRESERVE: a valid invoice is saved with the circuit user and closes the form");
     foreach (var (auth, destination) in new[] { (uiAnon, "/login"), (uiEmployee, "/unauthorized") })
