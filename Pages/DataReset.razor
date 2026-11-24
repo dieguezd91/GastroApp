@@ -1,0 +1,166 @@
+@page "/settings/reset"
+@using GastroApp.Models
+@using GastroApp.Services
+@inject DataResetService DataResetService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Reiniciar datos</PageTitle>
+
+@if (AuthService.IsAuthenticated && AuthService.IsInRole(UserRole.Admin))
+{
+    <div class="page-header">
+        <div>
+            <h1>Reiniciar datos</h1>
+            <p class="page-header__subtitle">Deja la aplicación vacía y conserva solo tu usuario administrador. Pensado para empezar de cero después de las pruebas.</p>
+        </div>
+        <div class="page-header__actions">
+            <button type="button" class="btn" @onclick="GoToDashboard">Volver al inicio</button>
+        </div>
+    </div>
+
+    <div class="stack stack--lg reset-view">
+        <Banner Variant="danger" Title="Esta acción es irreversible">
+            Se borran todos los datos cargados en la aplicación. Antes de borrar se guarda una copia de seguridad, pero restaurarla es un proceso manual.
+        </Banner>
+
+        <div class="reset-columns">
+            <section class="card reset-card reset-card--delete" aria-labelledby="reset-delete-title">
+                <h2 id="reset-delete-title" class="card__title">Se borra</h2>
+                <ul class="reset-list">
+                    <li>Productos y categorías</li>
+                    <li>Ventas y devoluciones</li>
+                    <li>Movimientos de stock y conteos de stock</li>
+                    <li>Cajas, movimientos de caja, arqueos y resúmenes diarios (incluida la caja actual)</li>
+                    <li>Ingredientes, proveedores y facturas</li>
+                    <li>Recetas</li>
+                    <li>Todos los usuarios, excepto el tuyo</li>
+                </ul>
+            </section>
+            <section class="card reset-card reset-card--keep" aria-labelledby="reset-keep-title">
+                <h2 id="reset-keep-title" class="card__title">Se conserva</h2>
+                <ul class="reset-list">
+                    <li>Tu usuario administrador (@AuthService.CurrentUser?.Username), con su contraseña actual</li>
+                    <li>Los contadores de identificadores: los números ya usados no se reutilizan</li>
+                    <li>La copia de seguridad <code>data.backup-AAAAMMDD-HHMMSS.json</code>, guardada junto a <code>data.json</code> y excluida del repositorio</li>
+                </ul>
+            </section>
+        </div>
+
+        @if (!done)
+        {
+            <section class="card reset-confirm" aria-labelledby="reset-confirm-title">
+                <h2 id="reset-confirm-title" class="card__title">Confirmación doble</h2>
+                <form id="reset-form" class="stack" novalidate @onsubmit="ResetData">
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <Banner Variant="danger">@errorMessage</Banner>
+                    }
+                    <label class="check-field" for="reset-ack">
+                        <input id="reset-ack" type="checkbox" @bind="acknowledged" />
+                        <span>Entiendo que esta acción es irreversible y que se borrarán todos los datos listados.</span>
+                    </label>
+                    <div class="field">
+                        <label class="field__label" for="reset-word">Para confirmar, escribí <strong>REINICIAR</strong> (en mayúsculas)</label>
+                        <input id="reset-word" type="text" class="input" autocomplete="off" spellcheck="false" placeholder="REINICIAR"
+                               @bind="confirmation" @bind:event="oninput" />
+                    </div>
+                    <div class="flex-wrap-gap">
+                        <button type="submit" class="btn btn--danger" disabled="@(!CanReset)">
+                            <Icon Name="trash" Size="17" />
+                            <span>Reiniciar todos los datos</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+        }
+        else
+        {
+            <Banner Variant="ok" Title="Datos reiniciados">
+                Copia de seguridad guardada como @backupFileName.
+            </Banner>
+            <div class="flex-wrap-gap">
+                <button type="button" class="btn btn--primary" @onclick="GoToDashboard">Ir al panel</button>
+            </div>
+        }
+    </div>
+
+    <ModalDialog @ref="doneDialog" Title="Datos reiniciados" LightDismiss="false" OnClosed="HandleDoneClosed">
+        <ChildContent>
+            <Banner Variant="ok">Se guardó la copia de seguridad <strong>@backupFileName</strong> junto a data.json.</Banner>
+        </ChildContent>
+        <Footer>
+            <button value="done" class="btn btn--primary" autofocus>Ir al panel</button>
+        </Footer>
+    </ModalDialog>
+
+    <Toast @ref="toast" />
+}
+
+@code {
+    private const string ConfirmationWord = "REINICIAR";
+
+    private bool acknowledged;
+    private string confirmation = string.Empty;
+    private bool done;
+    private string? backupFileName;
+    private string? errorMessage;
+    private ModalDialog? doneDialog;
+    private Toast? toast;
+
+    // Both confirmations must hold: the checkbox and the exact word (case-sensitive, no trimming).
+    private bool CanReset => acknowledged && string.Equals(confirmation, ConfirmationWord, StringComparison.Ordinal);
+
+    protected override void OnInitialized()
+    {
+        EnsureAdmin();
+    }
+
+    private bool EnsureAdmin()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return false;
+        }
+        if (!AuthService.IsInRole(UserRole.Admin))
+        {
+            Navigation.NavigateTo("/unauthorized");
+            return false;
+        }
+        return true;
+    }
+
+    private async Task ResetData()
+    {
+        if (!EnsureAdmin()) return;
+        if (done || !CanReset) return;
+
+        errorMessage = null;
+        try
+        {
+            backupFileName = DataResetService.ResetAll(AuthService.CurrentUser);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Navigation.NavigateTo(AuthService.IsAuthenticated ? "/unauthorized" : "/login");
+            return;
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+            toast?.Show(ex.Message, "danger");
+            return;
+        }
+
+        done = true;
+        acknowledged = false;
+        confirmation = string.Empty;
+        toast?.Show($"Datos reiniciados. Copia de seguridad: {backupFileName}", "ok");
+        if (doneDialog is not null) await doneDialog.ShowAsync();
+    }
+
+    private void HandleDoneClosed(string _) => GoToDashboard();
+
+    private void GoToDashboard() => Navigation.NavigateTo("/");
+}

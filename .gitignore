@@ -10,3 +10,6 @@
 .vs/
 *.user
 *.suo
+
+# Automatic backups written by "Reiniciar datos" (contain business data)
+data.backup-*.json

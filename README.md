@@ -44,6 +44,10 @@ Password: admin
 
 These credentials are intended only for local prototype use.
 
+### Reset Data
+
+Admins can wipe the application from **Reiniciar datos** (`/settings/reset`, last entry of the sidebar). It deletes products, categories, sales, refunds, stock movements and counts, cash registers (including the current one), cash movements, cash counts, daily summaries, ingredients, suppliers, invoices, recipes and every user except the admin who runs it (same password). ID counters keep running. It requires a checkbox plus typing `REINICIAR`, and first copies `data.json` to `data.backup-<yyyyMMdd-HHmmss>.json` next to it (git-ignored); if the backup fails nothing changes. The reset is irreversible from the UI. See [Docs/Architecture/DataReset.md](Docs/Architecture/DataReset.md).
+
 ### Dashboard
 
 The main dashboard (**Inicio** for employees, **Panel operativo** for admins) displays:

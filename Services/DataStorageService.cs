@@ -151,8 +151,9 @@ public class DataStorageService
         // Intentar cargar datos del archivo
         LoadFromFile();
 
-        // Si no hay datos, crear datos de ejemplo
-        if (Products.Count == 0)
+        // Si no hay datos, crear datos de ejemplo. Un sistema reiniciado (ResetAll) conserva al administrador y
+        // no debe volver a sembrarse: solo se siembra cuando tampoco hay usuarios.
+        if (Products.Count == 0 && Users.Count == 0)
         {
             SeedData();
             SaveToFile();
@@ -232,50 +233,138 @@ public class DataStorageService
     {
         try
         {
-            var data = new
-            {
-                Products,
-                ProductCategories,
-                Sales,
-                SaleRefunds,
-                StockMovements,
-                StockCounts,
-                CashRegisters,
-                CashMovements,
-                CashCounts,
-                CurrentCashRegisterId,
-                Summaries,
-                Users,
-                Ingredients,
-                Suppliers,
-                Invoices,
-                Recipes,
-                NextProductId = _nextProductId,
-                NextProductCategoryId = _nextProductCategoryId,
-                NextSaleId = _nextSaleId,
-                NextSaleRefundId = _nextSaleRefundId,
-                NextStockMovementId = _nextStockMovementId,
-                NextStockCountId = _nextStockCountId,
-                NextCashRegisterId = _nextCashRegisterId,
-                NextCashMovementId = _nextCashMovementId,
-                NextUserId = _nextUserId,
-                NextIngredientId = _nextIngredientId,
-                NextSupplierId = _nextSupplierId,
-                NextInvoiceId = _nextInvoiceId,
-                NextRecipeId = _nextRecipeId
-            };
-
-            var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
-
-            File.WriteAllText(_dataFilePath, json);
+            File.WriteAllText(_dataFilePath, SerializeState(null));
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error guardando datos: {ex.Message}");
         }
+    }
+
+    // The persisted document. With keptUsers it is the state after ResetAll: every business collection empty,
+    // no current register, only those users, counters unchanged. Without it, the live state.
+    private string SerializeState(List<User>? keptUsers)
+    {
+        var cleared = keptUsers != null;
+        List<T> Pick<T>(List<T> live) => cleared ? new List<T>() : live;
+        var data = new
+        {
+            Products = Pick(Products),
+            ProductCategories = Pick(ProductCategories),
+            Sales = Pick(Sales),
+            SaleRefunds = Pick(SaleRefunds),
+            StockMovements = Pick(StockMovements),
+            StockCounts = Pick(StockCounts),
+            CashRegisters = Pick(CashRegisters),
+            CashMovements = Pick(CashMovements),
+            CashCounts = Pick(CashCounts),
+            CurrentCashRegisterId = cleared ? null : CurrentCashRegisterId,
+            Summaries = Pick(Summaries),
+            Users = keptUsers ?? Users,
+            Ingredients = Pick(Ingredients),
+            Suppliers = Pick(Suppliers),
+            Invoices = Pick(Invoices),
+            Recipes = Pick(Recipes),
+            NextProductId = _nextProductId,
+            NextProductCategoryId = _nextProductCategoryId,
+            NextSaleId = _nextSaleId,
+            NextSaleRefundId = _nextSaleRefundId,
+            NextStockMovementId = _nextStockMovementId,
+            NextStockCountId = _nextStockCountId,
+            NextCashRegisterId = _nextCashRegisterId,
+            NextCashMovementId = _nextCashMovementId,
+            NextUserId = _nextUserId,
+            NextIngredientId = _nextIngredientId,
+            NextSupplierId = _nextSupplierId,
+            NextInvoiceId = _nextInvoiceId,
+            NextRecipeId = _nextRecipeId
+        };
+
+        return JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    // Irreversible: empties every business collection and every user except the acting admin, then persists.
+    // Order: validate the live admin -> build the new document -> copy data.json to data.backup-<yyyyMMdd-HHmmss>.json
+    // -> replace data.json atomically -> only then empty the memory. A failure at any step before the last leaves
+    // memory and data.json as they were (and removes the backup this call created). ID counters keep running.
+    // Returns the backup file name (next to data.json).
+    public string ResetAll(User? actor)
+    {
+        var admin = RequireLiveAdmin(actor);
+        var keptUsers = new List<User> { admin };
+        var emptyDocument = SerializeState(keptUsers);
+
+        var dataPath = Path.GetFullPath(_dataFilePath);
+        var backupName = $"data.backup-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+        var backupPath = Path.Combine(Path.GetDirectoryName(dataPath)!, backupName);
+        var tempPath = dataPath + ".reset.tmp";
+
+        var backupCreated = false;
+        try
+        {
+            try
+            {
+                if (File.Exists(dataPath))
+                {
+                    using var source = new FileStream(dataPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    using var backup = new FileStream(backupPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                    backupCreated = true;
+                    source.CopyTo(backup);
+                }
+                else
+                {
+                    using var backup = new FileStream(backupPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                    backupCreated = true;
+                    using var writer = new StreamWriter(backup);
+                    writer.Write(SerializeState(null));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    $"No se pudo crear la copia de seguridad {backupName}; no se modificó ningún dato. {ex.Message}", ex);
+            }
+
+            try
+            {
+                File.WriteAllText(tempPath, emptyDocument);
+                File.Move(tempPath, dataPath, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    $"No se pudo guardar el reinicio; no se modificó ningún dato. {ex.Message}", ex);
+            }
+        }
+        catch
+        {
+            TryDelete(tempPath);
+            if (backupCreated) TryDelete(backupPath);
+            throw;
+        }
+
+        Products = new();
+        ProductCategories = new();
+        Sales = new();
+        SaleRefunds = new();
+        StockMovements = new();
+        StockCounts = new();
+        CashRegisters = new();
+        CashMovements = new();
+        CashCounts = new();
+        CurrentCashRegisterId = null;
+        Summaries = new();
+        Users = keptUsers;
+        Ingredients = new();
+        Suppliers = new();
+        Invoices = new();
+        Recipes = new();
+        return backupName;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch (Exception) { /* best effort: only files this call created */ }
     }
 
     private static int RecoverNext(JsonElement root, string property, IEnumerable<int> ids)

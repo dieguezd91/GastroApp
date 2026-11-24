@@ -81,6 +81,14 @@
     }
 
     <div class="sidebar__footer">
+        @if (AuthService.IsInRole(UserRole.Admin))
+        {
+            <div class="sidebar__admin-zone">
+                <NavLink class="nav-link nav-link--danger" href="settings/reset">
+                    <span class="nav-link__main"><Icon Name="alertTriangle" /><span>Reiniciar datos</span></span>
+                </NavLink>
+            </div>
+        }
         <div class="user-pill">
             <span class="user-pill__avatar" aria-hidden="true">@Initials</span>
             <span class="user-pill__meta">

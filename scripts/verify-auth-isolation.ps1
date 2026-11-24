@@ -90,7 +90,8 @@ var adminPages = new Dictionary<string, string[]> {
     ["Ingredients"] = ["ShowAddForm", "EditIngredient", "ShowStockAdjust", "SaveStockAdjustment", "SaveIngredient", "DeleteIngredient"],
     ["Invoices"] = ["ShowAddForm", "AddItem", "RemoveItem", "SaveInvoice", "DeleteInvoice"],
     ["Recipes"] = ["ShowAddForm", "AddIngredient", "RemoveIngredient", "SaveRecipe", "EditRecipe", "RecalculateCost", "DeleteRecipe"],
-    ["Summary"] = ["CancelSelectedSale"]
+    ["Summary"] = ["CancelSelectedSale"],
+    ["DataReset"] = ["ResetData"]
 };
 void DeniedAction(string page, string method, AuthService auth, string destination)
 {
